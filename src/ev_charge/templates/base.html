@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}EV Charge{% endblock %}</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <script>
+        // Apply the saved theme before first paint (no flash)
+        (() => { let t = null; try { t = localStorage.getItem('ev-theme'); } catch (e) {}
+          if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          document.documentElement.setAttribute('data-theme', t); })();
+    </script>
+    <link rel="stylesheet" href="/static/css/app.css?v={{ app_version }}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1><a href="/">⚡ EV Charge</a></h1>
+        <nav>
+            <a href="/" class="{{ 'active' if active == 'dashboard' }}">Dashboard</a>
+            <a href="/sessions" class="{{ 'active' if active == 'sessions' }}">Sessions</a>
+            <a href="/reports" class="{{ 'active' if active == 'reports' }}">Reports</a>
+            <a href="/cars" class="{{ 'active' if active == 'cars' }}">Cars</a>
+            <button class="nav-btn" id="theme-toggle" title="Light / dark theme">🌓</button>
+        </nav>
+    </header>
+    {% block content %}{% endblock %}
+    <p class="muted small" style="text-align:center;color:rgba(255,255,255,.75)">EV Charge {{ app_version }} · <a href="/docs" style="color:inherit">API</a></p>
+</div>
+<div id="toast"></div>
+<script>window.EV = Object.assign(window.EV || {}, { currency: {{ currency|tojson }} });</script>
+<script src="/static/js/ev-common.js?v={{ app_version }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

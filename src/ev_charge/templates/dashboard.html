@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · EV Charge{% endblock %}
+{% block content %}
+<div class="content">
+    <div class="page-head">
+        <h2>My cars</h2>
+        <button class="btn" id="log-btn">⚡ Log a charge</button>
+    </div>
+    <div class="cards" id="car-cards"><p class="muted">Loading…</p></div>
+</div>
+<div class="content">
+    <div class="page-head">
+        <h2>Recent sessions</h2>
+        <a class="btn btn-ghost btn-sm" href="/sessions">All sessions →</a>
+    </div>
+    <div class="table-wrap" id="recent"></div>
+</div>
+{% include "_session_modal.html" %}
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+    const pct = (a, b) => b ? Math.max(0, Math.min(100, a / b * 100)) : 0;
+
+    function leaseBlock(car) {
+        const l = car.lease;
+        if (!l) return '<p class="muted small" style="margin-top:10px">No lease dates set.</p>';
+        let html = `
+            <div class="meter"><div class="label"><span>Lease: ${EV.date(car.lease_start)} → ${EV.date(car.lease_end)}</span><span>${EV.num(l.days_left)} days left</span></div>
+                <div class="track"><div class="fill" style="width:${pct(l.days_elapsed, l.days_total)}%"></div></div></div>`;
+        if (l.km_allowed_total && l.km_driven != null) {
+            const projected = l.km_projected_end;
+            const ahead = l.km_driven > l.km_allowed_to_date;
+            const over = projected != null && projected > l.km_allowed_total;
+            const state = over ? 'over' : (ahead ? 'warn' : '');
+            const note = over ? `⚠ projected ${EV.km(projected)} at lease end` : (ahead ? `▲ ${EV.km(l.km_driven - l.km_allowed_to_date)} ahead of plan` : `✓ ${EV.km(l.km_allowed_to_date - l.km_driven)} under plan`);
+            html += `
+            <div class="meter"><div class="label"><span>${EV.km(l.km_driven)} of ${EV.km(l.km_allowed_total)}</span><span>${note}</span></div>
+                <div class="track"><div class="fill ${state}" style="width:${pct(l.km_driven, l.km_allowed_total)}%"></div>
+                <div class="marker" title="Allowed to date: ${EV.km(l.km_allowed_to_date)}" style="left:${pct(l.km_allowed_to_date, l.km_allowed_total)}%"></div></div></div>`;
+        }
+        return html;
+    }
+
+    function renderCars(cars) {
+        const box = document.getElementById('car-cards');
+        const active = cars.filter(c => c.active);
+        if (!active.length) {
+            box.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><h3>No car yet</h3><p>Start by adding your car, its specs and lease.</p><p style="margin-top:14px"><a class="btn" href="/cars?new=1">＋ Add a car</a></p></div>`;
+            return;
+        }
+        box.innerHTML = active.map(c => `
+            <div class="card">
+                <h3><span>${EV.carDot(c.id)}${EV.esc(c.name)}</span><button class="btn btn-sm" data-log="${c.id}">⚡ Log</button></h3>
+                <div class="sub">${EV.esc([c.make, c.model, c.year].filter(Boolean).join(' '))}${c.license_plate ? ' · ' + EV.esc(c.license_plate) : ''}</div>
+                <dl class="kv">
+                    <dt>Odometer</dt><dd>${EV.km(c.last_odometer)}</dd>
+                    <dt>Last charge</dt><dd>${EV.date(c.last_charge_date)}</dd>
+                    <dt>Sessions</dt><dd>${EV.num(c.session_count)} · ${EV.kwh(c.total_kwh)}</dd>
+                    ${c.battery_kwh ? `<dt>Battery</dt><dd>${EV.num(c.battery_kwh, 1)} kWh</dd>` : ''}
+                </dl>
+                ${leaseBlock(c)}
+            </div>`).join('');
+    }
+
+    function renderRecent(rows) {
+        const box = document.getElementById('recent');
+        if (!rows.length) { box.innerHTML = '<div class="empty-state"><h3>No charging session yet</h3><p>Use ⚡ Log a charge to record the first one.</p></div>'; return; }
+        box.innerHTML = `<table><thead><tr><th>Date</th><th>Car</th><th class="hide-sm">Location</th><th class="hide-sm">Provider</th><th class="num">kWh</th><th class="num hide-sm">Odometer</th><th>Reimb.</th></tr></thead><tbody>
+            ${rows.map(s => `<tr style="cursor:pointer" data-id="${s.id}">
+                <td>${EV.date(s.charge_date)}</td><td>${EV.carDot(s.car_id)}${EV.esc(s.car_name)}</td>
+                <td class="hide-sm">${EV.esc(s.location || '')}</td><td class="hide-sm">${EV.esc(s.provider || '')}</td>
+                <td class="num">${EV.num(s.kwh, 2)}</td><td class="num hide-sm">${EV.num(s.odometer)}</td>
+                <td>${s.to_reimburse ? '<span class="badge badge-info">💶 Yes</span>' : ''}</td></tr>`).join('')}
+            </tbody></table>`;
+        box.querySelectorAll('tr[data-id]').forEach(tr => tr.addEventListener('click', () => {
+            EV.openSessionForm(rows.find(r => r.id === Number(tr.dataset.id)), { onSaved: load });
+        }));
+    }
+
+    async function load() {
+        try {
+            const [cars, recent] = await Promise.all([EV.loadCars(), EV.api('GET', '/api/sessions?limit=10')]);
+            renderCars(cars);
+            renderRecent(recent);
+        } catch (err) { EV.toast(err.message, true); }
+    }
+
+    document.getElementById('log-btn').addEventListener('click', () => EV.openSessionForm(null, { onSaved: load }));
+    document.getElementById('car-cards').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-log]');
+        if (b) EV.openSessionForm(null, { carId: Number(b.dataset.log), onSaved: load });
+    });
+    document.addEventListener('ev:themechange', load);
+    load();
+})();
+</script>
+{% endblock %}

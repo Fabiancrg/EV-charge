@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Sessions · EV Charge{% endblock %}
+{% block content %}
+<div class="content">
+    <div class="page-head">
+        <h2>Charging sessions</h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost" id="import-btn" title="Import sessions from an Excel workbook (.xlsx) or a CSV file">⬆ Import</button>
+            <input type="file" id="import-file" accept=".xlsx,.xlsm,.csv" hidden>
+            <a class="btn btn-ghost" id="export" href="/api/sessions/export.csv">⬇ Export CSV</a>
+            <button class="btn" id="new-btn">⚡ New session</button>
+        </div>
+    </div>
+    {% with with_reimburse = true %}{% include "_filters.html" %}{% endwith %}
+    <div id="bulk" style="display:none;margin-bottom:10px" class="small">
+        <span id="bulk-count"></span>
+        <button class="btn btn-ghost btn-sm" data-bulk="true">💶 Mark to reimburse</button>
+        <button class="btn btn-ghost btn-sm" data-bulk="false">Mark not to reimburse</button>
+    </div>
+    <div class="table-wrap" id="table"><p class="muted">Loading…</p></div>
+</div>
+{% include "_session_modal.html" %}
+{% include "_import_modal.html" %}
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/ev-import.js?v={{ app_version }}"></script>
+<script>
+(() => {
+    let rows = [];
+    let sort = { key: 'charge_date', dir: -1 };
+    const selected = new Set();
+
+    const COLS = [
+        { key: 'charge_date', label: 'Date', fmt: s => EV.date(s.charge_date) },
+        { key: 'car_name', label: 'Car', fmt: s => EV.carDot(s.car_id) + EV.esc(s.car_name) },
+        { key: 'odometer', label: 'Odometer', num: true, fmt: s => EV.num(s.odometer) },
+        { key: 'km_since_previous', label: 'Δ km', num: true, cls: 'hide-sm', fmt: s => s.km_since_previous == null ? '' : (s.km_since_previous < 0 ? `<span class="badge badge-err" title="Lower than the previous reading">⚠ ${EV.num(s.km_since_previous)}</span>` : EV.num(s.km_since_previous)) },
+        { key: 'location', label: 'Location', fmt: s => EV.esc(s.location || '') },
+        { key: 'provider', label: 'Provider', cls: 'hide-sm', fmt: s => EV.esc(s.provider || '') },
+        { key: 'kwh', label: 'kWh', num: true, fmt: s => EV.num(s.kwh, 2) },
+        { key: 'start_time', label: 'Start–end', cls: 'hide-sm', fmt: s => s.start_time ? `${EV.time(s.start_time)}–${EV.time(s.end_time)}` : '' },
+        { key: 'duration_minutes', label: 'Duration', num: true, cls: 'hide-sm', fmt: s => s.duration_minutes == null ? '' : EV.duration(s.duration_minutes) },
+        { key: 'avg_power_kw', label: 'Avg kW', num: true, cls: 'hide-sm', fmt: s => EV.num(s.avg_power_kw, 1) },
+        { key: 'cost', label: 'Cost', num: true, fmt: s => s.cost == null ? '' : EV.money(s.cost) },
+        { key: 'to_reimburse', label: 'Reimb.', fmt: s => s.to_reimburse ? '<span class="badge badge-info">💶 Yes</span>' : '' },
+    ];
+
+    function sorted() {
+        const k = sort.key;
+        return [...rows].sort((a, b) => {
+            let x = a[k], y = b[k];
+            if (x == null && y == null) return 0;
+            if (x == null) return 1;
+            if (y == null) return -1;
+            if (typeof x === 'string') { x = x.toLowerCase(); y = y.toLowerCase(); }
+            const c = x < y ? -1 : x > y ? 1 : 0;
+            return c ? c * sort.dir : (b.id - a.id);
+        });
+    }
+
+    function render() {
+        const box = document.getElementById('table');
+        if (!rows.length) {
+            box.innerHTML = '<div class="empty-state"><h3>No session matches</h3><p>Change the filters or record a new session.</p></div>';
+            updateBulk();
+            return;
+        }
+        const totKwh = rows.reduce((a, s) => a + s.kwh, 0);
+        const withCost = rows.filter(s => s.cost != null);
+        const totCost = withCost.reduce((a, s) => a + s.cost, 0);
+        const reimb = rows.filter(s => s.to_reimburse);
+        const arrow = (k) => sort.key === k ? (sort.dir > 0 ? ' ▲' : ' ▼') : '';
+        box.innerHTML = `<table><thead><tr>
+                <th><input type="checkbox" id="sel-all" title="Select all"></th>
+                ${COLS.map(c => `<th class="sortable ${c.num ? 'num' : ''} ${c.cls || ''}" data-sort="${c.key}">${c.label}${arrow(c.key)}</th>`).join('')}
+                <th></th></tr></thead>
+            <tbody>${sorted().map(s => `<tr data-id="${s.id}">
+                <td><input type="checkbox" class="sel" ${selected.has(s.id) ? 'checked' : ''}></td>
+                ${COLS.map(c => `<td class="${c.num ? 'num' : ''} ${c.cls || ''}">${c.fmt(s)}</td>`).join('')}
+                <td style="white-space:nowrap"><button class="icon-btn" data-act="edit" title="Edit">✏</button><button class="icon-btn" data-act="dup" title="Duplicate (as a new session today)">⧉</button></td>
+            </tr>`).join('')}</tbody>
+            <tfoot><tr><td></td><td colspan="${COLS.length + 1}">
+                ${EV.num(rows.length)} session(s) · <strong>${EV.kwh(totKwh)}</strong>${withCost.length ? ` · ${EV.money(totCost)}` : ''}
+                · to reimburse: ${EV.num(reimb.length)} session(s), ${EV.kwh(reimb.reduce((a, s) => a + s.kwh, 0))}${reimb.some(s => s.cost != null) ? `, ${EV.money(reimb.reduce((a, s) => a + (s.cost || 0), 0))}` : ''}
+            </td></tr></tfoot></table>`;
+        document.getElementById('sel-all').checked = rows.length > 0 && rows.every(r => selected.has(r.id));
+        updateBulk();
+    }
+
+    function updateBulk() {
+        const ids = [...selected].filter(id => rows.some(r => r.id === id));
+        document.getElementById('bulk').style.display = ids.length ? '' : 'none';
+        document.getElementById('bulk-count').textContent = `${ids.length} selected:`;
+    }
+
+    async function load() {
+        const p = EV.readFilters();
+        document.getElementById('export').href = `/api/sessions/export.csv?${p}`;
+        try { rows = await EV.api('GET', `/api/sessions?${p}`); render(); }
+        catch (err) { EV.toast(err.message, true); }
+    }
+
+    const table = document.getElementById('table');
+    table.addEventListener('click', (e) => {
+        const th = e.target.closest('th[data-sort]');
+        if (th) { const k = th.dataset.sort; sort = { key: k, dir: sort.key === k ? -sort.dir : (k === 'charge_date' ? -1 : 1) }; render(); return; }
+        if (e.target.id === 'sel-all') { rows.forEach(r => e.target.checked ? selected.add(r.id) : selected.delete(r.id)); render(); return; }
+        const tr = e.target.closest('tr[data-id]');
+        if (!tr) return;
+        const id = Number(tr.dataset.id);
+        if (e.target.classList.contains('sel')) { e.target.checked ? selected.add(id) : selected.delete(id); updateBulk(); return; }
+        const s = rows.find(r => r.id === id);
+        const act = e.target.closest('[data-act]')?.dataset.act;
+        if (act === 'dup') {
+            EV.openSessionForm(null, { carId: s.car_id, onSaved: load }).then(() => {
+                const f = document.getElementById('session-form');
+                ['location', 'provider', 'kwh', 'start_time', 'end_time', 'cost', 'notes'].forEach(k => { f[k].value = k.endsWith('_time') ? EV.time(s[k]) : (s[k] ?? ''); });
+                f.to_reimburse.checked = s.to_reimburse;
+            });
+        } else if (act === 'edit' || e.target.tagName === 'TD') {
+            EV.openSessionForm(s, { onSaved: load });
+        }
+    });
+    document.getElementById('bulk').addEventListener('click', async (e) => {
+        const b = e.target.closest('[data-bulk]');
+        if (!b) return;
+        const ids = [...selected].filter(id => rows.some(r => r.id === id));
+        try {
+            const r = await EV.api('PATCH', '/api/sessions/reimburse', { ids, to_reimburse: b.dataset.bulk === 'true' });
+            EV.toast(`${r.updated} session(s) updated`);
+            selected.clear();
+            load();
+        } catch (err) { EV.toast(err.message, true); }
+    });
+    const importFile = document.getElementById('import-file');
+    document.getElementById('import-btn').addEventListener('click', () => importFile.click());
+    importFile.addEventListener('change', () => {
+        const file = importFile.files[0];
+        importFile.value = '';  // the same file can be picked again
+        if (file) EV.importWizard.open(file, { onDone: () => EV.loadCars().then(load) });
+    });
+    document.getElementById('new-btn').addEventListener('click', () => EV.openSessionForm(null, { onSaved: load }));
+    document.addEventListener('ev:themechange', render);
+    EV.initFilters(load).then(load);
+})();
+</script>
+{% endblock %}

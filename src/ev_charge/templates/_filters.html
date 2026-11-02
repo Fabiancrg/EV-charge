@@ -1,0 +1,78 @@
+{# Shared filter bar (sessions and reports). The page script reads it with EV.readFilters(). #}
+<div class="filters" id="filters">
+    <div class="field"><label>Car</label><select id="f-car"><option value="">All cars</option></select></div>
+    <div class="field"><label>Period</label>
+        <select id="f-preset">
+            <option value="all">All time</option>
+            <option value="this-month">This month</option>
+            <option value="last-month">Last month</option>
+            <option value="last-3">Last 3 months</option>
+            <option value="last-12">Last 12 months</option>
+            <option value="this-year">This year</option>
+            <option value="last-year">Last year</option>
+            <option value="custom">Custom…</option>
+        </select>
+    </div>
+    <div class="field"><label>From</label><input type="date" id="f-from"></div>
+    <div class="field"><label>To</label><input type="date" id="f-to"></div>
+    {% if with_reimburse %}
+    <div class="field"><label>Reimbursement</label>
+        <select id="f-reimb"><option value="">All</option><option value="true">To reimburse</option><option value="false">Not to reimburse</option></select>
+    </div>
+    <div class="field grow"><label>Search</label><input type="search" id="f-q" placeholder="Location, provider, notes…"></div>
+    {% endif %}
+</div>
+<script>
+(() => {
+    const EV = window.EV = window.EV || {};
+    const iso = (d) => new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    function presetRange(p) {
+        const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+        switch (p) {
+            case 'this-month': return [iso(new Date(y, m, 1)), iso(new Date(y, m + 1, 0))];
+            case 'last-month': return [iso(new Date(y, m - 1, 1)), iso(new Date(y, m, 0))];
+            case 'last-3': return [iso(new Date(y, m - 2, 1)), iso(new Date(y, m + 1, 0))];
+            case 'last-12': return [iso(new Date(y, m - 11, 1)), iso(new Date(y, m + 1, 0))];
+            case 'this-year': return [`${y}-01-01`, `${y}-12-31`];
+            case 'last-year': return [`${y - 1}-01-01`, `${y - 1}-12-31`];
+            case 'all': return ['', ''];
+            default: return null;
+        }
+    }
+    const $ = (id) => document.getElementById(id);
+    EV.readFilters = () => {
+        const p = new URLSearchParams();
+        if ($('f-car').value) p.append('car_id', $('f-car').value);
+        if ($('f-from').value) p.set('date_from', $('f-from').value);
+        if ($('f-to').value) p.set('date_to', $('f-to').value);
+        if ($('f-reimb')?.value) p.set('to_reimburse', $('f-reimb').value);
+        if ($('f-q')?.value.trim()) p.set('q', $('f-q').value.trim());
+        return p;
+    };
+    // Filters live in the URL so a filtered view can be bookmarked / reloaded
+    EV.initFilters = async (onChange, defaultPreset = 'all') => {
+        const cars = EV.cars || await EV.loadCars();
+        $('f-car').innerHTML = '<option value="">All cars</option>' + cars.map(c => `<option value="${c.id}">${EV.esc(c.name)}</option>`).join('');
+        const u = new URLSearchParams(location.search);
+        $('f-car').value = u.get('car_id') || '';
+        if (u.has('date_from') || u.has('date_to')) {
+            $('f-from').value = u.get('date_from') || ''; $('f-to').value = u.get('date_to') || '';
+            const match = [...$('f-preset').options].find(o => { const r = presetRange(o.value); return r && r[0] === $('f-from').value && r[1] === $('f-to').value; });
+            $('f-preset').value = match ? match.value : 'custom';
+        } else {
+            $('f-preset').value = u.has('car_id') || u.has('q') || u.has('to_reimburse') ? 'all' : defaultPreset;
+            [$('f-from').value, $('f-to').value] = presetRange($('f-preset').value);
+        }
+        if ($('f-reimb')) $('f-reimb').value = u.get('to_reimburse') || '';
+        if ($('f-q')) $('f-q').value = u.get('q') || '';
+        const changed = () => { history.replaceState(null, '', `${location.pathname}?${EV.readFilters()}`); onChange(); };
+        $('f-preset').addEventListener('change', () => {
+            const r = presetRange($('f-preset').value);
+            if (r) { [$('f-from').value, $('f-to').value] = r; changed(); }
+        });
+        [$('f-from'), $('f-to')].forEach(el => el.addEventListener('change', () => { $('f-preset').value = 'custom'; changed(); }));
+        [$('f-car'), $('f-reimb')].forEach(el => el && el.addEventListener('change', changed));
+        let t; $('f-q')?.addEventListener('input', () => { clearTimeout(t); t = setTimeout(changed, 250); });
+    };
+})();
+</script>
