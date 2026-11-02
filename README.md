@@ -21,7 +21,7 @@ On first start, every page leads to **/setup**, where you create the first admin
 | `cars:manage` | Add and delete cars |
 | `chargers:manage` | Chargers, their connection, history import |
 | `tariffs:manage` | Home charging tariffs, CREG import |
-| `tokens:create` | Create personal API tokens |
+| `tokens:manage` | Manage API tokens, their access and cars (*Settings → API tokens*) |
 | `car:view` *(per car)* | See the car, its sessions, reports, statements, live charger |
 | `car:edit` *(per car)* | Edit the car (specs, lease) |
 | `sessions:create` / `sessions:edit` / `sessions:import` *(per car)* | Add / edit and delete / import sessions |
@@ -30,12 +30,12 @@ On first start, every page leads to **/setup**, where you create the first admin
 - **Wildcards:** `*` means everything, and `sessions:*` means every sessions permission.
 - **Built-in roles** can't be deleted, but their permissions can be changed:
   - **Administrator:** everything, all cars.
-  - **Driver:** view, add, edit and import sessions, reimbursement, API tokens.
+  - **Driver:** view, add, edit and import sessions, reimbursement.
   - **Viewer:** view only.
   - **Accountant:** view and reimbursement, all cars.
 - **Upgrading:** former *admin* users become Administrators; former *drivers* get the Driver role, globally and on each car they had.
 - **Safeguard:** there is always at least one active user whose role can manage users.
-- **Admin-level permissions:** `users:manage` and `roles:manage` let their holders give themselves any permission, so keep them for administrators.
+- **Admin-level permissions:** `users:manage`, `roles:manage` and `tokens:manage` let their holders give themselves, or a token, any permission, so keep them for administrators.
 - **Reimbursement without the permission:** when someone without `reimbursement:manage` adds or edits a session, the reimbursement flag and status follow the defaults or stay unchanged.
 - **Bulk changes** skip the sessions on cars where the caller lacks the permission, and the result tells how many were skipped.
 
@@ -48,10 +48,22 @@ On first start, every page leads to **/setup**, where you create the first admin
 
 **My account** (👤 menu) lists **where you are signed in**, with browser, IP, last activity and method. You can sign out one session, or all the others. Administrators can *sign a user out everywhere*; disabling a user or changing their password does it too.
 
-**API tokens.** From *My account*, users with `tokens:create` create personal tokens for scripts or Home Assistant:
+**API tokens** (*Settings → API tokens*, `tokens:manage`). Tokens for scripts and other tools, such as Home Assistant:
 - **Use:** send `Authorization: Bearer evc_…`. The API is documented at `/docs`.
-- **Permissions:** a token can only do what its owner can, narrowed to the permissions chosen for it, and it can't manage account settings or create tokens.
-- **Lifetime:** tokens expire after 30 days, 90 days, 1 year or never, and can be revoked. Only a hash is stored; the token is shown once.
+- **Access:** each token has its own, chosen when it's created and editable later without changing the secret:
+  - **what it may do:** the permissions of a **role** (the token follows later changes to the role), or **chosen permissions**;
+  - **on which cars:** **all cars**, including ones added later, or **chosen cars**.
+- **Limits:** a token works while its creator's account is active, and the sessions it adds are entered in the creator's name. It can't manage tokens or account settings, which need a browser sign-in.
+- **Lifetime:** tokens expire after 30 days, 90 days, 1 year or never. They can be revoked, then deleted from the list. Only a hash is stored; the token is shown once, with a `curl` example.
+- **Upgrade:** existing personal tokens keep their permissions, limited to the cars their creator could access.
+
+## E-mail (SMTP)
+
+*Settings → E-mail (SMTP)* (`settings:manage`) sets the SMTP server EV Charge sends e-mails through:
+- **Server:** host and port, with security STARTTLS (587), SSL/TLS (465) or none (25), and an option to skip the TLS certificate check.
+- **Login:** username and password, the password stored encrypted. Leave the username empty for no login.
+- **Sender:** the from address and name.
+- **Test:** *Send a test e-mail* uses the values in the form, saved or not, and reports the server's answer: refused login, unreachable server, TLS problem… Settings changes and tests are in the audit log.
 
 **Audit log** (*Settings → Audit log*, `audit:read`). It records sign-ins and failed sign-ins (password or SSO), user, role, token and SSO-settings changes, and **every change made through the app or the API**, such as `cars.update cars:3`, `sessions.bulk` or `chargers.connection`. Each entry has the user, time, IP and details, and the log can be filtered and searched. Events older than `audit_retention_days` (730) are deleted at startup.
 
@@ -172,8 +184,8 @@ The **Tariffs** page (administrators) holds the price per kWh of home charging, 
 | **Reimbursement** `/reimbursement` | A printable statement of the sessions flagged *to be reimbursed* in a period (default: last quarter) for a car. Each session is priced with the home tariff or the cost entered, and totals are split into home and other charging, with signature lines. *🖨 Print / PDF* uses the browser's print (save as PDF). *⬇ Excel* and *⬇ CSV* export the same rows. |
 | **Chargers** `/chargers` | Chargers whose sessions are reimbursed, and the company paying them back (administrators, see above). |
 | **Tariffs** `/tariffs` | Home charging price periods and the CREG import (administrators, see above). |
-| **Users**, **Roles**, **Single sign-on**, **Audit log** (Settings menu) | Accounts with their global role and role per car; roles and permissions; OpenID Connect settings; audit log (see above). |
-| **My account** `/account` | Where you are signed in, your API tokens, your permissions. |
+| **Users**, **Roles**, **Single sign-on**, **E-mail (SMTP)**, **API tokens**, **Audit log** (⚙ Settings menu) | Accounts with their global role and role per car; roles and permissions; OpenID Connect; SMTP; API tokens; audit log (see above). |
+| **My account** `/account` | Where you are signed in, your permissions. |
 | **Cars** `/cars` | Add and edit cars: identity (name, make, model, year, plate, VIN, colour), specs (usable battery, max AC/DC power, WLTP range and consumption), leasing (company, contract, start/end, km per year, monthly cost, odometer at start), notes, active flag. A car with sessions can't be deleted; mark it inactive instead. |
 
 ### Charging session fields
@@ -292,7 +304,8 @@ Every endpoint needs a signed-in user (session cookie) or an API token (`Authori
 | `GET /api/tariffs/creg?region=`, `POST /api/tariffs/creg/upload`, `POST /api/tariffs/creg/apply` | CREG import: preview (from the website or a saved page), then apply the chosen quarters (administrators) |
 | `POST /api/auth/login\|logout\|password\|setup`, `GET /api/auth/me` | Sign-in and own account (`me` includes the permissions, global and per car) |
 | `GET /api/auth/sessions`, `DELETE /api/auth/sessions/{id}`, `POST /api/auth/sessions/revoke-others` | My sign-ins |
-| `GET/POST /api/auth/tokens`, `DELETE /api/auth/tokens/{id}` | My API tokens |
+| `GET/POST /api/tokens`, `PUT/DELETE /api/tokens/{id}`, `POST /api/tokens/{id}/revoke` | API tokens: role or permissions, cars (`tokens:manage`, browser sign-in) |
+| `GET/PUT /api/settings/email`, `POST /api/settings/email/test` | SMTP settings and test e-mail (`settings:manage`) |
 | `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`, `POST /api/users/{id}/signout` | Users, global role and role per car (`users:manage`) |
 | `GET/POST /api/roles`, `PUT/DELETE /api/roles/{id}`, `GET /api/roles/permissions` | Roles and the permission catalogue (`roles:manage`) |
 | `GET/PUT /api/settings/sso`, `POST /api/settings/sso/test` | Single sign-on settings (`settings:manage`) |

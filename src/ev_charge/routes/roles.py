@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .. import audit
 from ..auth import Principal, current_user, require
 from ..database import get_db
-from ..models import CarGrant, Role, User
+from ..models import ApiToken, CarGrant, Role, User
 from ..permissions import CAR_PERMISSIONS, GLOBAL_PERMISSIONS, valid_permission
 from ..schemas import RoleIn, RoleOut
 from .users import check_admins_left
@@ -86,8 +86,9 @@ def delete_role(role_id: int, request: Request, _: Principal = Depends(require("
     if r.builtin:
         raise HTTPException(409, "Built-in roles can't be deleted (their permissions can be changed)")
     out = role_out(db, r)
-    if out.users or out.car_grants:
-        raise HTTPException(409, f"'{r.name}' is used by {out.users} user(s) and {out.car_grants} car access(es): change them first")
+    tokens = db.scalar(select(func.count()).select_from(ApiToken).where(ApiToken.role_id == r.id, ApiToken.revoked.is_(False))) or 0
+    if out.users or out.car_grants or tokens:
+        raise HTTPException(409, f"'{r.name}' is used by {out.users} user(s), {out.car_grants} car access(es) and {tokens} API token(s): change them first")
     db.delete(r)
     audit.record(db, request, "role.deleted", target=f"role:{role_id}", details={"name": r.name})
     db.commit()

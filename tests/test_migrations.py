@@ -43,3 +43,31 @@ def test_old_admin_and_driver_become_roles(tmp_path):
         assert users == {"boss": roles["Administrator"], "dave": roles["Driver"]}
         assert conn.execute(text("SELECT role_id FROM user_cars")).scalar() == roles["Driver"]
     eng.dispose()
+
+
+def test_personal_tokens_keep_their_creator_cars(tmp_path):
+    eng = create_engine(f"sqlite:///{tmp_path / 'v6.db'}")
+    run_migrations(eng, "006")
+    with eng.begin() as conn:
+        conn.execute(text("INSERT INTO cars (id, name, active, created_at, updated_at) VALUES (1, 'EV6', 1, '2026-01-01', '2026-01-01'), (2, 'M3', 1, '2026-01-01', '2026-01-01')"))
+        conn.execute(
+            text(
+                "INSERT INTO users (id, username, role, role_id, password_hash, active, created_at) "
+                "VALUES (1, 'boss', 'admin', 1, 'x', 1, '2026-01-01'), (2, 'dave', 'driver', 2, 'x', 1, '2026-01-01')"
+            )
+        )
+        conn.execute(text("INSERT INTO user_cars (user_id, car_id, role_id) VALUES (2, 2, 2)"))
+        for tid, uid in ((1, 1), (2, 2)):
+            conn.execute(
+                text(
+                    "INSERT INTO api_tokens (id, user_id, name, token_hash, prefix, permissions, created_at, revoked) "
+                    "VALUES (:t, :u, 'tok', :h, 'evc_x', '[\"car:view\"]', '2026-01-01', 0)"
+                ),
+                {"t": tid, "u": uid, "h": f"h{tid}"},
+            )
+    run_migrations(eng)
+    with eng.connect() as conn:
+        assert dict(conn.execute(text("SELECT id, car_ids FROM api_tokens")).all()) == {1: None, 2: "[2]"}
+        driver = conn.execute(text("SELECT permissions FROM roles WHERE name = 'Driver'")).scalar()
+        assert "tokens:create" not in driver
+    eng.dispose()

@@ -24,7 +24,7 @@ GLOBAL_PERMISSIONS: dict[str, tuple[str, str]] = {
     "cars:manage": ("Add and delete cars", "Fleet"),
     "chargers:manage": ("Manage chargers, their connection and history import", "Fleet"),
     "tariffs:manage": ("Manage home charging tariffs (CREG import)", "Fleet"),
-    "tokens:create": ("Create personal API tokens", "Account"),
+    "tokens:manage": ("Manage API tokens (their access and cars)", "Administration"),
 }
 CAR_PERMISSIONS: dict[str, tuple[str, str]] = {
     "car:view": ("See the car, its sessions, reports, statements and live charger", "Car"),
@@ -90,7 +90,7 @@ BUILTIN_ROLES: list[tuple[str, str, list[str], bool]] = [
     (
         "Driver",
         "Records, edits and imports the sessions of the cars given to them",
-        ["car:view", "sessions:create", "sessions:edit", "sessions:import", "reimbursement:manage", "tokens:create"],
+        ["car:view", "sessions:create", "sessions:edit", "sessions:import", "reimbursement:manage"],
         False,
     ),
     ("Viewer", "Sees the cars given to them, their sessions and reports", ["car:view"], False),
