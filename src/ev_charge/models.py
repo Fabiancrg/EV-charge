@@ -77,6 +77,8 @@ class ChargeSession(Base):
 
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     charger_id: Mapped[int | None] = mapped_column(ForeignKey("chargers.id", ondelete="RESTRICT"), index=True)
+    # Set when the session comes from the charger's API: "live:<charger id>:<start>" or "history:<charger id>:<start ms>"
+    external_ref: Mapped[str | None] = mapped_column(String(100), index=True)
     # Where the reimbursement stands (sessions to be reimbursed): in_progress | not_recorded | recorded | invoiced | paid
     # (in_progress: still being recorded, e.g. by a future automatic link with the charger)
     reimbursement_status: Mapped[str | None] = mapped_column(String(20))
@@ -105,6 +107,17 @@ class Charger(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+    # Sessions created from the charger (live or history) go to this car, at this location
+    default_car_id: Mapped[int | None] = mapped_column(ForeignKey("cars.id", ondelete="SET NULL"))
+    default_location: Mapped[str | None] = mapped_column(String(200))
+    # Connection to the charger's cloud API (connectors/): kind ("ohme"), encrypted credentials, polling
+    connector: Mapped[str | None] = mapped_column(String(30))
+    connector_secret: Mapped[str | None] = mapped_column(Text)  # encrypted JSON (secretbox)
+    poll_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    external_id: Mapped[str | None] = mapped_column(String(100))  # serial number reported by the API
+    live_state: Mapped[str | None] = mapped_column(Text)  # JSON of the last reading
+    last_poll_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_poll_error: Mapped[str | None] = mapped_column(Text)
 
 
 class User(Base):

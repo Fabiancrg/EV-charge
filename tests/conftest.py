@@ -7,6 +7,8 @@ import pytest
 _tmp = tempfile.mkdtemp(prefix="ev-charge-test-")
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
 os.environ["CONFIG_FILE"] = os.path.join(_tmp, "missing-config.json")
+os.environ["CHARGER_POLLING"] = "0"  # tests poll explicitly
+os.environ["EV_CHARGE_SECRET_KEY"] = "kNh0yW8wq1t6zJxH3o0m6l9Yv8G2cQZ3B6s4m1E9dXo="  # a fixed Fernet key
 
 from fastapi.testclient import TestClient  # noqa: E402
 

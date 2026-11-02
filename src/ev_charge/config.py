@@ -25,6 +25,9 @@ class AppConfig(BaseModel):
     currency: str = "EUR"  # Shown next to costs (ISO code, e.g. EUR, USD, CHF)
     log_level: str = "INFO"
     session_days: int = 30  # how long a sign-in lasts
+    # Chargers connected to their cloud API (Chargers page) are read every charger_poll_seconds
+    charger_polling: bool = True
+    charger_poll_seconds: int = 60
     # Page of the CREG home charging reimbursement tariffs (Tariffs → Import from CREG); the Dutch page works too
     creg_url: str = "https://www.creg.be/fr/consommateurs/prix-et-tarifs/tarif-de-remboursement-pour-la-recharge-a-domicile-des-voitures-de-0"
     # Optional HTTPS: both must be set (no certificate is generated)
@@ -45,6 +48,8 @@ class AppConfig(BaseModel):
         data = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
         if os.getenv("DATABASE_URL"):
             data["database_url"] = os.environ["DATABASE_URL"]
+        if os.getenv("CHARGER_POLLING") is not None:
+            data["charger_polling"] = os.environ["CHARGER_POLLING"].lower() in ("1", "true", "yes")
         return cls(**data)
 
 

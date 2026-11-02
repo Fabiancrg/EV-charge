@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,14 +15,25 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .database import init_db
+from .config import CONFIG
+from .database import SessionLocal, init_db
 from .routes import auth, cars, chargers, imports, reports, sessions, tariffs, ui, users
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     init_db()
+    poller = None
+    if CONFIG.charger_polling:
+        from .live import poll_loop
+
+        poller = asyncio.create_task(poll_loop(SessionLocal, max(15, CONFIG.charger_poll_seconds)))
+        logging.getLogger(__name__).info("Charger polling every %s s", max(15, CONFIG.charger_poll_seconds))
     yield
+    if poller:
+        poller.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await poller
 
 
 app = FastAPI(title="EV Charge", version=__version__, lifespan=lifespan)

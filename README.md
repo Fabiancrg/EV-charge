@@ -53,7 +53,33 @@ Each session to be reimbursed has a **reimbursement status**:
 - **Reimbursement statement:** filters on status and **reimbursing company**, so the statement for 50five can be checked against its invoice. The charger and status are shown per session, totals per status, and both appear in the Excel and CSV exports.
 - **Import:** a *Charger* column (matched on the charger's name or serial number) and a *Status* column are recognised. Statuses can be written as *Paid*, *payé*, *betaald*, *facturé*, *niet geregistreerd*… Without a charger column, one charger can be set for every row, and without a status column, a status for every row to be reimbursed.
 
-## Home charging tariffs
+## Charger connection: live sessions and history
+
+A charger can be connected to its cloud account (🔌 on the **Chargers** page, administrators). Supported today: **Ohme** (Home Pro, ePod, Home/Go…). Other chargers, such as Zaptec with its official API, can be added in `src/ev_charge/connectors/`.
+
+- **Ohme:**
+  - Ohme has no public API. EV Charge uses the open-source [`ohme`](https://github.com/dan-r/ohmepy) library (MIT), the one behind the Home Assistant integration.
+  - It logs in with the **Ohme app e-mail and password**; one Ohme account is one charger.
+  - The API is unofficial, so Ohme can change it at any time. A broken connection shows its error on the Chargers page and the dashboard; sessions can still be entered by hand.
+- **Credentials:**
+  - They're checked when saved and stored **encrypted**, with a key in `{data_dir}/secret.key` or the `EV_CHARGE_SECRET_KEY` environment variable.
+  - Losing the key only means entering the credentials again.
+  - The password is never sent back to the browser.
+- **Default car and location:** set them on the charger. Sessions created from the charger go to that car at that location.
+
+**Live session.** While *Follow the charger* is ticked, EV Charge reads it every `charger_poll_seconds` (60 by default):
+- **Charging starts:** as soon as the car is plugged in and energy is delivered, a session is created for the default car with status ⏳ **In progress**. It starts when charging started and is priced at the CREG tariff. Its kWh and end time follow the charger.
+- **Car unplugged:** the session becomes ✓ **Recorded**. If the energy counter restarts without unplugging, the session is closed and a new one starts.
+- **Edits:** the session can be edited at any time to add the odometer or notes.
+- **Dashboard:** a **Chargers** section shows each connected charger's state (charging, plugged in, finished…), power, energy of the current session, car battery % and last update. It refreshes every 30 s, and ⟳ reads the charger at once.
+- **Drivers:** they see the chargers whose default car is theirs.
+
+**History import.** 📜 on a connected charger rebuilds past sessions for a period and a car:
+- **How:** Ohme gives energy per **hour**, not a list of sessions. Consecutive hours with energy, or separated by one empty hour, make one session. Times are therefore rounded to the hour, and the end is tightened with the active charging time.
+- **Matching:** each rebuilt session is compared with the recorded ones. It's *new*, *matches* a recorded session (same day, kWh within 10 % or 1 kWh), or was *already imported*.
+- **Applying:** the selected new sessions are added as ✓ Recorded. Selected matches that have no charger get this one, keeping their kWh. Importing the same period again adds nothing.
+
+
 
 The **Tariffs** page (administrators) holds the price per kWh of home charging, as periods (usually quarters: the CREG reimbursement rate).
 
@@ -170,6 +196,7 @@ Then open http://127.0.0.1:8000. The interactive API docs are at `/docs`.
 | `ssl_certfile` / `ssl_keyfile` | none | Serve HTTPS when both are set |
 | `log_level` | `INFO` | |
 | `session_days` | `30` | How long a sign-in lasts |
+| `charger_polling` / `charger_poll_seconds` | `true` / `60` | Read the connected chargers in the background (`CHARGER_POLLING=0` disables it) |
 | `creg_url` | the CREG home-charging tariff page (FR) | Page read by *Import from CREG* |
 
 The database schema is created and migrated (Alembic) at startup. To add a migration after changing `models.py`:
@@ -199,7 +226,9 @@ Every endpoint needs a signed-in user (session cookie); drivers only see and cha
 | `GET /api/reports` | Report data. Filters: `car_id`, `date_from`, `date_to` |
 | `GET /api/reports/reimbursement` | Reimbursement statement. Same filters plus `status` (repeatable) and `company` (empty: sessions without a charger), `fmt=json\|csv\|xlsx` |
 | `GET/POST /api/tariffs`, `PUT/DELETE /api/tariffs/{id}` | Tariff periods (changes: administrators) |
-| `GET/POST /api/chargers`, `PUT/DELETE /api/chargers/{id}` | Chargers (changes: administrators) |
+| `GET/POST /api/chargers`, `PUT/DELETE /api/chargers/{id}` | Chargers, with their live state (changes: administrators) |
+| `GET /api/chargers/connectors`, `PUT /api/chargers/{id}/connection`, `POST /api/chargers/{id}/poll` | Charger APIs available, connect/disconnect a charger (tests the login), read it now |
+| `GET /api/chargers/{id}/history?date_from=&date_to=&car_id=`, `POST /api/chargers/{id}/history/apply` | History import: preview, then add/link the chosen sessions (administrators) |
 | `PATCH /api/sessions/bulk` | `{"ids": [...], "reimbursement_status": "paid", "charger_id": 1, "clear_charger": false, "to_reimburse": true}`: only the fields given change |
 | `GET /api/tariffs/creg?region=`, `POST /api/tariffs/creg/upload`, `POST /api/tariffs/creg/apply` | CREG import: preview (from the website or a saved page), then apply the chosen quarters (administrators) |
 | `POST /api/auth/login\|logout\|password\|setup`, `GET /api/auth/me` | Sign-in and own account |
