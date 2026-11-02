@@ -9,7 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import Car, ChargeSession
-from .schemas import CarOut, LeaseStatus, SessionOut
+from .pricing import Pricing
+from .schemas import CarIn, CarOut, LeaseStatus, SessionOut
 
 
 def duration_minutes(start: time | None, end: time | None) -> int | None:
@@ -44,8 +45,10 @@ def km_since_previous(sessions: Iterable[ChargeSession]) -> dict[int, int]:
     return result
 
 
-def session_out(s: ChargeSession, km_prev: dict[int, int] | None = None) -> SessionOut:
+def session_out(s: ChargeSession, pricing: Pricing, km_prev: dict[int, int] | None = None) -> SessionOut:
     minutes = duration_minutes(s.start_time, s.end_time)
+    price = pricing.price(s)
+    who = s.created_by
     return SessionOut(
         id=s.id,
         car_id=s.car_id,
@@ -58,12 +61,18 @@ def session_out(s: ChargeSession, km_prev: dict[int, int] | None = None) -> Sess
         start_time=s.start_time,
         end_time=s.end_time,
         to_reimburse=s.to_reimburse,
-        cost=s.cost,
+        cost=price.cost,
+        entered_cost=s.cost,
+        cost_source=price.source,
+        home=price.home,
+        tariff_price=price.tariff_price,
+        missing_tariff=price.missing_tariff,
         notes=s.notes,
         duration_minutes=minutes,
         avg_power_kw=round(s.kwh / (minutes / 60), 1) if minutes else None,
-        price_per_kwh=round(s.cost / s.kwh, 3) if s.cost is not None and s.kwh else None,
+        price_per_kwh=round(price.cost / s.kwh, 3) if price.cost is not None and s.kwh else None,
         km_since_previous=(km_prev or {}).get(s.id),
+        created_by=(who.full_name or who.username) if who else None,
     )
 
 
@@ -108,10 +117,12 @@ def car_out(db: Session, car: Car, today: date | None = None) -> CarOut:
     sessions = db.scalars(select(ChargeSession).where(ChargeSession.car_id == car.id)).all()
     with_odo = [s for s in sessions if s.odometer is not None]
     last = max(with_odo, key=session_sort_key) if with_odo else None
-    out = CarOut.model_validate(car)
+    out = CarOut.model_validate({**{k: getattr(car, k) for k in CarIn.model_fields}, "id": car.id})
     out.session_count = len(sessions)
     out.total_kwh = round(sum(s.kwh for s in sessions), 2)
     out.last_odometer = last.odometer if last else None
     out.last_charge_date = max((s.charge_date for s in sessions), default=None)
     out.lease = lease_status(car, out.last_odometer, today)
+    out.drivers = [u.full_name or u.username for u in car.drivers]
+    out.color_index = sum(1 for cid in db.scalars(select(Car.id)) if cid < car.id)
     return out

@@ -22,15 +22,39 @@
             <a href="/" class="{{ 'active' if active == 'dashboard' }}">Dashboard</a>
             <a href="/sessions" class="{{ 'active' if active == 'sessions' }}">Sessions</a>
             <a href="/reports" class="{{ 'active' if active == 'reports' }}">Reports</a>
+            <a href="/reimbursement" class="{{ 'active' if active == 'reimbursement' }}">Reimbursement</a>
             <a href="/cars" class="{{ 'active' if active == 'cars' }}">Cars</a>
+            {% if user.is_admin %}
+            <a href="/tariffs" class="{{ 'active' if active == 'tariffs' }}">Tariffs</a>
+            <a href="/users" class="{{ 'active' if active == 'users' }}">Users</a>
+            {% endif %}
             <button class="nav-btn" id="theme-toggle" title="Light / dark theme">🌓</button>
+            <div class="user-menu">
+                <button class="nav-btn" id="user-btn" aria-haspopup="true">👤 {{ me.display_name }} ▾</button>
+                <div class="user-dropdown" id="user-dropdown">
+                    <div class="muted small" style="padding:8px 14px">{{ me.username }} · {{ 'Administrator' if user.is_admin else 'Driver' }}</div>
+                    <button id="pw-btn">🔑 Change password</button>
+                    <button id="logout-btn">↪ Sign out</button>
+                </div>
+            </div>
         </nav>
     </header>
     {% block content %}{% endblock %}
     <p class="muted small" style="text-align:center;color:rgba(255,255,255,.75)">EV Charge {{ app_version }} · <a href="/docs" style="color:inherit">API</a></p>
 </div>
 <div id="toast"></div>
-<script>window.EV = Object.assign(window.EV || {}, { currency: {{ currency|tojson }} });</script>
+<div class="modal" id="pw-modal">
+    <div class="modal-box" style="max-width:420px">
+        <h3><span>Change password</span><button class="icon-btn" data-close title="Close">✕</button></h3>
+        <div class="form-error"></div>
+        <form id="pw-form" autocomplete="off">
+            <div class="field" style="margin-bottom:12px"><label>Current password</label><input type="password" name="current_password" required autocomplete="current-password"></div>
+            <div class="field" style="margin-bottom:12px"><label>New password</label><input type="password" name="new_password" required minlength="8" autocomplete="new-password"><div class="hint">At least 8 characters. Your other browsers will be signed out.</div></div>
+            <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn">Save</button></div>
+        </form>
+    </div>
+</div>
+<script>window.EV = Object.assign(window.EV || {}, { currency: {{ currency|tojson }}, me: {{ me|tojson }} });</script>
 <script src="/static/js/ev-common.js?v={{ app_version }}"></script>
 {% block scripts %}{% endblock %}
 </body>

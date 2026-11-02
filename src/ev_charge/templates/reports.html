@@ -13,8 +13,9 @@
 {% endblock %}
 {% block content %}
 <div class="content">
-    <div class="page-head"><h2>Reports</h2></div>
+    <div class="page-head"><h2>Reports</h2><a class="btn btn-ghost btn-sm" href="/reimbursement">💶 Reimbursement statement →</a></div>
     {% with with_reimburse = false %}{% include "_filters.html" %}{% endwith %}
+    <div id="report-note"></div>
     <div class="tiles" id="tiles"></div>
     <div id="empty" class="empty-state" style="display:none"><h3>No charging session in this period</h3><p>Change the filters, or record sessions first.</p></div>
     <div class="charts" id="charts">
@@ -103,6 +104,8 @@
             tile('To reimburse', `${EV.num(t.kwh_to_reimburse, 1)} <small>kWh · ${EV.num(t.sessions_to_reimburse)} sess.</small>`),
         ].join('');
 
+        document.getElementById('report-note').innerHTML = t.home_without_tariff
+            ? `<div class="note">⚠ ${EV.num(t.home_without_tariff)} home charging session(s) fall outside every tariff period: their cost is missing from the totals.${EV.isAdmin() ? ' <a href="/tariffs">Add the tariff →</a>' : ''}</div>` : '';
         const empty = !t.sessions;
         document.getElementById('empty').style.display = empty ? '' : 'none';
         document.getElementById('charts').style.display = empty ? 'none' : '';

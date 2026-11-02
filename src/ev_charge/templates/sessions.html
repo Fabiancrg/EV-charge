@@ -41,9 +41,14 @@
         { key: 'start_time', label: 'Start–end', cls: 'hide-sm', fmt: s => s.start_time ? `${EV.time(s.start_time)}–${EV.time(s.end_time)}` : '' },
         { key: 'duration_minutes', label: 'Duration', num: true, cls: 'hide-sm', fmt: s => s.duration_minutes == null ? '' : EV.duration(s.duration_minutes) },
         { key: 'avg_power_kw', label: 'Avg kW', num: true, cls: 'hide-sm', fmt: s => EV.num(s.avg_power_kw, 1) },
-        { key: 'cost', label: 'Cost', num: true, fmt: s => s.cost == null ? '' : EV.money(s.cost) },
+        { key: 'cost', label: 'Cost', num: true, fmt: s => s.missing_tariff ? '<span class="badge badge-warn" title="Home charging: no tariff for this date">🏠 no tariff</span>'
+            : s.cost == null ? '' : `${s.cost_source === 'tariff' ? `<span title="Home tariff ${EV.money(s.tariff_price, 4)}/kWh">🏠 </span>` : ''}${EV.money(s.cost)}` },
         { key: 'to_reimburse', label: 'Reimb.', fmt: s => s.to_reimburse ? '<span class="badge badge-info">💶 Yes</span>' : '' },
+        { key: 'created_by', label: 'Entered by', cls: 'hide-sm', fmt: s => `<span class="muted small">${EV.esc(s.created_by || '')}</span>` },
     ];
+    let page = 0;
+    let pageSize = 50;
+    try { pageSize = Number(localStorage.getItem('ev-page-size')) || 50; } catch (e) { /* private mode */ }
 
     function sorted() {
         const k = sort.key;
@@ -74,7 +79,7 @@
                 <th><input type="checkbox" id="sel-all" title="Select all"></th>
                 ${COLS.map(c => `<th class="sortable ${c.num ? 'num' : ''} ${c.cls || ''}" data-sort="${c.key}">${c.label}${arrow(c.key)}</th>`).join('')}
                 <th></th></tr></thead>
-            <tbody>${sorted().map(s => `<tr data-id="${s.id}">
+            <tbody>${pageRows().map(s => `<tr data-id="${s.id}">
                 <td><input type="checkbox" class="sel" ${selected.has(s.id) ? 'checked' : ''}></td>
                 ${COLS.map(c => `<td class="${c.num ? 'num' : ''} ${c.cls || ''}">${c.fmt(s)}</td>`).join('')}
                 <td style="white-space:nowrap"><button class="icon-btn" data-act="edit" title="Edit">✏</button><button class="icon-btn" data-act="dup" title="Duplicate (as a new session today)">⧉</button></td>
@@ -82,9 +87,30 @@
             <tfoot><tr><td></td><td colspan="${COLS.length + 1}">
                 ${EV.num(rows.length)} session(s) · <strong>${EV.kwh(totKwh)}</strong>${withCost.length ? ` · ${EV.money(totCost)}` : ''}
                 · to reimburse: ${EV.num(reimb.length)} session(s), ${EV.kwh(reimb.reduce((a, s) => a + s.kwh, 0))}${reimb.some(s => s.cost != null) ? `, ${EV.money(reimb.reduce((a, s) => a + (s.cost || 0), 0))}` : ''}
-            </td></tr></tfoot></table>`;
-        document.getElementById('sel-all').checked = rows.length > 0 && rows.every(r => selected.has(r.id));
+            </td></tr></tfoot></table>${pager()}`;
+        document.getElementById('sel-all').checked = rows.length > 0 && pageRows().every(r => selected.has(r.id));
         updateBulk();
+    }
+
+    const pageCount = () => pageSize ? Math.max(1, Math.ceil(rows.length / pageSize)) : 1;
+    function pageRows() {
+        page = Math.min(page, pageCount() - 1);
+        const all = sorted();
+        return pageSize ? all.slice(page * pageSize, (page + 1) * pageSize) : all;
+    }
+    function pager() {
+        const from = pageSize ? page * pageSize + 1 : 1;
+        const to = pageSize ? Math.min(rows.length, (page + 1) * pageSize) : rows.length;
+        return `<div class="pager">
+            <span>Rows per page</span>
+            <select id="page-size">${[25, 50, 100, 0].map(n => `<option value="${n}" ${n === pageSize ? 'selected' : ''}>${n || 'All'}</option>`).join('')}</select>
+            <span>${EV.num(from)}–${EV.num(to)} of ${EV.num(rows.length)}</span>
+            <button class="btn btn-ghost" data-page="first" ${page === 0 ? 'disabled' : ''} title="First page">«</button>
+            <button class="btn btn-ghost" data-page="prev" ${page === 0 ? 'disabled' : ''} title="Previous page">‹</button>
+            <span>Page ${page + 1} / ${pageCount()}</span>
+            <button class="btn btn-ghost" data-page="next" ${page >= pageCount() - 1 ? 'disabled' : ''} title="Next page">›</button>
+            <button class="btn btn-ghost" data-page="last" ${page >= pageCount() - 1 ? 'disabled' : ''} title="Last page">»</button>
+        </div>`;
     }
 
     function updateBulk() {
@@ -93,18 +119,26 @@
         document.getElementById('bulk-count').textContent = `${ids.length} selected:`;
     }
 
+    let keepPage = false;
     async function load() {
         const p = EV.readFilters();
         document.getElementById('export').href = `/api/sessions/export.csv?${p}`;
-        try { rows = await EV.api('GET', `/api/sessions?${p}`); render(); }
+        try { rows = await EV.api('GET', `/api/sessions?${p}`); page = keepPage ? page : 0; keepPage = false; render(); }
         catch (err) { EV.toast(err.message, true); }
     }
 
     const table = document.getElementById('table');
     table.addEventListener('click', (e) => {
         const th = e.target.closest('th[data-sort]');
-        if (th) { const k = th.dataset.sort; sort = { key: k, dir: sort.key === k ? -sort.dir : (k === 'charge_date' ? -1 : 1) }; render(); return; }
-        if (e.target.id === 'sel-all') { rows.forEach(r => e.target.checked ? selected.add(r.id) : selected.delete(r.id)); render(); return; }
+        if (th) { const k = th.dataset.sort; sort = { key: k, dir: sort.key === k ? -sort.dir : (k === 'charge_date' ? -1 : 1) }; page = 0; render(); return; }
+        if (e.target.id === 'sel-all') { pageRows().forEach(r => e.target.checked ? selected.add(r.id) : selected.delete(r.id)); render(); return; }
+        const pb = e.target.closest('[data-page]');
+        if (pb) {
+            page = { first: 0, prev: page - 1, next: page + 1, last: pageCount() - 1 }[pb.dataset.page];
+            render();
+            document.getElementById('table').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            return;
+        }
         const tr = e.target.closest('tr[data-id]');
         if (!tr) return;
         const id = Number(tr.dataset.id);
@@ -114,12 +148,21 @@
         if (act === 'dup') {
             EV.openSessionForm(null, { carId: s.car_id, onSaved: load }).then(() => {
                 const f = document.getElementById('session-form');
-                ['location', 'provider', 'kwh', 'start_time', 'end_time', 'cost', 'notes'].forEach(k => { f[k].value = k.endsWith('_time') ? EV.time(s[k]) : (s[k] ?? ''); });
+                ['location', 'provider', 'kwh', 'start_time', 'end_time', 'notes'].forEach(k => { f[k].value = k.endsWith('_time') ? EV.time(s[k]) : (s[k] ?? ''); });
+                f.cost.value = s.entered_cost ?? '';
                 f.to_reimburse.checked = s.to_reimburse;
+                f.location.dispatchEvent(new Event('input'));
             });
         } else if (act === 'edit' || e.target.tagName === 'TD') {
-            EV.openSessionForm(s, { onSaved: load });
+            EV.openSessionForm(s, { onSaved: () => { keepPage = true; load(); } });
         }
+    });
+    table.addEventListener('change', (e) => {
+        if (e.target.id !== 'page-size') return;
+        pageSize = Number(e.target.value);
+        try { localStorage.setItem('ev-page-size', String(pageSize)); } catch (err) { /* private mode */ }
+        page = 0;
+        render();
     });
     document.getElementById('bulk').addEventListener('click', async (e) => {
         const b = e.target.closest('[data-bulk]');

@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}Tariffs · EV Charge{% endblock %}
+{% block content %}
+<div class="content">
+    <div class="page-head">
+        <h2>Home charging tariffs</h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost" id="add-quarter" title="New period for the quarter after the last one">＋ Next quarter</button>
+            <button class="btn" id="add-tariff">＋ Add a period</button>
+        </div>
+    </div>
+    <p class="muted small" style="margin-bottom:12px">Sessions charged at a <b>home location</b> are priced at kWh × the tariff valid on the charge date, whatever cost was typed in.
+        Other sessions keep the cost entered. Changing a tariff reprices the home sessions of its period. Periods can't overlap; leave the end date empty for “until further notice”.</p>
+    <div id="gaps"></div>
+    <div class="table-wrap" id="tariffs-table"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="content">
+    <div class="page-head"><h2>Home locations</h2></div>
+    <p class="muted small" style="margin-bottom:12px">Sessions whose location matches one of these names (case and extra spaces don't matter) are home charging.</p>
+    <div id="home-chips"></div>
+    <form id="home-form" style="display:flex;gap:8px;max-width:520px;margin-top:6px">
+        <input type="text" id="home-input" list="dl-known" placeholder="Add a location, e.g. Home, Garage Wavre…" maxlength="200">
+        <datalist id="dl-known"></datalist>
+        <button class="btn" type="submit">Add</button>
+    </form>
+</div>
+
+<div class="modal" id="tariff-modal">
+    <div class="modal-box" style="max-width:560px">
+        <h3><span id="tf-title">Tariff</span><button class="icon-btn" data-close title="Close">✕</button></h3>
+        <div class="form-error"></div>
+        <form id="tariff-form" autocomplete="off">
+            <div class="form-grid">
+                <div class="field"><label>From *</label><input type="date" name="valid_from" required></div>
+                <div class="field"><label>To (inclusive)</label><input type="date" name="valid_to"><div class="hint">Empty: until further notice</div></div>
+                <div class="field"><label>Price per kWh ({{ currency }}) *</label><input type="number" name="price_per_kwh" required min="0.0001" max="10" step="0.0001" inputmode="decimal"></div>
+                <div class="field"><label>Label</label><input type="text" name="label" maxlength="100" placeholder="e.g. CREG Q1 2026"></div>
+                <div class="field span-all"><label>Notes</label><textarea name="notes" rows="2" placeholder="Source of the price, reference…"></textarea></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-danger left" id="tf-delete">🗑 Delete</button>
+                <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+                <button type="submit" class="btn">💾 Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+    const form = document.getElementById('tariff-form');
+    let tariffs = [], homes = [], editing = null;
+    const iso = (d) => new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const addDays = (s, n) => { const d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return iso(d); };
+
+    function open(t, prefill = {}) {
+        editing = t;
+        form.reset();
+        document.getElementById('tf-title').textContent = t ? 'Edit tariff' : 'New tariff period';
+        document.getElementById('tf-delete').style.display = t ? '' : 'none';
+        EV.fillForm(form, t || prefill);
+        EV.openModal('tariff-modal');
+    }
+
+    function nextQuarter() {
+        const last = tariffs.find(t => t.valid_to);  // newest first
+        const start = last ? new Date(addDays(last.valid_to, 1) + 'T00:00:00') : new Date();
+        const q = Math.floor(start.getMonth() / 3);
+        const from = last ? iso(start) : iso(new Date(start.getFullYear(), q * 3, 1));
+        const to = iso(new Date(start.getFullYear(), q * 3 + 3, 0));
+        return { valid_from: from, valid_to: to, label: `Q${q + 1} ${start.getFullYear()}`, price_per_kwh: tariffs[0]?.price_per_kwh ?? '' };
+    }
+
+    function renderGaps() {
+        // Holes between periods: home sessions there have no price
+        const sorted = [...tariffs].sort((a, b) => a.valid_from.localeCompare(b.valid_from));
+        const gaps = [];
+        for (let i = 1; i < sorted.length; i++) {
+            const prevEnd = sorted[i - 1].valid_to;
+            if (prevEnd && addDays(prevEnd, 1) < sorted[i].valid_from) gaps.push(`${EV.date(addDays(prevEnd, 1))} → ${EV.date(addDays(sorted[i].valid_from, -1))}`);
+        }
+        const last = sorted[sorted.length - 1];
+        const today = iso(new Date());
+        const msgs = [];
+        if (!tariffs.length) msgs.push('No tariff yet: home sessions have no cost until you add one.');
+        if (gaps.length) msgs.push(`No tariff between ${gaps.join(', ')}.`);
+        if (last && last.valid_to && last.valid_to < today) msgs.push(`The last period ended on ${EV.date(last.valid_to)}: add the next one.`);
+        document.getElementById('gaps').innerHTML = msgs.map(m => `<div class="note">⚠ ${EV.esc(m)}</div>`).join('');
+    }
+
+    function render() {
+        renderGaps();
+        const today = iso(new Date());
+        const box = document.getElementById('tariffs-table');
+        if (!tariffs.length) { box.innerHTML = '<div class="empty-state"><h3>No tariff period yet</h3><p>Use ＋ Next quarter or ＋ Add a period.</p></div>'; return; }
+        box.innerHTML = `<table><thead><tr><th>Period</th><th>Label</th><th class="num">Price / kWh</th><th class="num">Home sessions</th><th class="num">kWh</th><th class="num hide-sm">Amount</th><th></th></tr></thead><tbody>
+            ${tariffs.map(t => {
+                const current = t.valid_from <= today && (!t.valid_to || today <= t.valid_to);
+                return `<tr>
+                <td>${EV.date(t.valid_from)} → ${t.valid_to ? EV.date(t.valid_to) : '<span class="muted">until further notice</span>'} ${current ? '<span class="badge badge-ok">Current</span>' : ''}</td>
+                <td>${EV.esc(t.label || '')}${t.notes ? `<br><span class="muted small">${EV.esc(t.notes)}</span>` : ''}</td>
+                <td class="num"><strong>${EV.money(t.price_per_kwh, 4)}</strong></td>
+                <td class="num">${EV.num(t.sessions)}</td><td class="num">${EV.num(t.kwh, 1)}</td>
+                <td class="num hide-sm">${EV.money(t.kwh * t.price_per_kwh)}</td>
+                <td><button class="btn btn-ghost btn-sm" data-edit="${t.id}">✏ Edit</button></td></tr>`;
+            }).join('')}</tbody></table>`;
+    }
+
+    function renderHomes() {
+        document.getElementById('home-chips').innerHTML = homes.length
+            ? homes.map((h, i) => `<span class="chip">🏠 ${EV.esc(h)}<button title="Remove" data-rm="${i}">✕</button></span>`).join('')
+            : '<p class="note">No home location: no session is priced at the home tariff.</p>';
+    }
+
+    async function saveHomes(list) {
+        try { homes = (await EV.api('PUT', '/api/tariffs/home-locations', { locations: list })).locations; renderHomes(); load(); }
+        catch (err) { EV.toast(err.message, true); }
+    }
+
+    async function load() {
+        try {
+            const [t, h, s] = await Promise.all([EV.api('GET', '/api/tariffs'), EV.api('GET', '/api/tariffs/home-locations'), EV.api('GET', '/api/sessions/suggestions')]);
+            tariffs = t; homes = h.locations;
+            document.getElementById('dl-known').innerHTML = s.locations.map(l => `<option value="${EV.esc(l)}">`).join('');
+            render(); renderHomes();
+        } catch (err) { EV.toast(err.message, true); }
+    }
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+            if (editing) await EV.api('PUT', `/api/tariffs/${editing.id}`, EV.formData(form));
+            else await EV.api('POST', '/api/tariffs', EV.formData(form));
+            EV.toast('Tariff saved');
+            EV.closeModal('tariff-modal');
+            load();
+        } catch (err) { EV.formError('tariff-modal', err); }
+    });
+    document.getElementById('tf-delete').addEventListener('click', async () => {
+        if (!editing || !confirm('Delete this tariff period? Its home sessions will have no cost.')) return;
+        try { await EV.api('DELETE', `/api/tariffs/${editing.id}`); EV.toast('Tariff deleted'); EV.closeModal('tariff-modal'); load(); }
+        catch (err) { EV.formError('tariff-modal', err); }
+    });
+    document.getElementById('add-tariff').addEventListener('click', () => open(null));
+    document.getElementById('add-quarter').addEventListener('click', () => open(null, nextQuarter()));
+    document.getElementById('tariffs-table').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-edit]');
+        if (b) open(tariffs.find(t => t.id === Number(b.dataset.edit)));
+    });
+    document.getElementById('home-chips').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-rm]');
+        if (b) saveHomes(homes.filter((_, i) => i !== Number(b.dataset.rm)));
+    });
+    document.getElementById('home-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const input = document.getElementById('home-input');
+        if (input.value.trim()) saveHomes([...homes, input.value.trim()]);
+        input.value = '';
+    });
+    load();
+})();
+</script>
+{% endblock %}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, time
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, Time
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Table, Text, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -12,6 +12,15 @@ from .database import Base
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+# Cars a driver may work with (admins see every car)
+user_cars = Table(
+    "user_cars",
+    Base.metadata,
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("car_id", ForeignKey("cars.id", ondelete="CASCADE"), primary_key=True),
+)
 
 
 class Car(Base):
@@ -45,6 +54,7 @@ class Car(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     sessions: Mapped[list[ChargeSession]] = relationship(back_populates="car")
+    drivers: Mapped[list[User]] = relationship(secondary=user_cars, back_populates="cars")
 
 
 class ChargeSession(Base):
@@ -65,4 +75,64 @@ class ChargeSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
     car: Mapped[Car] = relationship(back_populates="sessions")
+    created_by: Mapped[User | None] = relationship()
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(50), unique=True)  # stored lower case
+    full_name: Mapped[str | None] = mapped_column(String(100))
+    email: Mapped[str | None] = mapped_column(String(200))
+    role: Mapped[str] = mapped_column(String(20), default="driver")  # admin | driver
+    password_hash: Mapped[str] = mapped_column(String(300))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    cars: Mapped[list[Car]] = relationship(secondary=user_cars, back_populates="drivers", order_by="Car.name")
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == "admin"
+
+
+class AuthSession(Base):
+    """A signed-in browser. The cookie holds a random token; only its SHA-256 is stored."""
+
+    __tablename__ = "auth_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship()
+
+
+class Tariff(Base):
+    """Price per kWh of home charging over a period (usually a quarter)."""
+
+    __tablename__ = "tariffs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    valid_from: Mapped[date] = mapped_column(Date, index=True)
+    valid_to: Mapped[date | None] = mapped_column(Date)  # inclusive; empty: until further notice
+    price_per_kwh: Mapped[float] = mapped_column(Float)
+    label: Mapped[str | None] = mapped_column(String(100))  # e.g. "CREG Q1 2026"
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class Setting(Base):
+    """Application settings as JSON values (e.g. home_locations)."""
+
+    __tablename__ = "settings"
+
+    key: Mapped[str] = mapped_column(String(50), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)  # JSON
