@@ -241,7 +241,7 @@ def _chargers_lookup(db: Session) -> dict[str, Charger]:
 
 
 def _dup_key(car_key: Any, d: date, kwh: float, odometer: int | None) -> tuple:
-    return (car_key, d, round(kwh, 2), odometer)
+    return (car_key, d, round(kwh, 3), odometer)
 
 
 def parse_rows(db: Session, req: ImportRequest, scope: set[int] | None = None) -> list[ParsedRow]:
@@ -371,7 +371,7 @@ def summary(rows: list[ParsedRow], req: ImportRequest) -> dict[str, Any]:
         "errors": sum(r.status == "error" for r in rows),
         "duplicates": sum(r.status == "duplicate" for r in rows),
         "to_import": len(importable),
-        "kwh": round(sum(r.values["kwh"] for r in importable), 2),
+        "kwh": round(sum(r.values["kwh"] for r in importable), 3),
         "new_cars": new_cars,
     }
 

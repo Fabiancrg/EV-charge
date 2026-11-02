@@ -42,7 +42,7 @@
         { key: 'km_since_previous', label: 'Δ km', num: true, cls: 'hide-sm', fmt: s => s.km_since_previous == null ? '' : (s.km_since_previous < 0 ? `<span class="badge badge-err" title="Lower than the previous reading">⚠ ${EV.num(s.km_since_previous)}</span>` : EV.num(s.km_since_previous)) },
         { key: 'location', label: 'Location', fmt: s => EV.esc(s.location || '') },
         { key: 'provider', label: 'Provider', cls: 'hide-sm', fmt: s => EV.esc(s.provider || '') },
-        { key: 'kwh', label: 'kWh', num: true, fmt: s => EV.num(s.kwh, 2) },
+        { key: 'kwh', label: 'kWh', num: true, fmt: s => EV.num(s.kwh, 3) },
         { key: 'start_time', label: 'Start–end', cls: 'hide-sm', fmt: s => s.start_time ? `${EV.time(s.start_time)}–${EV.time(s.end_time)}` : '' },
         { key: 'duration_minutes', label: 'Duration', num: true, cls: 'hide-sm', fmt: s => s.duration_minutes == null ? '' : EV.duration(s.duration_minutes) },
         { key: 'avg_power_kw', label: 'Avg kW', num: true, cls: 'hide-sm', fmt: s => EV.num(s.avg_power_kw, 1) },

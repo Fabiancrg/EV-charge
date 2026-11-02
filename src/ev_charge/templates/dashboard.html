@@ -74,7 +74,7 @@
             ${rows.map(s => `<tr style="cursor:pointer" data-id="${s.id}">
                 <td>${EV.date(s.charge_date)}</td><td>${EV.carDot(s.car_id)}${EV.esc(s.car_name)}</td>
                 <td class="hide-sm">${EV.esc(s.location || '')}</td><td class="hide-sm">${EV.esc(s.provider || '')}</td>
-                <td class="num">${EV.num(s.kwh, 2)}</td><td class="num hide-sm">${EV.num(s.odometer)}</td>
+                <td class="num">${EV.num(s.kwh, 3)}</td><td class="num hide-sm">${EV.num(s.odometer)}</td>
                 <td>${s.to_reimburse ? '<span class="badge badge-info">💶 Yes</span>' : ''}</td></tr>`).join('')}
             </tbody></table>`;
         box.querySelectorAll('tr[data-id]').forEach(tr => tr.addEventListener('click', () => {

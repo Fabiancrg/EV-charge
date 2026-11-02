@@ -61,12 +61,12 @@
                     <td>${EV.date(r.charge_date)}</td>${multi ? `<td>${EV.esc(r.car_name)}</td>` : ''}
                     <td>${r.home ? '🏠 ' : ''}${EV.esc(r.location || '')}</td><td class="hide-sm">${r.charger_name ? `🔌 ${EV.esc(r.charger_name)}${r.reimbursement_company ? `<br><span class="muted small">${EV.esc(r.reimbursement_company)}</span>` : ''}` : EV.esc(r.provider || '')}</td>
                     <td class="num">${EV.num(r.odometer)}</td><td class="hide-sm">${r.start_time ? `${r.start_time}–${r.end_time || ''}` : ''}</td>
-                    <td class="num">${EV.num(r.kwh, 2)}</td>
+                    <td class="num">${EV.num(r.kwh, 3)}</td>
                     <td class="num">${r.price_per_kwh != null ? EV.money(r.price_per_kwh, 4) : ''}</td>
                     <td class="num">${r.amount != null ? EV.money(r.amount) : '<span class="badge badge-warn">no price</span>'}</td>
                     <td>${EV.statusBadge(r.status)}</td></tr>`).join('')}
                 </tbody><tfoot><tr><td colspan="${multi ? 6 : 5}">Total: ${EV.num(t.sessions)} session(s)</td>
-                    <td class="num">${EV.num(t.kwh, 2)}</td><td></td><td class="num">${EV.money(t.amount)}</td><td></td></tr></tfoot></table></div>
+                    <td class="num">${EV.num(t.kwh, 3)}</td><td></td><td class="num">${EV.money(t.amount)}</td><td></td></tr></tfoot></table></div>
             <div class="summary">
                 <div class="tile"><div class="label">🔌 Chargers (CREG tariff)</div><div class="value">${EV.money(t.home_amount)} <small>${EV.num(t.home_kwh, 1)} kWh</small></div></div>
                 <div class="tile"><div class="label">Other charging</div><div class="value">${EV.money(t.amount - t.home_amount)} <small>${EV.num(t.kwh - t.home_kwh, 1)} kWh</small></div></div>
