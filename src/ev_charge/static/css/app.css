@@ -139,7 +139,7 @@ tfoot td { font-weight: 600; background: var(--bg-surface-alt); }
 .form-grid .span-all { grid-column: 1 / -1; }
 .field label { display: block; margin-bottom: 5px; font-weight: 500; font-size: var(--font-sm); color: var(--text-secondary); }
 .field .hint { font-size: var(--font-xs); color: var(--text-muted); margin-top: 3px; min-height: 1em; }
-input[type=text], input[type=number], input[type=date], input[type=time], input[type=search], select, textarea {
+input[type=text], input[type=password], input[type=email], input[type=number], input[type=date], input[type=time], input[type=search], select, textarea {
     width: 100%; padding: 9px 11px;
     border: 2px solid var(--border-color); border-radius: 8px;
     font-size: var(--font-base); font-family: inherit;

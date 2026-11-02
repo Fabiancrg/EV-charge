@@ -25,7 +25,7 @@ HISTORY_CHUNK = timedelta(days=7)  # one summary request per week of history
 
 class OhmeConnector:
     label = "Ohme (cloud account)"
-    fields = (("email", "Ohme account e-mail", False), ("password", "Ohme account password", True))
+    fields = (("email", "Ohme account e-mail", False, True), ("password", "Ohme account password", True, True))
 
     def __init__(self, config: dict[str, Any]) -> None:
         if not config.get("email") or not config.get("password"):

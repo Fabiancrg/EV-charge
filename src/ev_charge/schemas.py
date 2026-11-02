@@ -241,7 +241,8 @@ class ChargerOut(ChargerIn):
     kwh: float = 0
     last_used: date | None = None
     connector: str | None = None
-    connector_account: str | None = None  # e.g. the Ohme e-mail (administrators only); never the password
+    connector_account: str | None = None  # e.g. the account e-mail (administrators only); never the password
+    connector_settings: dict[str, str] | None = None  # the non-secret connection fields (administrators only)
     poll_enabled: bool = False
     external_id: str | None = None
     live: dict[str, Any] | None = None
