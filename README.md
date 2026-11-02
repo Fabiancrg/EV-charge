@@ -6,7 +6,7 @@ Same stack and look as Flow Manager: FastAPI, SQLAlchemy + Alembic (SQLite), Jin
 
 ## Users, roles and permissions
 
-On first start, every page leads to **/setup**, where you create the first administrator. Users are managed on **Admin → Users & car access**, roles on **Admin → Roles & permissions**.
+On first start, every page leads to **/setup**, where you create the first administrator. Users are managed on **Settings → Users & car access**, roles on **Settings → Roles & permissions**.
 
 **Roles are sets of permissions.** Each user has:
 - a **global role**: its app-wide permissions apply. If the role is marked *all cars*, its car permissions apply to **every car**.
@@ -53,11 +53,11 @@ On first start, every page leads to **/setup**, where you create the first admin
 - **Permissions:** a token can only do what its owner can, narrowed to the permissions chosen for it, and it can't manage account settings or create tokens.
 - **Lifetime:** tokens expire after 30 days, 90 days, 1 year or never, and can be revoked. Only a hash is stored; the token is shown once.
 
-**Audit log** (*Admin → Audit log*, `audit:read`). It records sign-ins and failed sign-ins (password or SSO), user, role, token and SSO-settings changes, and **every change made through the app or the API**, such as `cars.update cars:3`, `sessions.bulk` or `chargers.connection`. Each entry has the user, time, IP and details, and the log can be filtered and searched. Events older than `audit_retention_days` (730) are deleted at startup.
+**Audit log** (*Settings → Audit log*, `audit:read`). It records sign-ins and failed sign-ins (password or SSO), user, role, token and SSO-settings changes, and **every change made through the app or the API**, such as `cars.update cars:3`, `sessions.bulk` or `chargers.connection`. Each entry has the user, time, IP and details, and the log can be filtered and searched. Events older than `audit_retention_days` (730) are deleted at startup.
 
 ## Single sign-on (Authelia, OpenID Connect)
 
-*Admin → Single sign-on* (`settings:manage`) connects EV Charge to an OpenID Connect provider: Authelia, Keycloak, Entra ID, Google… The sign-in page then shows **Sign in with Authelia**.
+*Settings → Single sign-on* (`settings:manage`) connects EV Charge to an OpenID Connect provider: Authelia, Keycloak, Entra ID, Google… The sign-in page then shows **Sign in with Authelia**.
 
 1. **In Authelia:** add EV Charge as a client. The page shows the `identity_providers.oidc.clients` entry to paste into `configuration.yml`, with the redirect URI `https://<ev-charge>/auth/sso/callback`. Store the secret's digest (`authelia crypto hash generate pbkdf2`).
 2. **In EV Charge:** enter the issuer URL (e.g. `https://auth.example.com`), the client ID and the secret (stored encrypted), and click *Test the provider*. Set the *Redirect URI* when EV Charge is behind a reverse proxy with another public URL.
@@ -172,7 +172,7 @@ The **Tariffs** page (administrators) holds the price per kWh of home charging, 
 | **Reimbursement** `/reimbursement` | A printable statement of the sessions flagged *to be reimbursed* in a period (default: last quarter) for a car. Each session is priced with the home tariff or the cost entered, and totals are split into home and other charging, with signature lines. *🖨 Print / PDF* uses the browser's print (save as PDF). *⬇ Excel* and *⬇ CSV* export the same rows. |
 | **Chargers** `/chargers` | Chargers whose sessions are reimbursed, and the company paying them back (administrators, see above). |
 | **Tariffs** `/tariffs` | Home charging price periods and the CREG import (administrators, see above). |
-| **Users**, **Roles**, **Single sign-on**, **Audit log** (Admin menu) | Accounts with their global role and role per car; roles and permissions; OpenID Connect settings; audit log (see above). |
+| **Users**, **Roles**, **Single sign-on**, **Audit log** (Settings menu) | Accounts with their global role and role per car; roles and permissions; OpenID Connect settings; audit log (see above). |
 | **My account** `/account` | Where you are signed in, your API tokens, your permissions. |
 | **Cars** `/cars` | Add and edit cars: identity (name, make, model, year, plate, VIN, colour), specs (usable battery, max AC/DC power, WLTP range and consumption), leasing (company, contract, start/end, km per year, monthly cost, odometer at start), notes, active flag. A car with sessions can't be deleted; mark it inactive instead. |
 

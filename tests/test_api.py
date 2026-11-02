@@ -127,3 +127,15 @@ def test_kwh_keeps_three_decimals(client, car):
     body = {"rows": [["2026-03-01", "30,126"], ["2026-03-01", "30.125"]], "mapping": {"charge_date": 0, "kwh": 1}, "car_id": car["id"]}
     rows = client.post("/api/import/sessions/preview", json=body).json()["rows"]
     assert [(r["kwh"], r["status"]) for r in rows] == [(30.126, "ok"), (30.125, "duplicate")]
+
+
+def test_static_files_are_versioned_by_content(client):
+    page = client.get("/sessions").text
+    import re
+
+    from ev_charge.routes.ui import _asset_version
+
+    versions = set(re.findall(r"/static/[^\"?]+\?v=([0-9a-f]+)", page))
+    assert versions == {_asset_version()} and len(_asset_version()) == 12  # not the app version: changes with every script change
+    r = client.get("/static/js/ev-common.js")
+    assert r.headers["cache-control"] == "no-cache" and r.headers.get("etag")

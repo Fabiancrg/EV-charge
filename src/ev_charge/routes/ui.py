@@ -6,6 +6,7 @@ Users and Tariffs are for administrators.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from urllib.parse import quote
 
@@ -22,7 +23,21 @@ from .auth import me_out, setup_needed
 
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
-templates.env.globals.update(app_version=__version__, currency=CONFIG.currency, poll_seconds=max(15, CONFIG.charger_poll_seconds))
+
+
+def _asset_version() -> str:
+    """A fingerprint of the static files: it changes whenever a script or style changes, so browsers
+    fetch the new files after an update instead of running cached ones with new pages."""
+    digest = hashlib.sha256()
+    static = Path(__file__).parent.parent / "static"
+    for f in sorted(static.rglob("*")):
+        if f.is_file():
+            digest.update(f.relative_to(static).as_posix().encode())
+            digest.update(f.read_bytes())
+    return digest.hexdigest()[:12]
+
+
+templates.env.globals.update(app_version=__version__, asset_version=_asset_version(), currency=CONFIG.currency, poll_seconds=max(15, CONFIG.charger_poll_seconds))
 
 
 def _page(request: Request, db: Session, template: str, active: str, permission: str | None = None) -> Response:
