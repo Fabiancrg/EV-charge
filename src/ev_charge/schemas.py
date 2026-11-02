@@ -138,6 +138,10 @@ class SessionBulk(BaseModel):
     reimbursement_status: ReimbursementStatus | None = None
     charger_id: int | None = None
     clear_charger: bool = False  # remove the charger (charger_id null means "unchanged")
+    provider: str | None = Field(default=None, max_length=200)  # set this provider (null: unchanged)
+    clear_provider: bool = False  # empty the provider
+
+    _strip = field_validator("provider", mode="before")(_blank_to_none)
 
 
 Role = Literal["admin", "driver"]
@@ -229,8 +233,11 @@ class ChargerIn(BaseModel):
     notes: str | None = None
     default_car_id: int | None = None  # car of the sessions created from the charger (live, history)
     default_location: str | None = Field(default=None, max_length=200)
+    default_provider: str | None = Field(default=None, max_length=200)  # e.g. the home electricity supplier
 
-    _strip = field_validator("name", "brand", "model", "serial_number", "reimbursement_company", "notes", "default_car_id", "default_location", mode="before")(_blank_to_none)
+    _strip = field_validator("name", "brand", "model", "serial_number", "reimbursement_company", "notes", "default_car_id", "default_location", "default_provider", mode="before")(
+        _blank_to_none
+    )
 
 
 class ChargerOut(ChargerIn):

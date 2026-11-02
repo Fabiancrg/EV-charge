@@ -70,6 +70,8 @@
                     <div class="hint">Untick for a charger whose sessions keep the cost typed in.</div></div>
                 <div class="field"><label>Default car</label><select name="default_car_id"></select><div class="hint">Car of the sessions recorded from the charger</div></div>
                 <div class="field"><label>Default location</label><input type="text" name="default_location" maxlength="200" placeholder="Home"></div>
+                <div class="field span-2"><label>Default provider</label><input type="text" name="default_provider" maxlength="200" list="dl-providers-ch" placeholder="Your electricity supplier, e.g. Engie">
+                    <datalist id="dl-providers-ch"></datalist><div class="hint">Who supplies the electricity: set on the sessions made with this charger</div></div>
                 <div class="field span-all"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
                 <div class="field span-all"><label class="check"><input type="checkbox" name="active" checked> Active (offered in the session form)</label></div>
             </div>
@@ -94,6 +96,9 @@
         document.getElementById('chf-title').textContent = c ? `Edit ${c.name}` : 'New charger';
         document.getElementById('chf-delete').style.display = c ? '' : 'none';
         document.getElementById('dl-companies').innerHTML = [...new Set(chargers.map(x => x.reimbursement_company).filter(Boolean))].map(v => `<option value="${EV.esc(v)}">`).join('');
+        EV.api('GET', '/api/sessions/suggestions').then(sg => {
+            document.getElementById('dl-providers-ch').innerHTML = sg.providers.map(v => `<option value="${EV.esc(v)}">`).join('');
+        }).catch(() => {});
         form.default_car_id.innerHTML = '<option value="">— none —</option>' + cars.map(x => `<option value="${x.id}">${EV.esc(x.name)}</option>`).join('');
         if (c) EV.fillForm(form, c); else { form.active.checked = true; form.uses_home_tariff.checked = true; }
         EV.openModal('charger-modal');
@@ -119,7 +124,7 @@
                 <td><strong>🔌 ${EV.esc(c.name)}</strong>${c.notes ? `<br><span class="muted small">${EV.esc(c.notes)}</span>` : ''}</td>
                 <td>${EV.esc([c.brand, c.model].filter(Boolean).join(' '))}</td>
                 <td class="hide-sm">${EV.esc(c.serial_number || '')}</td>
-                <td>${EV.esc(c.reimbursement_company || '—')}</td>
+                <td>${EV.esc(c.reimbursement_company || '—')}${c.default_provider ? `<br><span class="muted small">Provider: ${EV.esc(c.default_provider)}</span>` : ''}</td>
                 <td>${c.uses_home_tariff ? '🏠 Home tariff' : '<span class="muted">Cost entered</span>'}</td>
                 <td class="num">${c.sessions ? `<a href="/sessions?charger_id=${c.id}">${EV.num(c.sessions)}</a>` : '0'}</td>
                 <td class="num hide-sm">${EV.num(c.kwh, 1)}</td>

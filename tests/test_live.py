@@ -50,7 +50,10 @@ def fake(monkeypatch):
 
 @pytest.fixture()
 def charger(client, car, fake):
-    c = client.post("/api/chargers", json={"name": "Ohme Home/Go", "reimbursement_company": "Enco e-Mobility", "default_car_id": car["id"], "default_location": "Home"}).json()
+    c = client.post(
+        "/api/chargers",
+        json={"name": "Ohme Home/Go", "reimbursement_company": "Enco e-Mobility", "default_car_id": car["id"], "default_location": "Home", "default_provider": "Engie"},
+    ).json()
     r = client.put(f"/api/chargers/{c['id']}/connection", json={"connector": "fake", "credentials": {"email": "me@example.com", "password": "secret"}})
     assert r.status_code == 200, r.text
     return r.json()
@@ -95,7 +98,7 @@ def test_live_session_lifecycle(client, charger):
     assert _apply(cid, LiveReading(status="charging", power_w=7200, energy_wh=1200), t0 + timedelta(minutes=11)) == "created"
     s = client.get("/api/sessions").json()[0]
     assert s["start_time"] == "22:06:00" and s["kwh"] == 1.2 and s["reimbursement_status"] == "in_progress" and s["charger_name"] == "Ohme Home/Go"
-    assert s["location"] == "Home" and s["to_reimburse"] and s["car_id"] == charger["default_car_id"]
+    assert s["location"] == "Home" and s["provider"] == "Engie" and s["to_reimburse"] and s["car_id"] == charger["default_car_id"]
     # Charging through midnight
     assert _apply(cid, LiveReading(status="charging", energy_wh=30500), t0 + timedelta(hours=4)) == "updated"
     assert _apply(cid, LiveReading(status="finished", energy_wh=30500), t0 + timedelta(hours=5)) == "updated"
@@ -176,6 +179,7 @@ def test_history_preview_and_apply(client, car, charger, fake):
     rows = {r["charge_date"]: r for r in client.get("/api/sessions").json()}
     assert rows["2026-10-05"]["kwh"] == 17.5 and rows["2026-10-05"]["reimbursement_status"] == "recorded" and rows["2026-10-05"]["end_time"] == "01:00:00"
     assert rows["2026-10-09"]["charger_name"] == "Ohme Home/Go" and rows["2026-10-09"]["kwh"] == 10.6  # linked, kWh kept
+    assert rows["2026-10-05"]["provider"] == "Engie" and rows["2026-10-09"]["provider"] == "Engie"  # the default fills an empty provider
     assert "2026-10-12" not in rows
     # Already imported sessions are recognised
     assert [i["status"] for i in client.get(url).json()["items"]] == ["imported", "match", "new"]

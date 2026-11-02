@@ -91,3 +91,22 @@ def test_import_with_charger_and_status(client, car):
     assert client.post("/api/import/sessions", json=fixed).json()["imported"] == 1
     s = client.get("/api/sessions").json()[0]
     assert s["charger_name"] == "Zaptec Go" and s["to_reimburse"] and s["reimbursement_status"] == "recorded"
+
+
+def test_default_provider_and_bulk_provider(client, car):
+    zap = client.post("/api/chargers", json={"name": "Zaptec Go", "reimbursement_company": "50five", "default_provider": " Engie "}).json()
+    assert zap["default_provider"] == "Engie"
+    a = _session(client, car["id"])  # no provider
+    b = _session(client, car["id"], provider="Luminus")  # a provider already set is kept
+    r = client.patch("/api/sessions/bulk", json={"ids": [a["id"], b["id"]], "charger_id": zap["id"]})
+    assert r.json()["updated"] == 2
+    got = {s["id"]: s["provider"] for s in client.get("/api/sessions").json()}
+    assert got == {a["id"]: "Engie", b["id"]: "Luminus"}
+
+    client.patch("/api/sessions/bulk", json={"ids": [a["id"], b["id"]], "provider": "TotalEnergies"})
+    assert {s["provider"] for s in client.get("/api/sessions").json()} == {"TotalEnergies"}
+    client.patch("/api/sessions/bulk", json={"ids": [b["id"]], "clear_provider": True})
+    assert client.get(f"/api/sessions/{b['id']}").json()["provider"] is None
+    # "  " is no provider: nothing changes
+    client.patch("/api/sessions/bulk", json={"ids": [a["id"]], "provider": "  "})
+    assert client.get(f"/api/sessions/{a['id']}").json()["provider"] == "TotalEnergies"
