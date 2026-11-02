@@ -1,3 +1,4 @@
+from conftest import role_id
 from fastapi.testclient import TestClient
 
 from ev_charge.auth import hash_password, verify_password
@@ -19,7 +20,8 @@ def test_first_run_setup(anon):
     assert anon.get("/api/cars").status_code == 401
     assert anon.post("/api/auth/setup", json={"username": "admin", "password": "short"}).status_code == 422
     assert anon.post("/api/auth/setup", json={"username": "Admin", "password": ADMIN_PASSWORD}).status_code == 201
-    assert anon.get("/api/auth/me").json()["role"] == "admin"
+    me = anon.get("/api/auth/me").json()
+    assert me["role_name"] == "Administrator" and "users:manage" in me["permissions"] and "sessions:edit" in me["all_cars"]
     assert anon.post("/api/auth/setup", json={"username": "other", "password": ADMIN_PASSWORD}).status_code == 409  # only once
 
 
@@ -56,22 +58,28 @@ def test_cross_site_writes_refused(client):
 
 
 def test_user_management(client, car):
-    r = client.post("/api/users", json={"username": "Dave", "role": "driver", "password": "driver-password", "car_ids": [car["id"]]})
-    assert r.status_code == 201 and r.json()["username"] == "dave" and r.json()["car_ids"] == [car["id"]]
+    driver, admin_role = role_id("Driver"), role_id("Administrator")
+    body = {"username": "Dave", "role_id": driver, "password": "driver-password", "grants": [{"car_id": car["id"], "role_id": driver}]}
+    r = client.post("/api/users", json=body)
+    assert r.status_code == 201 and r.json()["username"] == "dave" and r.json()["grants"] == [{"car_id": car["id"], "role_id": driver}]
+    assert r.json()["role_name"] == "Driver" and r.json()["has_password"]
     assert client.post("/api/users", json={"username": "dave", "password": "driver-password"}).status_code == 409
-    assert client.post("/api/users", json={"username": "eve"}).status_code == 422  # no password
-    assert client.get(f"/api/cars/{car['id']}").json()["drivers"] == ["dave"]
+    sso_only = client.post("/api/users", json={"username": "eve"})  # no password: single sign-on only
+    assert sso_only.status_code == 201 and not sso_only.json()["has_password"]
+    assert client.post("/api/auth/login", json={"username": "eve", "password": ""}).status_code in (401, 422)
+    assert client.post("/api/users", json={"username": "x1", "role_id": 999}).status_code == 422
+    assert client.get(f"/api/cars/{car['id']}").json()["drivers"] == ["dave (Driver)"]
     users = client.get("/api/users").json()
     admin = next(u for u in users if u["username"] == "admin")
-    # The last active administrator can't be demoted or disabled, nor delete themselves
-    assert client.put(f"/api/users/{admin['id']}", json={"username": "admin", "role": "driver"}).status_code == 409
-    assert client.put(f"/api/users/{admin['id']}", json={"username": "admin", "role": "admin", "active": False}).status_code == 409
+    # The last user who can manage users can't be demoted, disabled or deleted
+    assert client.put(f"/api/users/{admin['id']}", json={"username": "admin", "role_id": driver}).status_code == 409
+    assert client.put(f"/api/users/{admin['id']}", json={"username": "admin", "role_id": admin_role, "active": False}).status_code == 409
     assert client.delete(f"/api/users/{admin['id']}").status_code == 409
     # Disabling a user signs them out
     dave_client = TestClient(app)
     assert dave_client.post("/api/auth/login", json={"username": "dave", "password": "driver-password"}).status_code == 200
     dave = r.json()
-    assert client.put(f"/api/users/{dave['id']}", json={"username": "dave", "role": "driver", "active": False}).status_code == 200
+    assert client.put(f"/api/users/{dave['id']}", json={"username": "dave", "role_id": driver, "active": False}).status_code == 200
     assert dave_client.get("/api/auth/me").status_code == 401
     assert dave_client.post("/api/auth/login", json={"username": "dave", "password": "driver-password"}).status_code == 401
     dave_client.close()

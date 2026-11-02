@@ -11,10 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import creg
-from ..auth import current_user, require_admin
+from ..auth import Principal, current_user, require
 from ..config import CONFIG
 from ..database import get_db
-from ..models import ChargeSession, Tariff, User
+from ..models import ChargeSession, Tariff
 from ..pricing import Pricing, get_setting, set_setting
 from ..schemas import CregApply, CregRegion, TariffIn, TariffOut
 
@@ -40,7 +40,7 @@ def _check(db: Session, body: TariffIn, exclude_id: int | None = None) -> None:
 
 
 @router.get("", response_model=list[TariffOut])
-def list_tariffs(_: User = Depends(current_user), db: Session = Depends(get_db)) -> list[TariffOut]:
+def list_tariffs(_: Principal = Depends(current_user), db: Session = Depends(get_db)) -> list[TariffOut]:
     pricing = Pricing(db)
     usage: dict[int, list[float]] = {}
     for s in db.scalars(select(ChargeSession)):
@@ -58,7 +58,7 @@ def list_tariffs(_: User = Depends(current_user), db: Session = Depends(get_db))
 
 
 @router.post("", response_model=TariffOut, status_code=201)
-def create_tariff(body: TariffIn, _: User = Depends(require_admin), db: Session = Depends(get_db)) -> TariffOut:
+def create_tariff(body: TariffIn, _: Principal = Depends(require("tariffs:manage")), db: Session = Depends(get_db)) -> TariffOut:
     _check(db, body)
     t = Tariff(**body.model_dump())
     db.add(t)
@@ -67,7 +67,7 @@ def create_tariff(body: TariffIn, _: User = Depends(require_admin), db: Session 
 
 
 @router.put("/{tariff_id:int}", response_model=TariffOut)
-def update_tariff(tariff_id: int, body: TariffIn, _: User = Depends(require_admin), db: Session = Depends(get_db)) -> TariffOut:
+def update_tariff(tariff_id: int, body: TariffIn, _: Principal = Depends(require("tariffs:manage")), db: Session = Depends(get_db)) -> TariffOut:
     t = db.get(Tariff, tariff_id)
     if t is None:
         raise HTTPException(404, "Tariff not found")
@@ -79,7 +79,7 @@ def update_tariff(tariff_id: int, body: TariffIn, _: User = Depends(require_admi
 
 
 @router.delete("/{tariff_id:int}", status_code=204)
-def delete_tariff(tariff_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)) -> Response:
+def delete_tariff(tariff_id: int, _: Principal = Depends(require("tariffs:manage")), db: Session = Depends(get_db)) -> Response:
     t = db.get(Tariff, tariff_id)
     if t is None:
         raise HTTPException(404, "Tariff not found")
@@ -129,7 +129,7 @@ def _creg_preview(db: Session, quarters: list[creg.QuarterRate], region: str, so
 
 
 @router.get("/creg")
-async def creg_preview(region: CregRegion | None = None, _: User = Depends(require_admin), db: Session = Depends(get_db)) -> dict[str, Any]:
+async def creg_preview(region: CregRegion | None = None, _: Principal = Depends(require("tariffs:manage")), db: Session = Depends(get_db)) -> dict[str, Any]:
     """Fetch the CREG page and compare its quarterly tariffs for a region with the stored ones (nothing is saved)."""
     region = region or get_setting(db, "creg_region", "wallonia")
     try:
@@ -141,7 +141,9 @@ async def creg_preview(region: CregRegion | None = None, _: User = Depends(requi
 
 
 @router.post("/creg/upload")
-async def creg_preview_upload(region: CregRegion = Form(...), file: UploadFile = File(...), _: User = Depends(require_admin), db: Session = Depends(get_db)) -> dict[str, Any]:
+async def creg_preview_upload(
+    region: CregRegion = Form(...), file: UploadFile = File(...), _: Principal = Depends(require("tariffs:manage")), db: Session = Depends(get_db)
+) -> dict[str, Any]:
     """Same preview from the CREG page saved in a browser (when this server can't reach the internet)."""
     raw = await file.read(creg.MAX_PAGE_BYTES + 1)
     if len(raw) > creg.MAX_PAGE_BYTES:
@@ -154,7 +156,7 @@ async def creg_preview_upload(region: CregRegion = Form(...), file: UploadFile =
 
 
 @router.post("/creg/apply")
-def creg_apply(body: CregApply, _: User = Depends(require_admin), db: Session = Depends(get_db)) -> dict[str, Any]:
+def creg_apply(body: CregApply, _: Principal = Depends(require("tariffs:manage")), db: Session = Depends(get_db)) -> dict[str, Any]:
     """Create the selected quarters, or update the price of a quarter already stored with the same dates."""
     created, updated, skipped = 0, 0, []
     note = f"Imported from the CREG ({body.source or CONFIG.creg_url}) on {datetime.now(UTC).date().isoformat()}"

@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Roles · EV Charge{% endblock %}
+{% block head %}
+<style>
+    .perm-group { margin-bottom: 10px; }
+    .perm-group h4 { font-size: var(--font-sm); color: var(--text-secondary); margin: 8px 0 4px; }
+    .perm-group label { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; cursor: pointer; }
+    .perm-group code { font-size: var(--font-xs); color: var(--text-muted); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="content">
+    <div class="page-head">
+        <h2>Roles &amp; permissions</h2>
+        <button class="btn" id="add-role">＋ Add a role</button>
+    </div>
+    <p class="muted small" style="margin-bottom:12px">A role is a set of permissions. Given as a user's <b>global role</b>, its app-wide permissions apply, and its car permissions apply to
+        <b>every car</b> when <i>all cars</i> is ticked. Given <b>on a car</b> (Users page), only its car permissions apply, on that car.</p>
+    <div class="table-wrap" id="roles-table"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="modal" id="role-modal">
+    <div class="modal-box" style="max-width:760px">
+        <h3><span id="rf-title">Role</span><button class="icon-btn" data-close title="Close">✕</button></h3>
+        <div class="form-error"></div>
+        <form id="role-form" autocomplete="off">
+            <div class="form-grid">
+                <div class="field"><label>Name *</label><input type="text" name="name" required maxlength="50" autofocus></div>
+                <div class="field span-2"><label>Description</label><input type="text" name="description" maxlength="300"></div>
+                <div class="field span-all"><label class="check"><input type="checkbox" id="rf-all"> Everything (<code>*</code>): all permissions, present and future</label></div>
+            </div>
+            <div class="form-grid" id="rf-perms" style="grid-template-columns:1fr 1fr;margin-top:8px">
+                <fieldset><legend>App-wide permissions</legend><div id="rf-global"></div></fieldset>
+                <fieldset><legend>Car permissions</legend><div id="rf-car"></div>
+                    <label class="check" style="margin-top:10px"><input type="checkbox" name="all_cars"> <span>As a global role, on <b>all cars</b></span></label></fieldset>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-danger left" id="rf-delete">🗑 Delete</button>
+                <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+                <button type="submit" class="btn">💾 Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+    const form = document.getElementById('role-form');
+    let roles = [], catalogue = { global: [], car: [] }, editing = null;
+    const label = (name) => [...catalogue.global, ...catalogue.car].find(p => p.name === name)?.label || name;
+
+    function permList(list, granted) {
+        const groups = {};
+        list.forEach(p => { (groups[p.group] = groups[p.group] || []).push(p); });
+        return Object.entries(groups).map(([g, ps]) => `<div class="perm-group"><h4>${EV.esc(g)}</h4>
+            ${ps.map(p => `<label><input type="checkbox" data-perm="${p.name}" ${granted.has(p.name) || granted.has(p.name.split(':')[0] + ':*') ? 'checked' : ''}>
+                <span>${EV.esc(p.label)} <code>${p.name}</code></span></label>`).join('')}</div>`).join('');
+    }
+    function toggleAll() {
+        const all = document.getElementById('rf-all').checked;
+        document.querySelectorAll('#rf-perms input[data-perm]').forEach(i => { i.disabled = all; if (all) i.checked = true; });
+    }
+    function open(r) {
+        editing = r;
+        form.reset();
+        document.getElementById('rf-title').textContent = r ? `Edit ${r.name}` : 'New role';
+        document.getElementById('rf-delete').style.display = r && !r.builtin ? '' : 'none';
+        const granted = new Set(r ? r.permissions : ['car:view']);
+        document.getElementById('rf-global').innerHTML = permList(catalogue.global, granted);
+        document.getElementById('rf-car').innerHTML = permList(catalogue.car, granted);
+        if (r) EV.fillForm(form, r);
+        document.getElementById('rf-all').checked = granted.has('*');
+        toggleAll();
+        EV.openModal('role-modal');
+    }
+    function render() {
+        document.getElementById('roles-table').innerHTML = `<table><thead><tr><th>Role</th><th>Permissions</th><th>Scope</th><th class="num">Users</th><th class="num">Car accesses</th><th></th></tr></thead><tbody>
+            ${roles.map(r => `<tr>
+                <td><strong>${EV.esc(r.name)}</strong>${r.builtin ? ' <span class="badge">built-in</span>' : ''}${r.description ? `<br><span class="muted small">${EV.esc(r.description)}</span>` : ''}</td>
+                <td class="small">${r.permissions.includes('*') ? '<b>Everything</b>' : r.permissions.map(p => EV.esc(label(p))).join(' · ') || '<span class="muted">none</span>'}</td>
+                <td>${r.all_cars ? '<span class="badge badge-info">all cars</span>' : '<span class="muted small">per car</span>'}</td>
+                <td class="num">${EV.num(r.users)}</td><td class="num">${EV.num(r.car_grants)}</td>
+                <td><button class="btn btn-ghost btn-sm" data-edit="${r.id}">✏ Edit</button></td></tr>`).join('')}</tbody></table>`;
+    }
+    async function load() {
+        try { [roles, catalogue] = await Promise.all([EV.api('GET', '/api/roles'), EV.api('GET', '/api/roles/permissions')]); render(); }
+        catch (err) { EV.toast(err.message, true); }
+    }
+    document.getElementById('rf-all').addEventListener('change', toggleAll);
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = { name: form.name.value, description: form.description.value, all_cars: form.all_cars.checked,
+            permissions: document.getElementById('rf-all').checked ? ['*'] : [...document.querySelectorAll('#rf-perms input[data-perm]:checked')].map(i => i.dataset.perm) };
+        try {
+            editing ? await EV.api('PUT', `/api/roles/${editing.id}`, body) : await EV.api('POST', '/api/roles', body);
+            EV.toast(`${body.name} saved`);
+            EV.closeModal('role-modal');
+            load();
+        } catch (err) { EV.formError('role-modal', err); }
+    });
+    document.getElementById('rf-delete').addEventListener('click', async () => {
+        if (!editing || !confirm(`Delete the role ${editing.name}?`)) return;
+        try { await EV.api('DELETE', `/api/roles/${editing.id}`); EV.toast('Role deleted'); EV.closeModal('role-modal'); load(); }
+        catch (err) { EV.formError('role-modal', err); }
+    });
+    document.getElementById('add-role').addEventListener('click', () => open(null));
+    document.getElementById('roles-table').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-edit]');
+        if (b) open(roles.find(r => r.id === Number(b.dataset.edit)));
+    });
+    load();
+})();
+</script>
+{% endblock %}

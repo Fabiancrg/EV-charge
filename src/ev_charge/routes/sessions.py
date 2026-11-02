@@ -11,9 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, joinedload
 
-from ..auth import car_scope, check_car_access, current_user, restrict_car_ids
+from ..auth import Principal, car_scope, check_car_access, current_user, restrict_car_ids
 from ..database import get_db
-from ..models import Car, Charger, ChargeSession, User
+from ..models import Car, Charger, ChargeSession
 from ..pricing import Pricing
 from ..schemas import ReimbursementStatus, SessionBulk, SessionIn, SessionOut, default_status
 from ..services import km_since_previous, session_out, session_sort_key
@@ -21,20 +21,20 @@ from ..services import km_since_previous, session_out, session_sort_key
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
-def _get(db: Session, session_id: int, user: User) -> ChargeSession:
+def _get(db: Session, session_id: int, user: Principal, permission: str = "car:view") -> ChargeSession:
     s = db.get(ChargeSession, session_id)
     if s is None:
         raise HTTPException(404, "Session not found")
-    scope = car_scope(user)
-    if scope is not None and s.car_id not in scope:
+    if not user.can("car:view", s.car_id):
         raise HTTPException(404, "Session not found")
+    check_car_access(user, s.car_id, permission)
     return s
 
 
-def _check_car(db: Session, car_id: int, user: User) -> None:
+def _check_car(db: Session, car_id: int, user: Principal, permission: str) -> None:
     if db.get(Car, car_id) is None:
         raise HTTPException(422, "Unknown car")
-    check_car_access(user, car_id)
+    check_car_access(user, car_id, permission)
 
 
 def _check_charger(db: Session, charger_id: int | None, previous: int | None = None) -> None:
@@ -70,7 +70,7 @@ def filters(
     return Filters(car_id, date_from, date_to, to_reimburse, status, charger_id, q)
 
 
-def _filtered(db: Session, user: User, f: Filters) -> list[SessionOut]:
+def _filtered(db: Session, user: Principal, f: Filters) -> list[SessionOut]:
     all_sessions = db.scalars(select(ChargeSession).options(joinedload(ChargeSession.car))).all()
     km_prev = km_since_previous(all_sessions)  # over the whole history, not just the filtered rows
     query = select(ChargeSession).options(joinedload(ChargeSession.car))
@@ -104,7 +104,7 @@ def _filtered(db: Session, user: User, f: Filters) -> list[SessionOut]:
 def list_sessions(
     f: Filters = Depends(filters),
     limit: int | None = Query(default=None, ge=1),
-    user: User = Depends(current_user),
+    user: Principal = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> list[SessionOut]:
     rows = _filtered(db, user, f)
@@ -112,7 +112,7 @@ def list_sessions(
 
 
 @router.get("/export.csv")
-def export_csv(f: Filters = Depends(filters), user: User = Depends(current_user), db: Session = Depends(get_db)) -> Response:
+def export_csv(f: Filters = Depends(filters), user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> Response:
     rows = _filtered(db, user, f)
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")  # Excel in most European locales
@@ -135,7 +135,7 @@ def export_csv(f: Filters = Depends(filters), user: User = Depends(current_user)
 
 
 @router.get("/suggestions")
-def suggestions(car_id: int | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+def suggestions(car_id: int | None = None, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     """Values that pre-fill the session form: known locations/providers, the car's last reading,
     and per location the provider, charger and reimbursement flag used last time."""
     scope = car_scope(user)
@@ -159,15 +159,19 @@ def suggestions(car_id: int | None = None, user: User = Depends(current_user), d
 
 
 @router.get("/{session_id}", response_model=SessionOut)
-def get_session(session_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> SessionOut:
+def get_session(session_id: int, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> SessionOut:
     return session_out(_get(db, session_id, user), Pricing(db))
 
 
 @router.post("", response_model=SessionOut, status_code=201)
-def create_session(body: SessionIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> SessionOut:
-    _check_car(db, body.car_id, user)
+def create_session(body: SessionIn, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> SessionOut:
+    _check_car(db, body.car_id, user, "sessions:create")
     _check_charger(db, body.charger_id)
-    s = ChargeSession(**body.model_dump(), created_by_id=user.id)
+    values = body.model_dump()
+    if not user.can("reimbursement:manage", body.car_id):  # the reimbursement follows the defaults
+        values["to_reimburse"] = body.charger_id is not None
+        values["reimbursement_status"] = default_status(values["to_reimburse"], None, body.charger_id)
+    s = ChargeSession(**values, created_by_id=user.id)
     db.add(s)
     db.commit()
     db.refresh(s)
@@ -175,11 +179,15 @@ def create_session(body: SessionIn, user: User = Depends(current_user), db: Sess
 
 
 @router.put("/{session_id}", response_model=SessionOut)
-def update_session(session_id: int, body: SessionIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> SessionOut:
-    s = _get(db, session_id, user)
-    _check_car(db, body.car_id, user)
+def update_session(session_id: int, body: SessionIn, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> SessionOut:
+    s = _get(db, session_id, user, "sessions:edit")
+    if body.car_id != s.car_id:
+        _check_car(db, body.car_id, user, "sessions:create")
     _check_charger(db, body.charger_id, previous=s.charger_id)
-    for key, value in body.model_dump().items():
+    values = body.model_dump()
+    if not (user.can("reimbursement:manage", s.car_id) and user.can("reimbursement:manage", body.car_id)):
+        values["to_reimburse"], values["reimbursement_status"] = s.to_reimburse, s.reimbursement_status  # unchanged
+    for key, value in values.items():
         setattr(s, key, value)
     db.commit()
     db.refresh(s)
@@ -187,14 +195,18 @@ def update_session(session_id: int, body: SessionIn, user: User = Depends(curren
 
 
 @router.patch("/bulk")
-def bulk_update(body: SessionBulk, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+def bulk_update(body: SessionBulk, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     """Change the reimbursement flag, reimbursement status, charger and/or provider of the selected sessions."""
     charger = None
     if body.charger_id is not None:
         _check_charger(db, body.charger_id)
         charger = db.get(Charger, body.charger_id)
-    scope = car_scope(user)
-    rows = [s for s in db.scalars(select(ChargeSession).where(ChargeSession.id.in_(body.ids))) if scope is None or s.car_id in scope]
+    needs = []
+    if body.to_reimburse is not None or body.reimbursement_status is not None:
+        needs.append("reimbursement:manage")
+    if body.charger_id is not None or body.clear_charger or body.provider is not None or body.clear_provider:
+        needs.append("sessions:edit")
+    rows = [s for s in db.scalars(select(ChargeSession).where(ChargeSession.id.in_(body.ids))) if all(user.can(p, s.car_id) for p in needs or ["car:view"])]
     for s in rows:
         if body.clear_charger:
             s.charger_id = None
@@ -213,11 +225,11 @@ def bulk_update(body: SessionBulk, user: User = Depends(current_user), db: Sessi
         status = body.reimbursement_status if body.reimbursement_status and s.to_reimburse else s.reimbursement_status
         s.reimbursement_status = default_status(s.to_reimburse, status, s.charger_id)
     db.commit()
-    return {"updated": len(rows)}
+    return {"updated": len(rows), "skipped": len(body.ids) - len(rows)}
 
 
 @router.delete("/{session_id}", status_code=204)
-def delete_session(session_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> Response:
-    db.delete(_get(db, session_id, user))
+def delete_session(session_id: int, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> Response:
+    db.delete(_get(db, session_id, user, "sessions:edit"))
     db.commit()
     return Response(status_code=204)

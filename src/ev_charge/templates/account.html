@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}My account · EV Charge{% endblock %}
+{% block content %}
+<div class="content">
+    <div class="page-head"><h2>My account</h2><button class="btn btn-ghost" id="acc-pw">🔑 {{ 'Change password' if me.has_password else 'Set a password' }}</button></div>
+    <dl class="kv" style="max-width:520px;font-size:var(--font-base)">
+        <dt>Username</dt><dd>{{ me.username }}</dd>
+        <dt>Global role</dt><dd>{{ me.role_name or '—' }}</dd>
+        <dt>Sign-in</dt><dd>{{ 'Single sign-on' if me.sso else '' }}{{ ' + ' if me.sso and me.has_password }}{{ 'Password' if me.has_password }}</dd>
+    </dl>
+    <div id="acc-perms" class="small" style="margin-top:12px"></div>
+</div>
+
+<div class="content">
+    <div class="page-head"><h2>Where I'm signed in</h2><button class="btn btn-ghost btn-sm" id="acc-others">↪ Sign out all other sessions</button></div>
+    <div class="table-wrap" id="acc-sessions"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="content" id="acc-tokens-box">
+    <div class="page-head"><h2>API tokens</h2>{% if 'tokens:create' in can %}<button class="btn" id="acc-new-token">＋ New token</button>{% endif %}</div>
+    <p class="muted small" style="margin-bottom:10px">For scripts and other tools (e.g. Home Assistant): send <code>Authorization: Bearer evc_…</code>. A token can only do what you can, narrowed to the permissions you choose. The API is documented at <a href="/docs">/docs</a>.</p>
+    <div class="table-wrap" id="acc-tokens"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="modal" id="token-modal">
+    <div class="modal-box" style="max-width:640px">
+        <h3><span>New API token</span><button class="icon-btn" data-close title="Close">✕</button></h3>
+        <div class="form-error"></div>
+        <form id="token-form">
+            <div class="form-grid">
+                <div class="field span-2"><label>Name *</label><input type="text" name="name" required maxlength="100" placeholder="e.g. Home Assistant"></div>
+                <div class="field"><label>Expires after</label><select name="expires_days"><option value="30">30 days</option><option value="90">90 days</option><option value="365" selected>1 year</option><option value="">never</option></select></div>
+                <div class="field span-all"><label>Permissions</label><div id="tk-perms" class="form-grid" style="grid-template-columns:1fr 1fr;gap:4px 12px"></div></div>
+            </div>
+            <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn">Create</button></div>
+        </form>
+        <div id="tk-created" style="display:none">
+            <p style="margin-bottom:8px"><b>Copy the token now</b>: it won't be shown again.</p>
+            <input type="text" id="tk-value" readonly style="font-family:monospace">
+            <div class="modal-actions"><button type="button" class="btn btn-ghost" id="tk-copy">📋 Copy</button><button type="button" class="btn" data-close>Done</button></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+    let catalogue = { global: [], car: [] };
+    const when = (iso) => iso ? new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z').toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+    const label = (name) => name === '*' ? 'Everything' : ([...catalogue.global, ...catalogue.car].find(p => p.name === name)?.label || name);
+    const device = (ua) => !ua ? '—' : `${/Mobile|Android|iPhone/.test(ua) ? '📱' : '💻'} ${(ua.match(/(Firefox|Edg|Chrome|Safari)\/[\d.]+/) || [ua.slice(0, 40)])[0].replace('Edg', 'Edge')}`;
+
+    async function sessions() {
+        try {
+            const rows = await EV.api('GET', '/api/auth/sessions');
+            document.getElementById('acc-sessions').innerHTML = `<table><thead><tr><th>Browser</th><th>Signed in</th><th>Last activity</th><th class="hide-sm">IP</th><th>With</th><th></th></tr></thead><tbody>
+                ${rows.map(s => `<tr><td>${EV.esc(device(s.user_agent))}${s.current ? ' <span class="badge badge-ok">this browser</span>' : ''}</td><td>${when(s.created_at)}</td><td>${when(s.last_seen_at)}</td>
+                    <td class="hide-sm">${EV.esc(s.ip || '')}</td><td>${s.method === 'sso' ? '🔐 SSO' : 'password'}</td>
+                    <td>${s.current ? '' : `<button class="btn btn-ghost btn-sm" data-revoke="${s.id}">Sign out</button>`}</td></tr>`).join('')}</tbody></table>`;
+        } catch (err) { EV.toast(err.message, true); }
+    }
+    async function tokens() {
+        try {
+            const rows = await EV.api('GET', '/api/auth/tokens');
+            const now = Date.now();
+            document.getElementById('acc-tokens').innerHTML = rows.length ? `<table><thead><tr><th>Name</th><th>Token</th><th>Permissions</th><th>Expires</th><th>Last used</th><th></th></tr></thead><tbody>
+                ${rows.map(t => {
+                    const expired = t.expires_at && new Date(t.expires_at.endsWith('Z') || t.expires_at.includes('+') ? t.expires_at : t.expires_at + 'Z') < now;
+                    return `<tr class="${t.revoked || expired ? 'imp-above' : ''}"><td><strong>${EV.esc(t.name)}</strong></td><td><code>${EV.esc(t.prefix)}…</code></td>
+                    <td class="small">${t.permissions.map(p => EV.esc(label(p))).join(' · ')}</td><td>${t.revoked ? '<span class="badge badge-err">revoked</span>' : expired ? '<span class="badge badge-warn">expired</span>' : when(t.expires_at)}</td>
+                    <td>${when(t.last_used_at)}</td><td>${t.revoked ? '' : `<button class="btn btn-ghost btn-sm" data-token="${t.id}">Revoke</button>`}</td></tr>`;
+                }).join('')}</tbody></table>` : '<p class="muted">No token.</p>';
+        } catch (err) { EV.toast(err.message, true); }
+    }
+    function perms() {
+        const me = EV.me;
+        const mine = new Set([...me.permissions, ...me.all_cars, ...Object.values(me.car_permissions).flat()]);
+        document.getElementById('acc-perms').innerHTML = `<b>What I can do:</b> ${[...mine].map(label).join(' · ') || 'nothing yet'}`
+            + (Object.keys(me.car_permissions).length ? `<br><b>Per car:</b> ${Object.entries(me.car_permissions).map(([c, p]) => `${EV.esc((EV.cars || []).find(x => x.id === Number(c))?.name || '#' + c)}: ${p.map(label).join(', ')}`).join(' — ')}` : '')
+            + (me.all_cars.length ? `<br><b>On every car:</b> ${me.all_cars.map(label).join(', ')}` : '');
+        document.getElementById('tk-perms').innerHTML = [...catalogue.global, ...catalogue.car].filter(p => mine.has(p.name))
+            .map(p => `<label class="check"><input type="checkbox" data-perm="${p.name}" ${p.name.startsWith('car:') || p.name.startsWith('sessions:') ? 'checked' : ''}> ${EV.esc(p.label)}</label>`).join('');
+    }
+    document.getElementById('acc-sessions').addEventListener('click', async (e) => {
+        const b = e.target.closest('[data-revoke]');
+        if (!b) return;
+        try { await EV.api('DELETE', `/api/auth/sessions/${b.dataset.revoke}`); sessions(); } catch (err) { EV.toast(err.message, true); }
+    });
+    document.getElementById('acc-others').addEventListener('click', async () => {
+        try { await EV.api('POST', '/api/auth/sessions/revoke-others'); EV.toast('Other sessions signed out'); sessions(); } catch (err) { EV.toast(err.message, true); }
+    });
+    document.getElementById('acc-tokens').addEventListener('click', async (e) => {
+        const b = e.target.closest('[data-token]');
+        if (!b || !confirm('Revoke this token? Tools using it will stop working.')) return;
+        try { await EV.api('DELETE', `/api/auth/tokens/${b.dataset.token}`); tokens(); } catch (err) { EV.toast(err.message, true); }
+    });
+    document.getElementById('acc-new-token')?.addEventListener('click', () => {
+        document.getElementById('token-form').reset();
+        document.getElementById('token-form').style.display = '';
+        document.getElementById('tk-created').style.display = 'none';
+        perms();
+        EV.openModal('token-modal');
+    });
+    document.getElementById('token-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = e.target;
+        const body = { name: f.name.value, expires_days: f.expires_days.value ? Number(f.expires_days.value) : null, permissions: [...f.querySelectorAll('[data-perm]:checked')].map(i => i.dataset.perm) };
+        try {
+            const t = await EV.api('POST', '/api/auth/tokens', body);
+            f.style.display = 'none';
+            document.getElementById('tk-created').style.display = '';
+            document.getElementById('tk-value').value = t.token;
+            tokens();
+        } catch (err) { EV.formError('token-modal', err); }
+    });
+    document.getElementById('tk-copy').addEventListener('click', () => { const i = document.getElementById('tk-value'); i.select(); navigator.clipboard?.writeText(i.value); EV.toast('Copied'); });
+    document.getElementById('acc-pw').addEventListener('click', () => document.getElementById('pw-btn').click());
+    (async () => {
+        await EV.loadCars().catch(() => {});
+        catalogue = await EV.api('GET', '/api/roles/permissions');
+        perms(); sessions(); tokens();
+    })();
+})();
+</script>
+{% endblock %}

@@ -10,10 +10,9 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
-from ..auth import current_user, restrict_car_ids
+from ..auth import Principal, current_user, restrict_car_ids
 from ..config import CONFIG
 from ..database import get_db
-from ..models import User
 from ..reports import build_reimbursement, build_report
 from ..schemas import ReimbursementStatus
 
@@ -32,7 +31,7 @@ def report(
     car_id: list[int] | None = Query(default=None),
     date_from: date | None = None,
     date_to: date | None = None,
-    user: User = Depends(current_user),
+    user: Principal = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     return build_report(db, restrict_car_ids(user, car_id), date_from, date_to)
@@ -46,7 +45,7 @@ def reimbursement(
     status: list[ReimbursementStatus] | None = Query(default=None),
     company: str | None = Query(default=None, description="Reimbursing company of the charger; empty: sessions without a charger"),
     fmt: Literal["json", "csv", "xlsx"] = "json",
-    user: User = Depends(current_user),
+    user: Principal = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any] | Response:
     data = build_reimbursement(db, restrict_car_ids(user, car_id), date_from, date_to, status, company)

@@ -17,12 +17,19 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .config import CONFIG
 from .database import SessionLocal, init_db
-from .routes import auth, cars, chargers, imports, reports, sessions, tariffs, ui, users
+from .routes import audit as audit_routes
+from .routes import auth, cars, chargers, imports, reports, roles, sessions, sso, tariffs, ui, users
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     init_db()
+    from .audit import purge
+    from .permissions import ensure_builtin_roles
+
+    with SessionLocal() as db:
+        ensure_builtin_roles(db)
+        purge(db, CONFIG.audit_retention_days)
     poller = None
     if CONFIG.charger_polling:
         from .live import poll_loop
@@ -38,8 +45,19 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
 
 app = FastAPI(title="EV Charge", version=__version__, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
-for module in (auth, users, cars, chargers, sessions, tariffs, imports, reports, ui):
+for module in (auth, sso, users, roles, audit_routes, cars, chargers, sessions, tariffs, imports, reports, ui):
     app.include_router(module.router)
+
+
+@app.middleware("http")
+async def audit_changes(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    """Record the changes made through the API in the audit log (who, what, when)."""
+    response = await call_next(request)
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        from .audit import record_change
+
+        await asyncio.to_thread(record_change, SessionLocal, request, response.status_code)
+    return response
 
 
 @app.middleware("http")

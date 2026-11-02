@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Single sign-on · EV Charge{% endblock %}
+{% block content %}
+<div class="content">
+    <div class="page-head"><h2>Single sign-on (OpenID Connect)</h2></div>
+    <p class="muted small" style="margin-bottom:12px">Sign in with <b>Authelia</b> (or Keycloak, Entra ID, Google…): the sign-in page shows a button that sends users to the identity provider.
+        Users are found by their single sign-on account, else linked by username or e-mail, else created. Provider <b>groups</b> can set the global role.</p>
+    <div class="form-error" id="sso-error"></div>
+    <form id="sso-form" autocomplete="off">
+        <fieldset><legend>Provider</legend>
+            <div class="form-grid">
+                <div class="field span-all"><label class="check"><input type="checkbox" name="enabled"> Enable single sign-on</label></div>
+                <div class="field"><label>Button name</label><input type="text" name="name" maxlength="50" placeholder="Authelia"></div>
+                <div class="field span-2"><label>Issuer URL *</label><input type="text" name="issuer" maxlength="300" placeholder="https://auth.example.com"><div class="hint">Its /.well-known/openid-configuration is read</div></div>
+                <div class="field"><label>Client ID *</label><input type="text" name="client_id" maxlength="200" placeholder="ev-charge"></div>
+                <div class="field"><label>Client secret *</label><input type="password" name="client_secret" maxlength="500" autocomplete="new-password"><div class="hint" id="sso-secret-hint"></div></div>
+                <div class="field"><label>Client authentication</label><select name="auth_method"><option value="client_secret_basic">client_secret_basic</option><option value="client_secret_post">client_secret_post</option></select></div>
+                <div class="field span-2"><label>Scopes</label><input type="text" name="scopes" maxlength="300"></div>
+                <div class="field span-2"><label>Redirect URI</label><input type="text" name="redirect_uri" maxlength="300"><div class="hint" id="sso-callback-hint"></div></div>
+                <div class="field"><label>Username claim</label><input type="text" name="username_claim" maxlength="50"></div>
+                <div class="field"><label>Groups claim</label><input type="text" name="groups_claim" maxlength="50"></div>
+                <div class="field span-all"><button type="button" class="btn btn-ghost" id="sso-test">🔎 Test the provider</button> <span class="small" id="sso-test-out"></span></div>
+            </div>
+        </fieldset>
+        <fieldset><legend>Accounts and roles</legend>
+            <div class="form-grid">
+                <div class="field span-all"><label class="check"><input type="checkbox" name="auto_create"> Create the EV Charge account at the first sign-in</label></div>
+                <div class="field span-2"><label>Global role of new users</label><select name="default_role_id"></select><div class="hint">Cars are then given on the Users page (or by a group below)</div></div>
+                <div class="field span-all"><label>Group → global role (applied at each sign-in, first match wins)</label>
+                    <div id="sso-groups"></div>
+                    <button type="button" class="btn btn-ghost btn-sm" id="sso-add-group">＋ Add a mapping</button></div>
+                <div class="field span-all"><label class="check"><input type="checkbox" name="local_login"> Also allow username / password sign-in</label>
+                    <div class="hint">Untick to make single sign-on the only way in. If you get locked out, set <code>"allow_local_login": true</code> in config.json (or ALLOW_LOCAL_LOGIN=1) and restart.<span id="sso-override"></span></div></div>
+            </div>
+        </fieldset>
+        <div class="modal-actions"><button type="submit" class="btn">💾 Save</button></div>
+    </form>
+</div>
+<div class="content">
+    <div class="page-head"><h2>Authelia configuration</h2></div>
+    <p class="muted small" style="margin-bottom:8px">Add EV Charge as an OpenID Connect client in Authelia's <code>configuration.yml</code> (generate the secret's digest with <code>authelia crypto hash generate pbkdf2</code>), then restart Authelia:</p>
+    <pre id="authelia-yaml" style="background:var(--bg-surface-alt);padding:12px;border-radius:8px;overflow:auto;font-size:var(--font-sm)"></pre>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+    const form = document.getElementById('sso-form');
+    let roles = [], cfg = null;
+    const roleOptions = (sel) => '<option value="">— none —</option>' + roles.map(r => `<option value="${r.id}" ${r.id === sel ? 'selected' : ''}>${EV.esc(r.name)}</option>`).join('');
+    function groupRow(g = {}) {
+        const div = document.createElement('div');
+        div.style.cssText = 'display:flex;gap:8px;margin-bottom:6px';
+        div.innerHTML = `<input type="text" data-group placeholder="Group, e.g. ev-admins" value="${EV.esc(g.group || '')}" style="flex:1">
+            <select data-group-role style="flex:1">${roleOptions(g.role_id)}</select><button type="button" class="icon-btn" title="Remove">✕</button>`;
+        div.querySelector('button').addEventListener('click', () => div.remove());
+        document.getElementById('sso-groups').appendChild(div);
+    }
+    function yaml() {
+        const redirect = form.redirect_uri.value || cfg.callback_url;
+        document.getElementById('authelia-yaml').textContent = `identity_providers:
+  oidc:
+    clients:
+      - client_id: '${form.client_id.value || 'ev-charge'}'
+        client_name: 'EV Charge'
+        client_secret: '$pbkdf2-sha512$...'   # digest of the secret entered above
+        public: false
+        authorization_policy: 'two_factor'
+        require_pkce: true
+        pkce_challenge_method: 'S256'
+        redirect_uris:
+          - '${redirect}'
+        scopes: [${(form.scopes.value || 'openid profile email groups').split(/\s+/).map(s => `'${s}'`).join(', ')}]
+        response_types: ['code']
+        grant_types: ['authorization_code']
+        token_endpoint_auth_method: '${form.auth_method.value}'`;
+    }
+    function body() {
+        const b = EV.formData(form);
+        b.default_role_id = b.default_role_id ? Number(b.default_role_id) : null;
+        b.group_roles = [...document.querySelectorAll('#sso-groups > div')].map(d => ({ group: d.querySelector('[data-group]').value.trim(), role_id: Number(d.querySelector('[data-group-role]').value) }))
+            .filter(g => g.group && g.role_id);
+        return b;
+    }
+    async function load() {
+        try {
+            [cfg, roles] = await Promise.all([EV.api('GET', '/api/settings/sso'), EV.api('GET', '/api/roles')]);
+            form.default_role_id.innerHTML = roleOptions(cfg.default_role_id);
+            EV.fillForm(form, { ...cfg, client_secret: '' });
+            form.default_role_id.value = cfg.default_role_id ?? '';
+            document.getElementById('sso-groups').innerHTML = '';
+            (cfg.group_roles || []).forEach(groupRow);
+            document.getElementById('sso-secret-hint').textContent = cfg.has_secret ? 'Stored (encrypted): leave empty to keep it' : 'Not set yet';
+            document.getElementById('sso-callback-hint').textContent = `Empty: ${cfg.callback_url} — set it when EV Charge is behind a reverse proxy with another public URL`;
+            document.getElementById('sso-override').textContent = cfg.allow_local_login_override ? ' (allow_local_login is currently on in config.json)' : '';
+            yaml();
+        } catch (err) { EV.toast(err.message, true); }
+    }
+    form.addEventListener('input', yaml);
+    document.getElementById('sso-add-group').addEventListener('click', () => groupRow());
+    document.getElementById('sso-test').addEventListener('click', async () => {
+        const out = document.getElementById('sso-test-out');
+        out.textContent = 'Reading…';
+        try {
+            const d = await EV.api('POST', '/api/settings/sso/test', body());
+            out.innerHTML = `<span class="badge badge-ok">✓ Found</span> issuer ${EV.esc(d.issuer)}${(d.scopes_supported || []).includes('groups') ? ' · supports groups' : ''}`;
+        } catch (err) { out.innerHTML = `<span class="badge badge-err">✖</span> ${EV.esc(err.message)}`; }
+    });
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const box = document.getElementById('sso-error');
+        box.style.display = 'none';
+        try { await EV.api('PUT', '/api/settings/sso', body()); EV.toast('Single sign-on settings saved'); load(); }
+        catch (err) { box.textContent = err.message; box.style.display = 'block'; }
+    });
+    load();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Audit log · EV Charge{% endblock %}
+{% block content %}
+<div class="content">
+    <div class="page-head"><h2>Audit log</h2><span class="muted small">Sign-ins, account and permission changes, and every change made through the app or the API</span></div>
+    <div class="filters">
+        <div class="field"><label>Action</label><select id="a-action"><option value="">All</option></select></div>
+        <div class="field"><label>User</label><input type="text" id="a-user" placeholder="username"></div>
+        <div class="field"><label>From</label><input type="date" id="a-from"></div>
+        <div class="field"><label>To</label><input type="date" id="a-to"></div>
+        <div class="field grow"><label>Search</label><input type="search" id="a-q" placeholder="target, details, IP…"></div>
+    </div>
+    <div class="table-wrap" id="a-table"><p class="muted">Loading…</p></div>
+    <div class="pager" id="a-pager"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+    const PAGE = 100;
+    let offset = 0;
+    const $ = (id) => document.getElementById(id);
+    const when = (iso) => new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z').toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' });
+    const badge = (a) => a.startsWith('login.failed') ? 'badge-err' : a.startsWith('login') ? 'badge-ok' : a.match(/delete|revoked|signed_out/) ? 'badge-warn' : 'badge-info';
+    async function load() {
+        const p = new URLSearchParams({ limit: PAGE, offset });
+        if ($('a-action').value) p.set('action', $('a-action').value);
+        if ($('a-user').value.trim()) p.set('username', $('a-user').value.trim());
+        if ($('a-from').value) p.set('date_from', $('a-from').value);
+        if ($('a-to').value) p.set('date_to', $('a-to').value);
+        if ($('a-q').value.trim()) p.set('q', $('a-q').value.trim());
+        let d;
+        try { d = await EV.api('GET', `/api/audit?${p}`); } catch (err) { EV.toast(err.message, true); return; }
+        const sel = $('a-action'), cur = sel.value;
+        const groups = [...new Set(d.actions.map(a => a.split('.')[0] + '.'))];
+        sel.innerHTML = '<option value="">All</option>' + groups.map(g => `<option value="${g}">${g}*</option>`).join('') + d.actions.map(a => `<option value="${a}">${a}</option>`).join('');
+        sel.value = cur;
+        $('a-table').innerHTML = d.items.length ? `<table><thead><tr><th>When</th><th>User</th><th>Action</th><th>Target</th><th>Details</th><th class="hide-sm">IP</th></tr></thead><tbody>
+            ${d.items.map(e => `<tr><td style="white-space:nowrap">${when(e.at)}</td><td>${EV.esc(e.username || '—')}</td>
+                <td><span class="badge ${badge(e.action)}">${EV.esc(e.action)}</span></td><td>${EV.esc(e.target || '')}</td>
+                <td class="small" style="max-width:420px;overflow-wrap:anywhere">${e.details ? EV.esc(JSON.stringify(e.details)).slice(0, 400) : ''}</td>
+                <td class="hide-sm">${EV.esc(e.ip || '')}</td></tr>`).join('')}</tbody></table>` : '<div class="empty-state"><h3>No event</h3></div>';
+        $('a-pager').innerHTML = `<span>${EV.num(Math.min(d.total, offset + 1))}–${EV.num(Math.min(d.total, offset + PAGE))} of ${EV.num(d.total)}</span>
+            <button class="btn btn-ghost" data-p="-1" ${offset ? '' : 'disabled'}>‹</button><button class="btn btn-ghost" data-p="1" ${offset + PAGE < d.total ? '' : 'disabled'}>›</button>`;
+    }
+    $('a-pager').addEventListener('click', (e) => { const b = e.target.closest('[data-p]'); if (b) { offset = Math.max(0, offset + Number(b.dataset.p) * PAGE); load(); } });
+    let t;
+    ['a-action', 'a-from', 'a-to'].forEach(id => $(id).addEventListener('change', () => { offset = 0; load(); }));
+    ['a-user', 'a-q'].forEach(id => $(id).addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { offset = 0; load(); }, 300); }));
+    load();
+})();
+</script>
+{% endblock %}

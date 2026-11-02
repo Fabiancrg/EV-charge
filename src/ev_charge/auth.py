@@ -2,7 +2,7 @@
 
 - Passwords: scrypt (standard library), salted, with the parameters stored in the hash.
 - Sessions: a random token in an HttpOnly, SameSite=Lax cookie; the database keeps only its SHA-256.
-- Roles: ``admin`` can do everything; ``driver`` works only with the cars assigned to them.
+- Permissions: see permissions.py (global role + a role per car); API tokens (Bearer evc_…) narrow them.
 """
 
 from __future__ import annotations
@@ -10,10 +10,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import secrets
 import time
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import Depends, HTTPException, Request, Response
 from sqlalchemy import delete, select
@@ -21,10 +24,10 @@ from sqlalchemy.orm import Session
 
 from .config import CONFIG
 from .database import get_db
-from .models import AuthSession, User
+from .models import ApiToken, AuthSession, User
+from .permissions import ALL_PERMISSIONS, CAR_PERMISSIONS, GLOBAL_PERMISSIONS, Grants, expand
 
 COOKIE_NAME = "ev_session"
-ROLES = ("admin", "driver")
 MIN_PASSWORD_LENGTH = 8
 _SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 
@@ -90,7 +93,7 @@ def clear_failures(keys: Iterable[str]) -> None:
 
 def authenticate(db: Session, username: str, password: str) -> User | None:
     user = db.scalar(select(User).where(User.username == username.strip().lower()))
-    if user is None:
+    if user is None or not user.has_password:
         verify_password(password, _DUMMY_HASH)
         return None
     if not verify_password(password, user.password_hash) or not user.active:
@@ -109,12 +112,21 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)  # SQLite returns naive datetimes
 
 
-def start_session(db: Session, response: Response, user: User, request: Request) -> None:
+def client_ip(request: Request) -> str | None:
+    return request.client.host if request.client else None
+
+
+def start_session(db: Session, response: Response, user: User, request: Request, method: str = "password") -> None:
     token = secrets.token_urlsafe(32)
     lifetime = timedelta(days=CONFIG.session_days)
     now = datetime.now(UTC)
     db.execute(delete(AuthSession).where(AuthSession.expires_at < now))  # housekeeping
-    db.add(AuthSession(token_hash=_token_hash(token), user_id=user.id, expires_at=now + lifetime))
+    db.add(
+        AuthSession(
+            token_hash=_token_hash(token), user_id=user.id, expires_at=now + lifetime, last_seen_at=now,
+            ip=client_ip(request), user_agent=(request.headers.get("user-agent") or "")[:300], method=method,
+        )
+    )  # fmt: skip
     user.last_login = now
     db.commit()
     response.set_cookie(
@@ -145,46 +157,162 @@ def end_all_sessions(db: Session, user_id: int, keep_request: Request | None = N
     db.execute(query)
 
 
-def user_from_request(db: Session, request: Request) -> User | None:
+def session_from_request(db: Session, request: Request) -> AuthSession | None:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         return None
     s = db.get(AuthSession, _token_hash(token))
     if s is None or _aware(s.expires_at) < datetime.now(UTC) or not s.user.active:
         return None
-    return s.user
+    now = datetime.now(UTC)
+    if s.last_seen_at is None or now - _aware(s.last_seen_at) > timedelta(minutes=1):
+        s.last_seen_at = now
+        db.commit()
+    return s
+
+
+# ── API tokens ───────────────────────────────────────────────────────────────
+
+TOKEN_PREFIX = "evc_"
+
+
+def new_api_token() -> tuple[str, str]:
+    """A fresh token (shown once) and its stored hash."""
+    raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
+    return raw, _token_hash(raw)
+
+
+def token_from_request(db: Session, request: Request) -> ApiToken | None:
+    header = request.headers.get("authorization", "")
+    if not header.lower().startswith("bearer "):
+        return None
+    raw = header[7:].strip()
+    if not raw.startswith(TOKEN_PREFIX):
+        return None
+    t = db.scalar(select(ApiToken).where(ApiToken.token_hash == _token_hash(raw)))
+    now = datetime.now(UTC)
+    if t is None or t.revoked or not t.user.active or (t.expires_at is not None and _aware(t.expires_at) < now):
+        raise HTTPException(401, "Invalid or expired API token")
+    if t.last_used_at is None or now - _aware(t.last_used_at) > timedelta(minutes=1):
+        t.last_used_at = now
+        db.commit()
+    return t
+
+
+# ── Principal: who is calling, with which permissions ────────────────────────
+
+
+def compute_grants(user: User) -> Grants:
+    g = Grants()
+    if user.role is not None:
+        perms = user.role.permission_set
+        g.global_perms = expand(perms, GLOBAL_PERMISSIONS)
+        if user.role.all_cars:
+            g.all_cars = expand(perms, CAR_PERMISSIONS)
+    for grant in user.grants:
+        if grant.role is not None:
+            g.per_car.setdefault(grant.car_id, set()).update(expand(grant.role.permission_set, CAR_PERMISSIONS))
+    return g
+
+
+@dataclass
+class Principal:
+    user: User
+    grants: Grants
+    token: ApiToken | None = None
+    session: AuthSession | None = None
+
+    # Shortcuts used by the routes
+    @property
+    def id(self) -> int:
+        return self.user.id
+
+    @property
+    def username(self) -> str:
+        return self.user.username
+
+    @property
+    def full_name(self) -> str | None:
+        return self.user.full_name
+
+    @property
+    def display_name(self) -> str:
+        return self.user.full_name or self.user.username
+
+    def has(self, permission: str) -> bool:
+        return self.grants.has(permission)
+
+    def can(self, permission: str, car_id: int) -> bool:
+        return self.grants.on_car(permission, car_id)
+
+    def cars_with(self, permission: str = "car:view") -> set[int] | None:
+        return self.grants.cars_with(permission)
+
+
+def principal_for(user: User, token: ApiToken | None = None, session: AuthSession | None = None) -> Principal:
+    grants = compute_grants(user)
+    if token is not None:
+        try:
+            allowed = set(json.loads(token.permissions or "[]"))
+        except ValueError:
+            allowed = set()
+        grants = grants.restrict(allowed)
+    return Principal(user=user, grants=grants, token=token, session=session)
+
+
+def principal_from_request(db: Session, request: Request) -> Principal | None:
+    token = token_from_request(db, request)
+    if token is not None:
+        return principal_for(token.user, token=token)
+    s = session_from_request(db, request)
+    if s is None:
+        return None
+    return principal_for(s.user, session=s)
 
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
 
 
-def current_user(request: Request, db: Session = Depends(get_db)) -> User:
-    user = user_from_request(db, request)
-    if user is None:
+def current_user(request: Request, db: Session = Depends(get_db)) -> Principal:
+    p = principal_from_request(db, request)
+    if p is None:
         raise HTTPException(401, "Sign in first")
-    return user
+    request.state.principal = p  # for the audit log
+    return p
 
 
-def require_admin(user: User = Depends(current_user)) -> User:
-    if not user.is_admin:
-        raise HTTPException(403, "Administrators only")
-    return user
+def require(*permissions: str) -> Any:
+    """Dependency: the caller needs one of these global permissions."""
+
+    def checker(principal: Principal = Depends(current_user)) -> Principal:
+        if not any(principal.has(p) for p in permissions):
+            raise HTTPException(403, f"Permission needed: {' or '.join(permissions)}")
+        return principal
+
+    return checker
 
 
-def car_scope(user: User) -> set[int] | None:
-    """Car ids the user may work with; None means every car (admin)."""
-    return None if user.is_admin else {c.id for c in user.cars}
+def browser_only(principal: Principal = Depends(current_user)) -> Principal:
+    """Account settings can't be changed with an API token."""
+    if principal.token is not None:
+        raise HTTPException(403, "Not available with an API token")
+    return principal
 
 
-def check_car_access(user: User, car_id: int) -> None:
-    scope = car_scope(user)
-    if scope is not None and car_id not in scope:
-        raise HTTPException(403, "This car is not assigned to you")
+def car_scope(principal: Principal, permission: str = "car:view") -> set[int] | None:
+    """Car ids the caller has this permission on; None means every car."""
+    return principal.cars_with(permission)
 
 
-def restrict_car_ids(user: User, requested: list[int] | None) -> list[int] | None:
-    """The car filter of a list/report request, limited to the user's cars (None: every car)."""
-    scope = car_scope(user)
+def check_car_access(principal: Principal, car_id: int, permission: str = "car:view") -> None:
+    if not principal.can(permission, car_id):
+        label = ALL_PERMISSIONS.get(permission, (permission,))[0].lower()
+        raise HTTPException(403, f"Not allowed on this car ({label})")
+
+
+def restrict_car_ids(principal: Principal, requested: list[int] | None, permission: str = "car:view") -> list[int] | None:
+    """The car filter of a list/report request, limited to the caller's cars (None: every car)."""
+    scope = car_scope(principal, permission)
     if scope is None:
         return requested or None
     if requested:

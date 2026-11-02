@@ -198,7 +198,7 @@
         if (ids.length > 25 && !confirm(`${what} for ${ids.length} sessions?`)) return;
         try {
             const r = await EV.api('PATCH', '/api/sessions/bulk', { ids, ...change });
-            EV.toast(`${r.updated} session(s) updated`);
+            EV.toast(`${r.updated} session(s) updated${r.skipped ? ` — ${r.skipped} skipped (not allowed on their car)` : ''}`, !r.updated && r.skipped > 0);
             keepPage = true;
             load();
         } catch (err) { EV.toast(err.message, true); }
@@ -242,6 +242,8 @@
         importFile.value = '';  // the same file can be picked again
         if (file) EV.importWizard.open(file, { onDone: () => EV.loadCars().then(load) });
     });
+    if (!EV.canAnyCar('sessions:create')) document.getElementById('new-btn').style.display = 'none';
+    if (!EV.canAnyCar('sessions:import')) document.getElementById('import-btn').style.display = 'none';
     document.getElementById('new-btn').addEventListener('click', () => EV.openSessionForm(null, { onSaved: load }));
     document.addEventListener('ev:themechange', render);
     EV.initFilters(load).then(load);

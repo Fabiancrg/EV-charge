@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, date, datetime, time
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Table, Text, Time
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -14,13 +15,41 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-# Cars a driver may work with (admins see every car)
-user_cars = Table(
-    "user_cars",
-    Base.metadata,
-    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
-    Column("car_id", ForeignKey("cars.id", ondelete="CASCADE"), primary_key=True),
-)
+class Role(Base):
+    """A named set of permissions (see permissions.py). As a user's global role it gives its app-wide
+    permissions, and its car permissions on every car when all_cars is set; given on one car
+    (CarGrant), only its car permissions apply, on that car."""
+
+    __tablename__ = "roles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(50), unique=True)
+    description: Mapped[str | None] = mapped_column(String(300))
+    permissions: Mapped[str] = mapped_column(Text, default="[]")  # JSON list, wildcards "*" and "sessions:*"
+    all_cars: Mapped[bool] = mapped_column(Boolean, default=False)
+    builtin: Mapped[bool] = mapped_column(Boolean, default=False)  # created by the app (can't be deleted)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    @property
+    def permission_set(self) -> set[str]:
+        try:
+            return set(json.loads(self.permissions or "[]"))
+        except ValueError:
+            return set()
+
+
+class CarGrant(Base):
+    """A user's role on one car (table kept from the first version: user_cars)."""
+
+    __tablename__ = "user_cars"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    car_id: Mapped[int] = mapped_column(ForeignKey("cars.id", ondelete="CASCADE"), primary_key=True)
+    role_id: Mapped[int | None] = mapped_column(ForeignKey("roles.id", ondelete="CASCADE"))
+
+    user: Mapped[User] = relationship(back_populates="grants")
+    car: Mapped[Car] = relationship(back_populates="grants")
+    role: Mapped[Role | None] = relationship()
 
 
 class Car(Base):
@@ -54,7 +83,7 @@ class Car(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     sessions: Mapped[list[ChargeSession]] = relationship(back_populates="car")
-    drivers: Mapped[list[User]] = relationship(secondary=user_cars, back_populates="cars")
+    grants: Mapped[list[CarGrant]] = relationship(back_populates="car", cascade="all, delete-orphan")
 
 
 class ChargeSession(Base):
@@ -128,17 +157,22 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(50), unique=True)  # stored lower case
     full_name: Mapped[str | None] = mapped_column(String(100))
     email: Mapped[str | None] = mapped_column(String(200))
-    role: Mapped[str] = mapped_column(String(20), default="driver")  # admin | driver
-    password_hash: Mapped[str] = mapped_column(String(300))
+    # The old "role" column (admin | driver) is kept in the table but no longer used: see role_id
+    role_id: Mapped[int | None] = mapped_column(ForeignKey("roles.id", ondelete="SET NULL"))
+    password_hash: Mapped[str] = mapped_column(String(300))  # "!" = no local password (single sign-on only)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Single sign-on (OpenID Connect): the account at the identity provider
+    oidc_issuer: Mapped[str | None] = mapped_column(String(300))
+    oidc_subject: Mapped[str | None] = mapped_column(String(300), index=True)
 
-    cars: Mapped[list[Car]] = relationship(secondary=user_cars, back_populates="drivers", order_by="Car.name")
+    role: Mapped[Role | None] = relationship()
+    grants: Mapped[list[CarGrant]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
     @property
-    def is_admin(self) -> bool:
-        return self.role == "admin"
+    def has_password(self) -> bool:
+        return bool(self.password_hash) and self.password_hash != "!"
 
 
 class AuthSession(Base):
@@ -150,8 +184,44 @@ class AuthSession(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ip: Mapped[str | None] = mapped_column(String(64))
+    user_agent: Mapped[str | None] = mapped_column(String(300))
+    method: Mapped[str | None] = mapped_column(String(20))  # password | sso
 
     user: Mapped[User] = relationship()
+
+
+class ApiToken(Base):
+    """A personal API token (Authorization: Bearer evc_…). Its permissions are a subset of its owner's."""
+
+    __tablename__ = "api_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    prefix: Mapped[str] = mapped_column(String(16))  # shown to recognise the token
+    permissions: Mapped[str] = mapped_column(Text, default="[]")  # JSON list
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    user: Mapped[User] = relationship()
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, index=True)  # no foreign key: the log outlives users
+    username: Mapped[str | None] = mapped_column(String(100))
+    action: Mapped[str] = mapped_column(String(50), index=True)
+    target: Mapped[str | None] = mapped_column(String(200))  # e.g. "user:3", "car:1"
+    details: Mapped[str | None] = mapped_column(Text)  # JSON
+    ip: Mapped[str | None] = mapped_column(String(64))
 
 
 class Tariff(Base):

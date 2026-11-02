@@ -25,6 +25,9 @@ class AppConfig(BaseModel):
     currency: str = "EUR"  # Shown next to costs (ISO code, e.g. EUR, USD, CHF)
     log_level: str = "INFO"
     session_days: int = 30  # how long a sign-in lasts
+    # Re-allows username/password sign-in when single sign-on is set to be the only way in (lock-out escape)
+    allow_local_login: bool = False
+    audit_retention_days: int = 730  # audit log events older than this are deleted at startup (0: keep all)
     # Chargers connected to their cloud API (Chargers page) are read every charger_poll_seconds
     charger_polling: bool = True
     charger_poll_seconds: int = 60
@@ -48,6 +51,8 @@ class AppConfig(BaseModel):
         data = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
         if os.getenv("DATABASE_URL"):
             data["database_url"] = os.environ["DATABASE_URL"]
+        if os.getenv("ALLOW_LOCAL_LOGIN") is not None:
+            data["allow_local_login"] = os.environ["ALLOW_LOCAL_LOGIN"].lower() in ("1", "true", "yes")
         if os.getenv("CHARGER_POLLING") is not None:
             data["charger_polling"] = os.environ["CHARGER_POLLING"].lower() in ("1", "true", "yes")
         return cls(**data)

@@ -13,12 +13,18 @@
     document.getElementById('theme-toggle')?.addEventListener('click', () => EV.setTheme(EV.theme() === 'dark' ? 'light' : 'dark'));
 
     /* ── User menu: change password, sign out ─────────────────────────── */
-    EV.isAdmin = () => EV.me?.role === 'admin';
+    // Permissions of the signed-in user (see permissions.py): global ones, and per car
+    EV.can = (perm) => (EV.me?.permissions || []).includes(perm);
+    EV.canCar = (perm, carId) => (EV.me?.all_cars || []).includes(perm) || (EV.me?.car_permissions?.[carId] || []).includes(perm);
+    EV.canAnyCar = (perm) => (EV.me?.all_cars || []).includes(perm) || Object.values(EV.me?.car_permissions || {}).some(p => p.includes(perm));
     const userBtn = document.getElementById('user-btn');
-    if (userBtn) {
-        const dd = document.getElementById('user-dropdown');
-        userBtn.addEventListener('click', (e) => { e.stopPropagation(); dd.classList.toggle('open'); });
+    for (const [btnId, ddId] of [['user-btn', 'user-dropdown'], ['admin-btn', 'admin-dropdown']]) {
+        const btn = document.getElementById(btnId), dd = document.getElementById(ddId);
+        if (!btn) continue;
+        btn.addEventListener('click', (e) => { e.stopPropagation(); document.querySelectorAll('.user-dropdown.open').forEach(x => { if (x !== dd) x.classList.remove('open'); }); dd.classList.toggle('open'); });
         document.addEventListener('click', () => dd.classList.remove('open'));
+    }
+    if (userBtn) {
         document.getElementById('logout-btn').addEventListener('click', async () => {
             await fetch('/api/auth/logout', { method: 'POST' });
             location.href = '/login';
@@ -186,6 +192,10 @@
     // The reimbursement status only applies to sessions to be reimbursed
     function updateStatus() {
         const f = document.getElementById('session-form');
+        // Without the reimbursement permission on the car, the flag and status are shown read-only
+        const canReimb = EV.canCar('reimbursement:manage', Number(f.car_id.value));
+        f.to_reimburse.disabled = !canReimb;
+        f.reimbursement_status.disabled = !canReimb;
         document.getElementById('sf-status').style.display = f.to_reimburse.checked ? '' : 'none';
         if (f.to_reimburse.checked && !f.reimbursement_status.value) f.reimbursement_status.value = f.charger_id.value ? 'recorded' : 'not_recorded';
     }
@@ -222,8 +232,9 @@
         const f = document.getElementById('session-form');
         if (!f) return;
         if (!EV.cars) await EV.loadCars();
-        const active = EV.cars.filter(c => c.active || (session && c.id === session.car_id));
-        if (!active.length) { EV.toast('Add a car first (Cars page)', true); return; }
+        // New sessions: the active cars the user may add sessions to; editing: the session's car too
+        const active = EV.cars.filter(c => (c.active && EV.canCar('sessions:create', c.id)) || (session && c.id === session.car_id));
+        if (!active.length) { EV.toast('No car where you may add sessions', true); return; }
         if (!tariffs) tariffs = await EV.api('GET', '/api/tariffs').catch(() => []);
         if (!EV.chargers) await EV.loadChargers();
         fillChargers(session?.charger_id);
@@ -292,7 +303,7 @@
                 afterSave && afterSave(null);
             } catch (err) { EV.formError('session-modal', err); }
         });
-        f.car_id.addEventListener('change', () => refreshSuggestions(Number(f.car_id.value)));
+        f.car_id.addEventListener('change', () => { refreshSuggestions(Number(f.car_id.value)); updateStatus(); });
         f.start_time.addEventListener('input', updateDuration);
         f.end_time.addEventListener('input', updateDuration);
         f.kwh.addEventListener('input', () => { updateDuration(); updateHomeCost(); });
