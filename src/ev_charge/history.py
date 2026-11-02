@@ -1,8 +1,9 @@
-"""Rebuild charging sessions from a charger's hourly history, for an import the administrator confirms.
+"""Charging sessions from a charger's history, for an import the administrator confirms.
 
-Ohme only gives energy per hour (no list of sessions): consecutive hours with energy, or separated
-by at most one empty hour, make one session. Times are therefore approximate (to the hour, the end
-tightened with the active charging time of the last hour).
+- Zaptec lists its sessions: they are taken as they are (exact times and energy).
+- Ohme only gives energy per hour: consecutive hours with energy, or separated by at most one
+  empty hour, make one session. Times are then approximate (to the hour, the end tightened with
+  the active charging time of the last hour).
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ class Rebuilt:
     end: datetime
     kwh: float
     hours: int
+    exact: bool = False  # a session listed by the charger (not rebuilt from hours)
 
     @property
     def key(self) -> str:
@@ -33,9 +35,9 @@ class Rebuilt:
 
 
 def rebuild_sessions(stats: list[HourStat]) -> list[Rebuilt]:
-    out: list[Rebuilt] = []
+    out: list[Rebuilt] = [Rebuilt(start=h.start, end=h.end, kwh=h.energy_wh / 1000, hours=0, exact=True) for h in stats if h.is_session and h.energy_wh > 0]
     current: Rebuilt | None = None
-    for h in sorted((h for h in stats if h.energy_wh > 0), key=lambda h: h.start):
+    for h in sorted((h for h in stats if h.energy_wh > 0 and not h.is_session), key=lambda h: h.start):
         end = h.start + timedelta(milliseconds=h.active_ms) if 0 < h.active_ms < (h.end - h.start).total_seconds() * 1000 else h.end
         if current is not None and h.start - current.end <= MAX_GAP:
             current.end = max(current.end, end)
@@ -46,7 +48,7 @@ def rebuild_sessions(stats: list[HourStat]) -> list[Rebuilt]:
             out.append(current)
     for s in out:
         s.kwh = round(s.kwh, 3)
-    return out
+    return sorted(out, key=lambda r: r.start)
 
 
 def _ref(c: Charger, r: Rebuilt) -> str:
@@ -83,7 +85,7 @@ def preview(db: Session, c: Charger, rebuilt: list[Rebuilt], car_id: int | None)
                                           "start_time": m.start_time.strftime("%H:%M") if m.start_time else None}  # fmt: skip
         items.append({
             "key": r.key, "charge_date": r.start.date().isoformat(), "start_time": r.start.strftime("%H:%M"), "end_time": r.end.strftime("%H:%M"),
-            "kwh": r.kwh, "hours": r.hours, "status": status, "match": match,
+            "kwh": r.kwh, "hours": r.hours, "exact": r.exact, "status": status, "match": match,
         })  # fmt: skip
     return items
 
@@ -100,7 +102,7 @@ def apply(db: Session, c: Charger, rebuilt: list[Rebuilt], keys: set[str], car_i
                     car_id=car_id, charge_date=r.start.date(), location=c.default_location, kwh=r.kwh,
                     start_time=r.start.time().replace(second=0, microsecond=0), end_time=r.end.time().replace(second=0, microsecond=0),
                     to_reimburse=True, reimbursement_status="recorded", charger_id=c.id, external_ref=_ref(c, r),
-                    notes=f"Imported from the {c.name} charging history (times rounded to the hour)",
+                    notes=f"Imported from the {c.name} charging history" + ("" if r.exact else " (times rounded to the hour)"),
                 )
             )  # fmt: skip
             created += 1

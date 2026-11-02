@@ -55,8 +55,14 @@ Each session to be reimbursed has a **reimbursement status**:
 
 ## Charger connection: live sessions and history
 
-A charger can be connected to its cloud account (🔌 on the **Chargers** page, administrators). Supported today: **Ohme** (Home Pro, ePod, Home/Go…). Other chargers, such as Zaptec with its official API, can be added in `src/ev_charge/connectors/`.
+A charger can be connected to its cloud account (🔌 on the **Chargers** page, administrators). Supported: **Zaptec** and **Ohme**. Other chargers can be added in `src/ev_charge/connectors/`.
 
+- **Zaptec** (Go, Go 2, Pro…):
+  - Uses Zaptec's **official API** ([docs.zaptec.com](https://docs.zaptec.com)) with the Zaptec Portal / app e-mail and password.
+  - The login method is Zaptec's OAuth "password" grant, which Zaptec plans to replace one day.
+  - If the account holds several chargers, give the serial number (e.g. `ZAP049123`).
+  - **Live state:** the charger's operation mode, power, and energy of the current session.
+  - **History:** the exact sessions (start, end, kWh), up to 365 days back.
 - **Ohme:**
   - Ohme has no public API. EV Charge uses the open-source [`ohme`](https://github.com/dan-r/ohmepy) library (MIT), the one behind the Home Assistant integration.
   - It logs in with the **Ohme app e-mail and password**; one Ohme account is one charger.
@@ -74,8 +80,8 @@ A charger can be connected to its cloud account (🔌 on the **Chargers** page, 
 - **Dashboard:** a **Chargers** section shows each connected charger's state (charging, plugged in, finished…), power, energy of the current session, car battery % and last update. It refreshes every 30 s, and ⟳ reads the charger at once.
 - **Drivers:** they see the chargers whose default car is theirs.
 
-**History import.** 📜 on a connected charger rebuilds past sessions for a period and a car:
-- **How:** Ohme gives energy per **hour**, not a list of sessions. Consecutive hours with energy, or separated by one empty hour, make one session. Times are therefore rounded to the hour, and the end is tightened with the active charging time.
+**History import.** 📜 on a connected charger fetches past sessions for a period and a car:
+- **How:** Zaptec lists its sessions, which are taken as they are. Ohme gives energy per **hour**, not a list of sessions. Consecutive hours with energy, or separated by one empty hour, make one session. Times are therefore rounded to the hour, and the end is tightened with the active charging time.
 - **Matching:** each rebuilt session is compared with the recorded ones. It's *new*, *matches* a recorded session (same day, kWh within 10 % or 1 kWh), or was *already imported*.
 - **Applying:** the selected new sessions are added as ✓ Recorded. Selected matches that have no charger get this one, keeping their kWh. Importing the same period again adds nothing.
 

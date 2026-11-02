@@ -56,11 +56,14 @@ def charger_out(c: Charger, user: User, usage: list[ChargeSession] | None = None
     o.live = live.live_state(c) or None
     o.last_poll_at = c.last_poll_at
     o.last_poll_error = c.last_poll_error
-    if user.is_admin and c.connector:
+    if user.is_admin and c.connector and c.connector in CONNECTORS:
         try:
-            o.connector_account = decrypt_json(c.connector_secret).get("email")
+            config = decrypt_json(c.connector_secret)
         except SecretError:
-            o.connector_account = None
+            config = {}
+        plain = [f["name"] for f in map(_field, CONNECTORS[c.connector].fields) if not f["secret"]]
+        o.connector_settings = {k: config[k] for k in plain if config.get(k)}
+        o.connector_account = config.get("email")
     return o
 
 
@@ -89,7 +92,12 @@ def list_chargers(user: User = Depends(current_user), db: Session = Depends(get_
 @router.get("/connectors")
 def connector_types(_: User = Depends(current_user)) -> list[dict[str, Any]]:
     """Charger APIs EV Charge can connect to, and the credentials each needs."""
-    return [{"id": k, "label": cls.label, "fields": [{"name": n, "label": label, "secret": secret} for n, label, secret in cls.fields]} for k, cls in CONNECTORS.items()]
+    return [{"id": k, "label": cls.label, "fields": [_field(f) for f in cls.fields]} for k, cls in CONNECTORS.items()]
+
+
+def _field(f: tuple) -> dict[str, Any]:
+    """(name, label, secret[, required]) → dict."""
+    return {"name": f[0], "label": f[1], "secret": f[2], "required": f[3] if len(f) > 3 else True}
 
 
 @router.post("", response_model=ChargerOut, status_code=201)
@@ -143,8 +151,10 @@ async def set_connection(charger_id: int, body: ChargerConnection, user: User = 
         stored = decrypt_json(c.connector_secret) if c.connector == body.connector else {}
     except SecretError:
         stored = {}
-    config = {name: (body.credentials.get(name) or "").strip() or stored.get(name, "") for name, _label, _secret in cls.fields}
-    missing = [label for name, label, _secret in cls.fields if not config.get(name)]
+    fields = [_field(f) for f in cls.fields]
+    # An empty secret keeps the stored one; an empty plain field clears it
+    config = {f["name"]: (body.credentials.get(f["name"]) or "").strip() or (stored.get(f["name"], "") if f["secret"] else "") for f in fields}
+    missing = [f["label"] for f in fields if f["required"] and not config.get(f["name"])]
     if missing:
         raise HTTPException(422, f"Missing: {', '.join(missing)}")
     try:

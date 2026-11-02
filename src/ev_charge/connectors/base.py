@@ -33,12 +33,15 @@ class LiveReading:
 
 @dataclass
 class HourStat:
-    """Energy charged in one bucket of the charger's history (an hour)."""
+    """Energy charged in one bucket of the charger's history (an hour), or one whole session
+    when the charger's API lists sessions (is_session: exact start, end and energy)."""
 
     start: datetime  # local time
     end: datetime
     energy_wh: float
     active_ms: int = 0
+    is_session: bool = False
+    ref: str | None = None  # the session's id in the charger's API, when known
 
 
 class Connector(Protocol):

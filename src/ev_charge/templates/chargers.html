@@ -18,7 +18,8 @@
         <div class="form-error"></div>
         <p class="muted small" style="margin-bottom:12px">EV Charge reads the charger's cloud account to follow the <b>live session</b> (a session is created when charging starts,
             ⏳ <i>In progress</i> while plugged in, ✓ <i>Recorded</i> once unplugged) and to import its <b>charging history</b>.
-            The credentials are stored encrypted and checked now. Ohme has no official API: the connection uses the same unofficial API as the Ohme app and Home Assistant.</p>
+            The credentials are stored encrypted and checked now. <b>Zaptec</b>: official API, with the Zaptec Portal account; its history lists the exact sessions.
+            <b>Ohme</b>: no official API, the connection uses the same unofficial API as the Ohme app and Home Assistant; its history is hourly.</p>
         <form id="conn-form" autocomplete="off">
             <div class="form-grid">
                 <div class="field span-all"><label>Charger API</label><select name="connector"></select></div>
@@ -38,7 +39,7 @@
     <div class="modal-box imp-box" style="max-width:900px">
         <h3><span id="hs-title">Charging history</span><button class="icon-btn" data-close title="Close">✕</button></h3>
         <div class="form-error"></div>
-        <p class="muted small" style="margin-bottom:12px">Sessions are rebuilt from the charger's <b>hourly</b> history (consecutive hours with energy = one session), so their times are rounded to the hour.
+        <p class="muted small" style="margin-bottom:12px">Zaptec lists its sessions (exact times); Ohme only gives an <b>hourly</b> history, from which sessions are rebuilt (consecutive hours with energy = one session, times rounded to the hour).
             Each one is compared with the sessions already recorded: <b>new</b> ones can be added (✓ Recorded), <b>matching</b> ones (same day, close kWh) can be linked to this charger.</p>
         <div class="form-grid" style="align-items:end">
             <div class="field"><label>From</label><input type="date" id="hs-from"></div>
@@ -168,9 +169,10 @@
     function connFields() {
         const kind = connectors.find(k => k.id === connForm.connector.value);
         const sameKind = connFor && connFor.connector === connForm.connector.value;
-        document.getElementById('cn-fields').innerHTML = kind ? kind.fields.map(f => `<div class="field"><label>${EV.esc(f.label)}</label>
+        const stored = (sameKind && connFor.connector_settings) || {};
+        document.getElementById('cn-fields').innerHTML = kind ? kind.fields.map(f => `<div class="field ${f.required ? '' : 'span-all'}"><label>${EV.esc(f.label)}${f.required ? ' *' : ''}</label>
             <input type="${f.secret ? 'password' : 'text'}" data-cred="${f.name}" autocomplete="off" ${f.secret && sameKind ? 'placeholder="unchanged"' : ''}
-                value="${!f.secret && sameKind && f.name === 'email' ? EV.esc(connFor.connector_account || '') : ''}"></div>`).join('') : '';
+                value="${!f.secret ? EV.esc(stored[f.name] || '') : ''}"></div>`).join('') : '';
     }
     function openConn(c) {
         connFor = c;
@@ -234,7 +236,7 @@
                 const linkable = i.status === 'match' && !i.match.charger_id;
                 const selectable = i.status === 'new' || linkable;
                 return `<tr class="${selectable ? '' : 'imp-above'}"><td><input type="checkbox" data-k="${k}" ${selectable ? 'checked' : 'disabled'}></td>
-                <td>${EV.date(i.charge_date)}</td><td>${i.start_time}–${i.end_time}</td><td class="num">${EV.num(i.kwh, 3)}</td><td>${HS[i.status]}</td>
+                <td>${EV.date(i.charge_date)}</td><td>${i.start_time}–${i.end_time}${i.exact ? '' : ' <span class="muted" title="Rebuilt from hourly data">≈</span>'}</td><td class="num">${EV.num(i.kwh, 3)}</td><td>${HS[i.status]}</td>
                 <td class="small">${i.match ? `${EV.date(i.match.charge_date)}${i.match.start_time ? ' ' + i.match.start_time : ''} · ${EV.num(i.match.kwh, 3)} kWh${linkable ? ' — <i>link to this charger</i>' : (i.match.charger_id ? ' (has a charger)' : '')}` : ''}</td></tr>`;
             }).join('')}</tbody></table></div>` : ''}`;
         const boxes = () => [...hsBody.querySelectorAll('input[data-k]:not(:disabled)')];
