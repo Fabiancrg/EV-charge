@@ -68,7 +68,7 @@
         ['not_recorded', 'Not recorded', '⚠', 'badge-err'],
         ['recorded', 'Recorded', '✓', 'badge-warn'],
         ['invoiced', 'Invoiced', '🧾', 'badge-info'],
-        ['paid', 'Paid', '✔', 'badge-ok'],
+        ['paid', 'Paid', '🪙', 'badge-ok'],
     ];
     EV.statusLabel = (st) => (EV.STATUSES.find(x => x[0] === st) || [null, ''])[1];
     EV.statusBadge = (st) => {
