@@ -43,7 +43,7 @@ Each session to be reimbursed has a **reimbursement status**:
 | ⚠ **Not recorded** | The session wasn't exported to the reimbursing company |
 | ✓ **Recorded** | The charger recorded it with the reimbursing company (default for a charger's session) |
 | 🧾 **Invoiced** | The invoice from the reimbursing company was received |
-| 🪙 **Paid** | The amount was paid |
+| 💰 **Paid** | The amount was paid |
 
 - **Defaults:** a new session to be reimbursed starts as *Recorded* with a charger, *Not recorded* without one. A session not to be reimbursed has no status. After upgrading, sessions already flagged *to be reimbursed* start as *Not recorded*.
 - **Sessions page:** charger and status columns, *Status* and *Charger* filters (*Not paid yet* shows everything but *Paid*), and bulk *Set status…* / *Set charger…* for the selected rows. A typical flow is: filter a quarter → select all → *Invoiced* when the invoice arrives → *Paid* when the money is in.
