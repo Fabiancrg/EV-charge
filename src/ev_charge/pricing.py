@@ -1,4 +1,5 @@
-"""Session cost: home charging is priced at the tariff valid on the charge date; other sessions keep the cost entered."""
+"""Session cost: sessions made with a charger that uses the home tariff (home wall box, mobile charger…) are priced
+at the CREG tariff valid on the charge date; other sessions keep the cost entered."""
 
 from __future__ import annotations
 
@@ -10,11 +11,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import ChargeSession, Setting, Tariff
-
-
-def norm_location(value: str | None) -> str:
-    return " ".join((value or "").split()).casefold()
+from .models import Charger, ChargeSession, Setting, Tariff
 
 
 def get_setting(db: Session, key: str, default: Any) -> Any:
@@ -30,29 +27,24 @@ def set_setting(db: Session, key: str, value: Any) -> None:
         row.value = json.dumps(value)
 
 
-def home_locations(db: Session) -> list[str]:
-    return get_setting(db, "home_locations", ["Home"])
-
-
 @dataclass
 class Price:
     cost: float | None
     source: str | None  # "tariff" | "entered" | None
     tariff_price: float | None = None
-    home: bool = False
-    missing_tariff: bool = False  # home session with no tariff for its date
+    home: bool = False  # priced at the home tariff (made with such a charger)
+    missing_tariff: bool = False  # priced at the home tariff, but no tariff covers its date
 
 
 class Pricing:
-    """Tariffs and home locations loaded once per request."""
+    """Tariffs and chargers loaded once per request."""
 
     def __init__(self, db: Session) -> None:
         self.tariffs = sorted(db.scalars(select(Tariff)).all(), key=lambda t: t.valid_from)
-        self.home_names = home_locations(db)
-        self.home = {norm_location(x) for x in self.home_names}
+        self.tariff_chargers = {c.id for c in db.scalars(select(Charger).where(Charger.uses_home_tariff.is_(True)))}
 
-    def is_home(self, location: str | None) -> bool:
-        return bool(location) and norm_location(location) in self.home
+    def is_home(self, s: ChargeSession) -> bool:
+        return s.charger_id is not None and s.charger_id in self.tariff_chargers
 
     def tariff_on(self, day: date) -> Tariff | None:
         for t in reversed(self.tariffs):
@@ -61,7 +53,7 @@ class Pricing:
         return None
 
     def price(self, s: ChargeSession) -> Price:
-        if self.is_home(s.location):
+        if self.is_home(s):
             t = self.tariff_on(s.charge_date)
             if t is None:
                 return Price(cost=None, source=None, home=True, missing_tariff=True)

@@ -77,6 +77,16 @@ class CarOut(CarIn):
     lease: LeaseStatus | None = None
 
 
+ReimbursementStatus = Literal["in_progress", "not_recorded", "recorded", "invoiced", "paid"]
+
+
+def default_status(to_reimburse: bool, status: str | None, charger_id: int | None) -> str | None:
+    """A session to be reimbursed always has a status (recorded when made with a charger, else not recorded); others have none."""
+    if not to_reimburse:
+        return None
+    return status or ("recorded" if charger_id else "not_recorded")
+
+
 class SessionIn(BaseModel):
     car_id: int
     charge_date: date
@@ -89,8 +99,15 @@ class SessionIn(BaseModel):
     to_reimburse: bool = False
     cost: float | None = Field(default=None, ge=0)
     notes: str | None = None
+    charger_id: int | None = None  # a charger that uses the home tariff prices the session at the CREG tariff
+    reimbursement_status: ReimbursementStatus | None = None
 
-    _strip = field_validator("odometer", "location", "provider", "start_time", "end_time", "cost", "notes", mode="before")(_blank_to_none)
+    _strip = field_validator("odometer", "location", "provider", "start_time", "end_time", "cost", "notes", "charger_id", "reimbursement_status", mode="before")(_blank_to_none)
+
+    @model_validator(mode="after")
+    def _status(self) -> SessionIn:
+        self.reimbursement_status = default_status(self.to_reimburse, self.reimbursement_status, self.charger_id)  # type: ignore[assignment]
+        return self
 
 
 class SessionOut(SessionIn):
@@ -109,13 +126,18 @@ class SessionOut(SessionIn):
     price_per_kwh: float | None = None
     km_since_previous: int | None = None  # negative: odometer lower than the previous session (typo?)
     created_by: str | None = None
+    charger_name: str | None = None
+    reimbursement_company: str | None = None
 
 
-class SessionPatch(BaseModel):
-    """Bulk update of the reimbursement flag."""
+class SessionBulk(BaseModel):
+    """Bulk update of selected sessions; only the fields given are changed."""
 
-    ids: list[int] = Field(min_length=1)
-    to_reimburse: bool
+    ids: list[int] = Field(min_length=1, max_length=10_000)
+    to_reimburse: bool | None = None
+    reimbursement_status: ReimbursementStatus | None = None
+    charger_id: int | None = None
+    clear_charger: bool = False  # remove the charger (charger_id null means "unchanged")
 
 
 Role = Literal["admin", "driver"]
@@ -192,12 +214,30 @@ class TariffOut(TariffIn):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    sessions: int = 0  # home sessions priced with this tariff
+    sessions: int = 0  # sessions priced with this tariff (made with a charger using the home tariff)
     kwh: float = 0
 
 
-class HomeLocations(BaseModel):
-    locations: list[str] = Field(max_length=50)
+class ChargerIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    brand: str | None = Field(default=None, max_length=100)
+    model: str | None = Field(default=None, max_length=100)
+    serial_number: str | None = Field(default=None, max_length=100)
+    reimbursement_company: str | None = Field(default=None, max_length=100)
+    uses_home_tariff: bool = True
+    active: bool = True
+    notes: str | None = None
+
+    _strip = field_validator("name", "brand", "model", "serial_number", "reimbursement_company", "notes", mode="before")(_blank_to_none)
+
+
+class ChargerOut(ChargerIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    sessions: int = 0
+    kwh: float = 0
+    last_used: date | None = None
 
 
 CregRegion = Literal["wallonia", "brussels", "flanders"]

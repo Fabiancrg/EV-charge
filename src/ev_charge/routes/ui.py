@@ -67,6 +67,11 @@ def tariffs(request: Request, db: Session = Depends(get_db)) -> Response:
     return _page(request, db, "tariffs.html", "tariffs", admin_only=True)
 
 
+@router.get("/chargers", response_class=HTMLResponse)
+def chargers(request: Request, db: Session = Depends(get_db)) -> Response:
+    return _page(request, db, "chargers.html", "chargers", admin_only=True)
+
+
 @router.get("/users", response_class=HTMLResponse)
 def users(request: Request, db: Session = Depends(get_db)) -> Response:
     return _page(request, db, "users.html", "users", admin_only=True)

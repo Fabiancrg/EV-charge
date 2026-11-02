@@ -24,8 +24,9 @@
             <a class="btn btn-ghost" id="dl-csv">⬇ CSV</a>
         </div>
     </div>
-    {% with with_reimburse = false %}{% include "_filters.html" %}{% endwith %}
-    <p class="muted small">Sessions flagged <b>to be reimbursed</b> in the period. Home charging is priced at the home tariff of its date; other sessions at the cost entered.
+    {% with with_status = true, with_company = true %}{% include "_filters.html" %}{% endwith %}
+    <p class="muted small">Sessions flagged <b>to be reimbursed</b> in the period. Sessions made with a charger using the home tariff are priced at the CREG tariff of their date; other sessions at the cost entered.
+        Filter on the <i>reimbursing company</i> to check an invoice, and on the status to see what is still to be paid.
         Use <i>Print / PDF</i> to save the statement as a PDF.</p>
 </div>
 <div class="content statement" id="statement"><p class="muted">Loading…</p></div>
@@ -49,28 +50,34 @@
             <dl class="meta">
                 <dt>Period</dt><dd>${period}</dd>
                 <dt>Car${d.cars.length > 1 ? 's' : ''}</dt><dd>${carsTxt}</dd>
+                ${d.company !== null && d.company !== undefined ? `<dt>Reimbursed by</dt><dd>${EV.esc(d.company || 'sessions without a charger')}</dd>` : ''}
                 <dt>Prepared by</dt><dd>${EV.esc(d.prepared_by)}, ${EV.date(EV.today())}</dd>
             </dl>
-            ${t.missing_price ? `<div class="note no-print">⚠ ${t.missing_price} session(s) have no price: add the missing home tariff (Tariffs page) or enter the cost of the session. They count as 0 below.</div>` : ''}
+            ${t.missing_price ? `<div class="note no-print">⚠ ${t.missing_price} session(s) have no price: add the missing tariff (Tariffs page) or enter the cost of the session. They count as 0 below.</div>` : ''}
             ${d.rows.length ? `<div class="table-wrap"><table><thead><tr>
-                <th>Date</th>${multi ? '<th>Car</th>' : ''}<th>Location</th><th class="hide-sm">Provider</th><th class="num">Odometer</th><th class="hide-sm">Time</th>
-                <th class="num">kWh</th><th class="num">Price/kWh</th><th class="num">Amount</th></tr></thead><tbody>
+                <th>Date</th>${multi ? '<th>Car</th>' : ''}<th>Location</th><th class="hide-sm">Charger</th><th class="num">Odometer</th><th class="hide-sm">Time</th>
+                <th class="num">kWh</th><th class="num">Price/kWh</th><th class="num">Amount</th><th>Status</th></tr></thead><tbody>
                 ${d.rows.map(r => `<tr>
                     <td>${EV.date(r.charge_date)}</td>${multi ? `<td>${EV.esc(r.car_name)}</td>` : ''}
-                    <td>${r.home ? '🏠 ' : ''}${EV.esc(r.location || '')}</td><td class="hide-sm">${EV.esc(r.provider || '')}</td>
+                    <td>${r.home ? '🏠 ' : ''}${EV.esc(r.location || '')}</td><td class="hide-sm">${r.charger_name ? `🔌 ${EV.esc(r.charger_name)}${r.reimbursement_company ? `<br><span class="muted small">${EV.esc(r.reimbursement_company)}</span>` : ''}` : EV.esc(r.provider || '')}</td>
                     <td class="num">${EV.num(r.odometer)}</td><td class="hide-sm">${r.start_time ? `${r.start_time}–${r.end_time || ''}` : ''}</td>
                     <td class="num">${EV.num(r.kwh, 2)}</td>
                     <td class="num">${r.price_per_kwh != null ? EV.money(r.price_per_kwh, 4) : ''}</td>
-                    <td class="num">${r.amount != null ? EV.money(r.amount) : '<span class="badge badge-warn">no price</span>'}</td></tr>`).join('')}
+                    <td class="num">${r.amount != null ? EV.money(r.amount) : '<span class="badge badge-warn">no price</span>'}</td>
+                    <td>${EV.statusBadge(r.status)}</td></tr>`).join('')}
                 </tbody><tfoot><tr><td colspan="${multi ? 6 : 5}">Total: ${EV.num(t.sessions)} session(s)</td>
-                    <td class="num">${EV.num(t.kwh, 2)}</td><td></td><td class="num">${EV.money(t.amount)}</td></tr></tfoot></table></div>
+                    <td class="num">${EV.num(t.kwh, 2)}</td><td></td><td class="num">${EV.money(t.amount)}</td><td></td></tr></tfoot></table></div>
             <div class="summary">
-                <div class="tile"><div class="label">Home charging (tariff)</div><div class="value">${EV.money(t.home_amount)} <small>${EV.num(t.home_kwh, 1)} kWh</small></div></div>
+                <div class="tile"><div class="label">🔌 Chargers (CREG tariff)</div><div class="value">${EV.money(t.home_amount)} <small>${EV.num(t.home_kwh, 1)} kWh</small></div></div>
                 <div class="tile"><div class="label">Other charging</div><div class="value">${EV.money(t.amount - t.home_amount)} <small>${EV.num(t.kwh - t.home_kwh, 1)} kWh</small></div></div>
                 <div class="tile"><div class="label">Total to reimburse</div><div class="value">${EV.money(t.amount)}</div></div>
             </div>
+            <div class="summary">
+                ${EV.STATUSES.filter(([st]) => t.by_status[st].sessions).map(([st, label, icon]) => `<div class="tile"><div class="label">${icon} ${label}</div>
+                    <div class="value">${EV.money(t.by_status[st].amount)} <small>${EV.num(t.by_status[st].sessions)} sess.</small></div></div>`).join('')}
+            </div>
             <div class="sign"><div>Driver — date and signature</div><div>Approved by — date and signature</div></div>`
-            : '<div class="empty-state"><h3>Nothing to reimburse in this period</h3><p>Only sessions flagged “to be reimbursed” are listed.</p></div>'}`;
+            : '<div class="empty-state"><h3>Nothing to reimburse with these filters</h3><p>Only sessions flagged “to be reimbursed” are listed.</p></div>'}`;
     }
     EV.initFilters(load, 'last-quarter').then(load);
 })();

@@ -21,6 +21,21 @@
     <div class="field"><label>Reimbursement</label>
         <select id="f-reimb"><option value="">All</option><option value="true">To reimburse</option><option value="false">Not to reimburse</option></select>
     </div>
+    {% endif %}
+    {% if with_status %}
+    <div class="field"><label>Status</label>
+        <select id="f-status"><option value="">All statuses</option><option value="outstanding">Not paid yet</option>
+            <option value="in_progress">⏳ In progress</option><option value="not_recorded">⚠ Not recorded</option><option value="recorded">✓ Recorded</option>
+            <option value="invoiced">🧾 Invoiced</option><option value="paid">💰 Paid</option></select>
+    </div>
+    {% endif %}
+    {% if with_charger %}
+    <div class="field"><label>Charger</label><select id="f-charger"><option value="">All chargers</option></select></div>
+    {% endif %}
+    {% if with_company %}
+    <div class="field"><label>Reimbursed by</label><select id="f-company"><option value="__all__">All</option></select></div>
+    {% endif %}
+    {% if with_reimburse %}
     <div class="field grow"><label>Search</label><input type="search" id="f-q" placeholder="Location, provider, notes…"></div>
     {% endif %}
 </div>
@@ -50,6 +65,12 @@
         if ($('f-from').value) p.set('date_from', $('f-from').value);
         if ($('f-to').value) p.set('date_to', $('f-to').value);
         if ($('f-reimb')?.value) p.set('to_reimburse', $('f-reimb').value);
+        const st = $('f-status')?.value;
+        if (st === 'outstanding') ['in_progress', 'not_recorded', 'recorded', 'invoiced'].forEach(x => p.append('status', x));
+        else if (st) p.append('status', st);
+        if ($('f-charger')?.value) p.append('charger_id', $('f-charger').value);
+        const co = $('f-company')?.value;
+        if (co !== undefined && co !== '__all__') p.set('company', co === '__none__' ? '' : co);
         if ($('f-q')?.value.trim()) p.set('q', $('f-q').value.trim());
         return p;
     };
@@ -64,10 +85,27 @@
             const match = [...$('f-preset').options].find(o => { const r = presetRange(o.value); return r && r[0] === $('f-from').value && r[1] === $('f-to').value; });
             $('f-preset').value = match ? match.value : 'custom';
         } else {
-            $('f-preset').value = u.has('car_id') || u.has('q') || u.has('to_reimburse') ? 'all' : defaultPreset;
+            $('f-preset').value = ['car_id', 'q', 'to_reimburse', 'status', 'charger_id', 'company'].some(k => u.has(k)) ? 'all' : defaultPreset;
             [$('f-from').value, $('f-to').value] = presetRange($('f-preset').value);
         }
         if ($('f-reimb')) $('f-reimb').value = u.get('to_reimburse') || '';
+        if ($('f-status')) {
+            const sts = u.getAll('status');
+            $('f-status').value = sts.length === 4 && !sts.includes('paid') ? 'outstanding' : (sts[0] || '');
+        }
+        if ($('f-charger') || $('f-company')) {
+            const chargers = EV.chargers || await EV.loadChargers();
+            if ($('f-charger')) {
+                $('f-charger').innerHTML = '<option value="">All chargers</option><option value="0">No charger</option>' + chargers.map(c => `<option value="${c.id}">🔌 ${EV.esc(c.name)}</option>`).join('');
+                $('f-charger').value = u.get('charger_id') || '';
+            }
+            if ($('f-company')) {
+                const companies = [...new Set(chargers.map(c => c.reimbursement_company).filter(Boolean))].sort();
+                $('f-company').innerHTML = '<option value="__all__">All</option>' + companies.map(c => `<option value="${EV.esc(c)}">${EV.esc(c)}</option>`).join('') + '<option value="__none__">No charger</option>';
+                $('f-company').value = !u.has('company') ? '__all__' : (u.get('company') === '' ? '__none__' : u.get('company'));
+                if (!$('f-company').value) $('f-company').value = '__all__';
+            }
+        }
         if ($('f-q')) $('f-q').value = u.get('q') || '';
         const changed = () => { history.replaceState(null, '', `${location.pathname}?${EV.readFilters()}`); onChange(); };
         $('f-preset').addEventListener('change', () => {
@@ -75,7 +113,7 @@
             if (r) { [$('f-from').value, $('f-to').value] = r; changed(); }
         });
         [$('f-from'), $('f-to')].forEach(el => el.addEventListener('change', () => { $('f-preset').value = 'custom'; changed(); }));
-        [$('f-car'), $('f-reimb')].forEach(el => el && el.addEventListener('change', changed));
+        [$('f-car'), $('f-reimb'), $('f-status'), $('f-charger'), $('f-company')].forEach(el => el && el.addEventListener('change', changed));
         let t; $('f-q')?.addEventListener('input', () => { clearTimeout(t); t = setTimeout(changed, 250); });
     };
 })();

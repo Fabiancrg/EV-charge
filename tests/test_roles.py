@@ -21,7 +21,7 @@ def test_driver_sees_and_edits_only_assigned_cars(client, car, make_driver):
     assert dave.delete(f"/api/sessions/{other_session['id']}").status_code == 404
     body = {"car_id": other["id"], "charge_date": "2026-03-01", "kwh": 5}
     assert dave.put(f"/api/sessions/{mine.json()['id']}", json=body).status_code == 403  # can't move a session to another car
-    r = dave.patch("/api/sessions/reimburse", json={"ids": [mine.json()["id"], other_session["id"]], "to_reimburse": True})
+    r = dave.patch("/api/sessions/bulk", json={"ids": [mine.json()["id"], other_session["id"]], "to_reimburse": True})
     assert r.json()["updated"] == 1
     assert "Model 3" not in dave.get("/api/sessions/export.csv").text
 
@@ -36,7 +36,9 @@ def test_driver_admin_pages_and_apis(client, car, make_driver):
     assert dave.get("/tariffs", follow_redirects=False).headers["location"] == "/"
     assert dave.get("/api/users").status_code == 403
     assert dave.post("/api/tariffs", json={"valid_from": "2026-01-01", "price_per_kwh": 0.3}).status_code == 403
-    assert dave.put("/api/tariffs/home-locations", json={"locations": []}).status_code == 403
+    assert dave.post("/api/chargers", json={"name": "Mine"}).status_code == 403
+    assert dave.get("/api/chargers").status_code == 200  # to pick one in the session form
+    assert dave.get("/chargers", follow_redirects=False).headers["location"] == "/"
     assert dave.get("/api/tariffs").status_code == 200  # read-only
     assert dave.get("/").status_code == 200
 

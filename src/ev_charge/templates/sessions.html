@@ -11,11 +11,16 @@
             <button class="btn" id="new-btn">⚡ New session</button>
         </div>
     </div>
-    {% with with_reimburse = true %}{% include "_filters.html" %}{% endwith %}
-    <div id="bulk" style="display:none;margin-bottom:10px" class="small">
+    {% with with_reimburse = true, with_status = true, with_charger = true %}{% include "_filters.html" %}{% endwith %}
+    <div id="bulk" style="display:none;margin-bottom:10px;align-items:center;gap:8px;flex-wrap:wrap" class="small">
         <span id="bulk-count"></span>
+        <select id="bulk-status" style="width:auto;padding:5px 8px"><option value="">Set status…</option>
+            <option value="in_progress">⏳ In progress</option><option value="not_recorded">⚠ Not recorded</option><option value="recorded">✓ Recorded</option>
+            <option value="invoiced">🧾 Invoiced</option><option value="paid">💰 Paid</option></select>
+        <select id="bulk-charger" style="width:auto;padding:5px 8px"><option value="">Set charger…</option></select>
         <button class="btn btn-ghost btn-sm" data-bulk="true">💶 Mark to reimburse</button>
         <button class="btn btn-ghost btn-sm" data-bulk="false">Mark not to reimburse</button>
+        <button class="btn btn-ghost btn-sm" id="bulk-clear" title="Unselect all">✕</button>
     </div>
     <div class="table-wrap" id="table"><p class="muted">Loading…</p></div>
 </div>
@@ -41,9 +46,10 @@
         { key: 'start_time', label: 'Start–end', cls: 'hide-sm', fmt: s => s.start_time ? `${EV.time(s.start_time)}–${EV.time(s.end_time)}` : '' },
         { key: 'duration_minutes', label: 'Duration', num: true, cls: 'hide-sm', fmt: s => s.duration_minutes == null ? '' : EV.duration(s.duration_minutes) },
         { key: 'avg_power_kw', label: 'Avg kW', num: true, cls: 'hide-sm', fmt: s => EV.num(s.avg_power_kw, 1) },
-        { key: 'cost', label: 'Cost', num: true, fmt: s => s.missing_tariff ? '<span class="badge badge-warn" title="Home charging: no tariff for this date">🏠 no tariff</span>'
+        { key: 'cost', label: 'Cost', num: true, fmt: s => s.missing_tariff ? '<span class="badge badge-warn" title="Charger priced at the home tariff, but no tariff covers this date">🏠 no tariff</span>'
             : s.cost == null ? '' : `${s.cost_source === 'tariff' ? `<span title="Home tariff ${EV.money(s.tariff_price, 4)}/kWh">🏠 </span>` : ''}${EV.money(s.cost)}` },
-        { key: 'to_reimburse', label: 'Reimb.', fmt: s => s.to_reimburse ? '<span class="badge badge-info">💶 Yes</span>' : '' },
+        { key: 'charger_name', label: 'Charger', cls: 'hide-sm', fmt: s => s.charger_name ? `<span title="${EV.esc(s.reimbursement_company ? 'Reimbursed by ' + s.reimbursement_company : '')}">🔌 ${EV.esc(s.charger_name)}</span>` : '' },
+        { key: 'reimbursement_status', label: 'Reimbursement', fmt: s => s.to_reimburse ? EV.statusBadge(s.reimbursement_status) : '' },
         { key: 'created_by', label: 'Entered by', cls: 'hide-sm', fmt: s => `<span class="muted small">${EV.esc(s.created_by || '')}</span>` },
     ];
     let page = 0;
@@ -115,7 +121,7 @@
 
     function updateBulk() {
         const ids = [...selected].filter(id => rows.some(r => r.id === id));
-        document.getElementById('bulk').style.display = ids.length ? '' : 'none';
+        document.getElementById('bulk').style.display = ids.length ? 'flex' : 'none';
         document.getElementById('bulk-count').textContent = `${ids.length} selected:`;
     }
 
@@ -150,8 +156,11 @@
                 const f = document.getElementById('session-form');
                 ['location', 'provider', 'kwh', 'start_time', 'end_time', 'notes'].forEach(k => { f[k].value = k.endsWith('_time') ? EV.time(s[k]) : (s[k] ?? ''); });
                 f.cost.value = s.entered_cost ?? '';
+                f.charger_id.value = s.charger_id && EV.chargers.some(c => c.id === s.charger_id && c.active) ? s.charger_id : '';
                 f.to_reimburse.checked = s.to_reimburse;
-                f.location.dispatchEvent(new Event('input'));
+                f.reimbursement_status.value = '';  // a new session starts with its default status
+                f.charger_id.dispatchEvent(new Event('change'));
+                f.to_reimburse.dispatchEvent(new Event('change'));
             });
         } else if (act === 'edit' || e.target.tagName === 'TD') {
             EV.openSessionForm(s, { onSaved: () => { keepPage = true; load(); } });
@@ -164,17 +173,37 @@
         page = 0;
         render();
     });
-    document.getElementById('bulk').addEventListener('click', async (e) => {
-        const b = e.target.closest('[data-bulk]');
-        if (!b) return;
+    async function bulk(change) {
         const ids = [...selected].filter(id => rows.some(r => r.id === id));
+        if (!ids.length) return;
         try {
-            const r = await EV.api('PATCH', '/api/sessions/reimburse', { ids, to_reimburse: b.dataset.bulk === 'true' });
+            const r = await EV.api('PATCH', '/api/sessions/bulk', { ids, ...change });
             EV.toast(`${r.updated} session(s) updated`);
-            selected.clear();
+            keepPage = true;
             load();
         } catch (err) { EV.toast(err.message, true); }
+    }
+    document.getElementById('bulk').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-bulk]');
+        if (b) bulk({ to_reimburse: b.dataset.bulk === 'true' });
+        if (e.target.id === 'bulk-clear') { selected.clear(); render(); }
     });
+    document.getElementById('bulk-status').addEventListener('change', (e) => {
+        const st = e.target.value;
+        e.target.value = '';
+        // A status only applies to sessions to be reimbursed: setting one flags them
+        if (st) bulk({ reimbursement_status: st, to_reimburse: true });
+    });
+    document.getElementById('bulk-charger').addEventListener('change', (e) => {
+        const v = e.target.value;
+        e.target.value = '';
+        if (v === 'none') bulk({ clear_charger: true });
+        else if (v) bulk({ charger_id: Number(v) });
+    });
+    EV.loadChargers().then(list => {
+        document.getElementById('bulk-charger').innerHTML = '<option value="">Set charger…</option>' +
+            list.filter(c => c.active).map(c => `<option value="${c.id}">🔌 ${EV.esc(c.name)}</option>`).join('') + '<option value="none">Remove the charger</option>';
+    }).catch(() => {});
     const importFile = document.getElementById('import-file');
     document.getElementById('import-btn').addEventListener('click', () => importFile.click());
     importFile.addEventListener('change', () => {

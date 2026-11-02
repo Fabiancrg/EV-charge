@@ -76,9 +76,35 @@ class ChargeSession(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    charger_id: Mapped[int | None] = mapped_column(ForeignKey("chargers.id", ondelete="RESTRICT"), index=True)
+    # Where the reimbursement stands (sessions to be reimbursed): in_progress | not_recorded | recorded | invoiced | paid
+    # (in_progress: still being recorded, e.g. by a future automatic link with the charger)
+    reimbursement_status: Mapped[str | None] = mapped_column(String(20))
 
     car: Mapped[Car] = relationship(back_populates="sessions")
     created_by: Mapped[User | None] = relationship()
+    charger: Mapped[Charger | None] = relationship()
+
+
+REIMBURSEMENT_STATUSES = ("in_progress", "not_recorded", "recorded", "invoiced", "paid")
+
+
+class Charger(Base):
+    """A charger whose sessions are reimbursed (home wall box, mobile charger…), and the company that pays them back."""
+
+    __tablename__ = "chargers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)  # e.g. "Zaptec Go (garage)"
+    brand: Mapped[str | None] = mapped_column(String(100))
+    model: Mapped[str | None] = mapped_column(String(100))
+    serial_number: Mapped[str | None] = mapped_column(String(100))
+    reimbursement_company: Mapped[str | None] = mapped_column(String(100))  # e.g. "50five", "Enco e-Mobility"
+    uses_home_tariff: Mapped[bool] = mapped_column(Boolean, default=True)  # sessions priced at the CREG tariff of their date
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
 class User(Base):
@@ -130,7 +156,7 @@ class Tariff(Base):
 
 
 class Setting(Base):
-    """Application settings as JSON values (e.g. home_locations)."""
+    """Application settings as JSON values (e.g. creg_region)."""
 
     __tablename__ = "settings"
 

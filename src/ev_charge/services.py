@@ -73,6 +73,10 @@ def session_out(s: ChargeSession, pricing: Pricing, km_prev: dict[int, int] | No
         price_per_kwh=round(price.cost / s.kwh, 3) if price.cost is not None and s.kwh else None,
         km_since_previous=(km_prev or {}).get(s.id),
         created_by=(who.full_name or who.username) if who else None,
+        charger_id=s.charger_id,
+        charger_name=s.charger.name if s.charger else None,
+        reimbursement_company=s.charger.reimbursement_company if s.charger else None,
+        reimbursement_status=s.reimbursement_status,
     )
 
 

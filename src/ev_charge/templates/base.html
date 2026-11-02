@@ -25,6 +25,7 @@
             <a href="/reimbursement" class="{{ 'active' if active == 'reimbursement' }}">Reimbursement</a>
             <a href="/cars" class="{{ 'active' if active == 'cars' }}">Cars</a>
             {% if user.is_admin %}
+            <a href="/chargers" class="{{ 'active' if active == 'chargers' }}">Chargers</a>
             <a href="/tariffs" class="{{ 'active' if active == 'tariffs' }}">Tariffs</a>
             <a href="/users" class="{{ 'active' if active == 'users' }}">Users</a>
             {% endif %}
