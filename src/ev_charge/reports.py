@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import Car, ChargeSession
+from .models import REIMBURSEMENT_STATUSES, Car, Charger, ChargeSession
 from .pricing import Pricing
 from .services import duration_minutes, session_sort_key, years_between
 
@@ -150,15 +150,31 @@ def build_report(db: Session, car_ids: list[int] | None = None, date_from: date 
     }
 
 
-def build_reimbursement(db: Session, car_ids: list[int] | None, date_from: date | None, date_to: date | None) -> dict[str, Any]:
-    """Sessions flagged "to be reimbursed", priced (home tariff or cost entered), for a printable statement."""
+def build_reimbursement(
+    db: Session,
+    car_ids: list[int] | None,
+    date_from: date | None,
+    date_to: date | None,
+    statuses: list[str] | None = None,
+    company: str | None = None,
+) -> dict[str, Any]:
+    """Sessions flagged "to be reimbursed", priced (home tariff or cost entered), for a printable statement.
+
+    company: only the sessions of the chargers reimbursed by this company ("" = sessions without a charger)."""
     pricing = Pricing(db)
     cars = {c.id: c for c in db.scalars(select(Car))}
+    chargers = {c.id: c for c in db.scalars(select(Charger))}
     rows = []
     for s in sorted(db.scalars(select(ChargeSession).where(ChargeSession.to_reimburse.is_(True))), key=session_sort_key):
         if car_ids and s.car_id not in car_ids:
             continue
         if (date_from and s.charge_date < date_from) or (date_to and s.charge_date > date_to):
+            continue
+        status = s.reimbursement_status or "not_recorded"
+        if statuses and status not in statuses:
+            continue
+        charger = chargers.get(s.charger_id) if s.charger_id else None
+        if company is not None and (charger.reimbursement_company if charger else "") != company:
             continue
         p = pricing.price(s)
         unit = p.tariff_price if p.home else (round(p.cost / s.kwh, 4) if p.cost is not None and s.kwh else None)
@@ -168,6 +184,8 @@ def build_reimbursement(db: Session, car_ids: list[int] | None, date_from: date 
             "kwh": s.kwh, "start_time": s.start_time.strftime("%H:%M") if s.start_time else None,
             "end_time": s.end_time.strftime("%H:%M") if s.end_time else None, "home": p.home, "price_per_kwh": unit,
             "amount": p.cost, "missing_price": p.cost is None, "notes": s.notes,
+            "charger_id": s.charger_id, "charger_name": charger.name if charger else None,
+            "reimbursement_company": charger.reimbursement_company if charger else None, "status": status,
         })  # fmt: skip
     used_cars = sorted({r["car_id"] for r in rows} | set(car_ids or []), key=lambda i: cars[i].name if i in cars else "")
     return {
@@ -182,5 +200,11 @@ def build_reimbursement(db: Session, car_ids: list[int] | None, date_from: date 
             "amount": round(sum(r["amount"] or 0 for r in rows), 2),
             "home_amount": round(sum(r["amount"] or 0 for r in rows if r["home"]), 2),
             "missing_price": sum(r["missing_price"] for r in rows),
+            "by_status": {
+                st: {"sessions": sum(r["status"] == st for r in rows), "amount": round(sum(r["amount"] or 0 for r in rows if r["status"] == st), 2)}
+                for st in REIMBURSEMENT_STATUSES
+            },
         },
+        "companies": sorted({c.reimbursement_company for c in chargers.values() if c.reimbursement_company}, key=str.casefold),
+        "company": company,
     }

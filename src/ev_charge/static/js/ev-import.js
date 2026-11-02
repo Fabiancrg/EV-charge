@@ -14,7 +14,8 @@
     const FIELDS = [
         ['charge_date', 'Charge date *'], ['car', 'Car (name or plate)'], ['odometer', 'Odometer (km)'], ['location', 'Location'], ['provider', 'Provider'],
         ['kwh', 'Energy (kWh) *'], ['start_time', 'Start time'], ['end_time', 'End time'], ['duration', 'Duration (if no end time)'],
-        ['to_reimburse', 'To be reimbursed (yes/no)'], ['cost', 'Cost'], ['notes', 'Notes'],
+        ['to_reimburse', 'To be reimbursed (yes/no)'], ['charger', 'Charger (name or serial number)'], ['reimbursement_status', 'Reimbursement status'],
+        ['cost', 'Cost'], ['notes', 'Notes'],
     ];
     const LABEL = Object.fromEntries(FIELDS);
     // Header names recognised for each field (compared after normalisation: lower case, no accents/punctuation). EN / FR / NL.
@@ -22,7 +23,7 @@
         charge_date: ['date', 'charge date', 'charging date', 'session date', 'day', 'datum', 'jour', 'date de charge', 'date recharge', 'laaddatum', 'start date', 'date debut'],
         car: ['car', 'vehicle', 'car name', 'voiture', 'vehicule', 'auto', 'wagen', 'voertuig', 'plate', 'license plate', 'licence plate', 'number plate', 'plaque', 'immatriculation', 'nummerplaat', 'kenteken'],
         odometer: ['odometer', 'odo', 'mileage', 'km', 'kms', 'kilometers', 'kilometres', 'km stand', 'kilometerstand', 'compteur', 'kilometrage', 'odometer km', 'km counter'],
-        location: ['location', 'place', 'site', 'address', 'where', 'lieu', 'adresse', 'endroit', 'locatie', 'plaats', 'adres', 'station', 'charger', 'charging station', 'charge point', 'borne', 'laadpaal', 'laadpunt'],
+        location: ['location', 'place', 'site', 'address', 'where', 'lieu', 'adresse', 'endroit', 'locatie', 'plaats', 'adres', 'station', 'charging station', 'charge point', 'laadpunt'],
         provider: ['provider', 'operator', 'network', 'cpo', 'emsp', 'supplier', 'fournisseur', 'operateur', 'reseau', 'leverancier', 'aanbieder', 'charge card', 'card', 'charging card', 'badge'],
         kwh: ['kwh', 'energy', 'energy kwh', 'kwh charged', 'charged', 'charged kwh', 'energy charged', 'quantity', 'volume', 'energie', 'energie kwh', 'consommation', 'verbruik', 'hoeveelheid', 'geladen'],
         start_time: ['start', 'start time', 'begin', 'begin time', 'from', 'started', 'heure debut', 'debut', 'heure de debut', 'starttijd', 'start tijd', 'beginuur', 'begintijd'],
@@ -30,6 +31,8 @@
         duration: ['duration', 'charging time', 'charge time', 'charging duration', 'duree', 'temps de charge', 'duur', 'laadtijd', 'laadduur'],
         to_reimburse: ['reimburse', 'to reimburse', 'reimbursable', 'reimbursement', 'refund', 'refundable', 'business', 'professional', 'expense', 'company paid', 'rembourser', 'a rembourser', 'remboursable', 'remboursement', 'professionnel', 'terugbetaling', 'terug te betalen', 'terugbetalen', 'zakelijk'],
         cost: ['cost', 'price', 'amount', 'total', 'total cost', 'paid', 'eur', 'euro', 'cout', 'prix', 'montant', 'kost', 'kosten', 'prijs', 'bedrag', 'cost eur', 'price eur'],
+        charger: ['charger', 'charger name', 'wallbox', 'wall box', 'charging box', 'home charger', 'chargeur', 'borne', 'borne de recharge', 'laadpaal', 'lader', 'serial', 'serial number', 'charger serial'],
+        reimbursement_status: ['status', 'reimbursement status', 'payment status', 'state', 'statut', 'etat', 'statut remboursement', 'status terugbetaling', 'betaalstatus'],
         notes: ['notes', 'note', 'comment', 'comments', 'remarks', 'remark', 'description', 'commentaire', 'commentaires', 'remarque', 'remarques', 'opmerking', 'opmerkingen'],
     };
     const PREVIEW_ROWS = 30;
@@ -117,6 +120,7 @@
             filename: data.filename || file.name, sheets, step: 1, onDone, cars,
             carId: (cars.find(c => c.active) || cars[0] || {}).id || null,
             createMissing: false, dateOrder: 'auto', defaultReimb: false, skipDuplicates: true,
+            chargers: EV.chargers || await EV.loadChargers(), chargerId: '', defaultStatus: '',
         };
         selectSheet(scored.sort((a, b) => b.score - a.score)[0].i);
         render();
@@ -226,6 +230,11 @@
                 <div class="field"><label>Dates are written</label>
                     <select id="imp-order">${[['auto', 'Detect automatically'], ['dmy', 'day/month/year'], ['mdy', 'month/day/year'], ['ymd', 'year-month-day']].map(([k, l]) => `<option value="${k}" ${k === state.dateOrder ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
                 ${hasReimbCol ? '' : `<div class="field"><label class="check" style="margin-top:22px"><input type="checkbox" id="imp-reimb" ${state.defaultReimb ? 'checked' : ''}> Mark all as to be reimbursed</label></div>`}
+                ${state.mapping.includes('charger') || !state.chargers.length ? '' : `<div class="field span-2"><label>Charger for every row</label>
+                    <select id="imp-charger"><option value="">— none —</option>${state.chargers.filter(c => c.active).map(c => `<option value="${c.id}" ${String(c.id) === String(state.chargerId) ? 'selected' : ''}>🔌 ${esc(c.name)}</option>`).join('')}</select>
+                    <div class="hint">Its sessions are to be reimbursed and priced at the home tariff.</div></div>`}
+                ${state.mapping.includes('reimbursement_status') ? '' : `<div class="field"><label>Status of sessions to reimburse</label>
+                    <select id="imp-status"><option value="">Default (recorded with a charger, else not recorded)</option>${EV.STATUSES.map(([k, l, i]) => `<option value="${k}" ${k === state.defaultStatus ? 'selected' : ''}>${i} ${l}</option>`).join('')}</select></div>`}
             </div>`;
         $('[data-body]').querySelectorAll('select[data-col]').forEach(sel => sel.addEventListener('change', () => {
             const col = +sel.dataset.col, field = sel.value;
@@ -237,6 +246,8 @@
         $('#imp-car')?.addEventListener('change', e => { state.carId = Number(e.target.value) || null; });
         $('#imp-order').addEventListener('change', e => { state.dateOrder = e.target.value; });
         $('#imp-reimb')?.addEventListener('change', e => { state.defaultReimb = e.target.checked; });
+        $('#imp-charger')?.addEventListener('change', e => { state.chargerId = e.target.value; });
+        $('#imp-status')?.addEventListener('change', e => { state.defaultStatus = e.target.value; });
         const missing = missingFields();
         setActions(`${missing ? `<span class="imp-missing">${esc(missing)}</span>` : ''}<button class="btn btn-ghost" data-act="back">‹ Back</button><button class="btn" data-act="next" ${missing ? 'disabled' : ''}>Next ›</button>`);
     }
@@ -253,6 +264,8 @@
             create_missing_cars: state.createMissing,
             date_order: state.dateOrder,
             default_to_reimburse: state.defaultReimb,
+            charger_id: mapping.charger === undefined && state.chargerId ? Number(state.chargerId) : null,
+            default_status: mapping.reimbursement_status === undefined && state.defaultStatus ? state.defaultStatus : null,
             skip_duplicates: state.skipDuplicates,
         };
     }
@@ -277,14 +290,17 @@
         const rows = res.rows.filter(r => filter === 'all' || r.status === filter);
         const mapped = new Set(state.mapping.filter(f => f !== 'ignore'));
         const cols = [['car_name', 'Car'], ['charge_date', 'Date'], ['odometer', 'Odometer'], ['location', 'Location'], ['provider', 'Provider'], ['kwh', 'kWh'],
-            ['start_time', 'Start'], ['end_time', 'End'], ['to_reimburse', 'Reimb.'], ['cost', 'Cost'], ['notes', 'Notes']]
-            .filter(([k]) => k === 'car_name' || k === 'charge_date' || k === 'kwh' || mapped.has(k) || (k === 'end_time' && mapped.has('duration')) || (k === 'to_reimburse' && state.defaultReimb));
+            ['start_time', 'Start'], ['end_time', 'End'], ['charger_name', 'Charger'], ['to_reimburse', 'Reimb.'], ['reimbursement_status', 'Status'], ['cost', 'Cost'], ['notes', 'Notes']]
+            .filter(([k]) => k === 'car_name' || k === 'charge_date' || k === 'kwh' || mapped.has(k) || (k === 'end_time' && mapped.has('duration'))
+                || (k === 'charger_name' && (mapped.has('charger') || state.chargerId)) || (['to_reimburse', 'reimbursement_status'].includes(k)));
         const fmt = (r, k) => {
             const v = r[k];
             if (k === 'charge_date') return v ? EV.date(v) : '';
             if (k === 'kwh' || k === 'cost') return v == null ? '' : EV.num(v, 2);
             if (k === 'odometer') return v == null ? '' : EV.num(v);
             if (k === 'to_reimburse') return v ? '💶 Yes' : '';
+            if (k === 'reimbursement_status') return EV.statusBadge(v);
+            if (k === 'charger_name') return v ? `🔌 ${esc(v)}` : '';
             return esc(clip(v || '', 40));
         };
         $('[data-body]').innerHTML = `

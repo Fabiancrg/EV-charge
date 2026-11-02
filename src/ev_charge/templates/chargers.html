@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Chargers · EV Charge{% endblock %}
+{% block content %}
+<div class="content">
+    <div class="page-head">
+        <h2>Chargers</h2>
+        <button class="btn" id="add-charger">＋ Add a charger</button>
+    </div>
+    <p class="muted small" style="margin-bottom:12px">Chargers whose sessions are reimbursed: home wall box, mobile charger… Picking one in a session makes it <b>to be reimbursed</b>
+        and, when the charger uses the home tariff, prices it at the <a href="/tariffs">CREG tariff</a> of its date. The <b>reimbursing company</b> (e.g. 50five, Enco e-Mobility)
+        is the one that pays the sessions back; the reimbursement statement can be filtered on it.</p>
+    <div class="table-wrap" id="chargers-table"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="modal" id="charger-modal">
+    <div class="modal-box" style="max-width:640px">
+        <h3><span id="chf-title">Charger</span><button class="icon-btn" data-close title="Close">✕</button></h3>
+        <div class="form-error"></div>
+        <form id="charger-form" autocomplete="off">
+            <div class="form-grid">
+                <div class="field span-2"><label>Name *</label><input type="text" name="name" required maxlength="100" placeholder="e.g. Zaptec Go (garage), Ohme mobile" autofocus></div>
+                <div class="field"><label>Brand</label><input type="text" name="brand" maxlength="100" placeholder="Zaptec, Ohme…"></div>
+                <div class="field"><label>Model</label><input type="text" name="model" maxlength="100"></div>
+                <div class="field"><label>Serial number</label><input type="text" name="serial_number" maxlength="100"><div class="hint">Also matched by the Excel import</div></div>
+                <div class="field"><label>Reimbursing company</label><input type="text" name="reimbursement_company" maxlength="100" list="dl-companies" placeholder="50five, Enco e-Mobility…"><datalist id="dl-companies"></datalist></div>
+                <div class="field span-all"><label class="check"><input type="checkbox" name="uses_home_tariff" checked> Price its sessions at the home tariff (CREG) of their date</label>
+                    <div class="hint">Untick for a charger whose sessions keep the cost typed in.</div></div>
+                <div class="field span-all"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
+                <div class="field span-all"><label class="check"><input type="checkbox" name="active" checked> Active (offered in the session form)</label></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-danger left" id="chf-delete">🗑 Delete</button>
+                <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+                <button type="submit" class="btn">💾 Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+    const form = document.getElementById('charger-form');
+    let chargers = [], editing = null;
+
+    function open(c) {
+        editing = c;
+        form.reset();
+        document.getElementById('chf-title').textContent = c ? `Edit ${c.name}` : 'New charger';
+        document.getElementById('chf-delete').style.display = c ? '' : 'none';
+        document.getElementById('dl-companies').innerHTML = [...new Set(chargers.map(x => x.reimbursement_company).filter(Boolean))].map(v => `<option value="${EV.esc(v)}">`).join('');
+        if (c) EV.fillForm(form, c); else { form.active.checked = true; form.uses_home_tariff.checked = true; }
+        EV.openModal('charger-modal');
+    }
+
+    function render() {
+        const box = document.getElementById('chargers-table');
+        if (!chargers.length) { box.innerHTML = '<div class="empty-state"><h3>No charger yet</h3><p>Add your wall box or mobile charger with ＋ Add a charger.</p></div>'; return; }
+        box.innerHTML = `<table><thead><tr><th>Name</th><th>Brand / model</th><th class="hide-sm">Serial number</th><th>Reimbursed by</th><th>Pricing</th>
+            <th class="num">Sessions</th><th class="num hide-sm">kWh</th><th class="hide-sm">Last used</th><th>Status</th><th></th></tr></thead><tbody>
+            ${chargers.map(c => `<tr>
+                <td><strong>🔌 ${EV.esc(c.name)}</strong>${c.notes ? `<br><span class="muted small">${EV.esc(c.notes)}</span>` : ''}</td>
+                <td>${EV.esc([c.brand, c.model].filter(Boolean).join(' '))}</td>
+                <td class="hide-sm">${EV.esc(c.serial_number || '')}</td>
+                <td>${EV.esc(c.reimbursement_company || '—')}</td>
+                <td>${c.uses_home_tariff ? '🏠 Home tariff' : '<span class="muted">Cost entered</span>'}</td>
+                <td class="num">${c.sessions ? `<a href="/sessions?charger_id=${c.id}">${EV.num(c.sessions)}</a>` : '0'}</td>
+                <td class="num hide-sm">${EV.num(c.kwh, 1)}</td>
+                <td class="hide-sm">${EV.date(c.last_used)}</td>
+                <td>${c.active ? '<span class="badge badge-ok">Active</span>' : '<span class="badge badge-warn">Inactive</span>'}</td>
+                <td><button class="btn btn-ghost btn-sm" data-edit="${c.id}">✏ Edit</button></td>
+            </tr>`).join('')}</tbody></table>`;
+    }
+
+    async function load() {
+        try { chargers = await EV.loadChargers(); render(); } catch (err) { EV.toast(err.message, true); }
+    }
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+            const body = EV.formData(form);
+            const saved = editing ? await EV.api('PUT', `/api/chargers/${editing.id}`, body) : await EV.api('POST', '/api/chargers', body);
+            EV.toast(`${saved.name} saved`);
+            EV.closeModal('charger-modal');
+            load();
+        } catch (err) { EV.formError('charger-modal', err); }
+    });
+    document.getElementById('chf-delete').addEventListener('click', async () => {
+        if (!editing || !confirm(`Delete ${editing.name}?`)) return;
+        try { await EV.api('DELETE', `/api/chargers/${editing.id}`); EV.toast('Charger deleted'); EV.closeModal('charger-modal'); load(); }
+        catch (err) { EV.formError('charger-modal', err); }
+    });
+    document.getElementById('add-charger').addEventListener('click', () => open(null));
+    document.getElementById('chargers-table').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-edit]');
+        if (b) open(chargers.find(c => c.id === Number(b.dataset.edit)));
+    });
+    load();
+})();
+</script>
+{% endblock %}

@@ -10,21 +10,10 @@
             <button class="btn btn-ghost" id="add-tariff">＋ Add a period</button>
         </div>
     </div>
-    <p class="muted small" style="margin-bottom:12px"><b>⟳ Import from CREG</b> reads the official quarterly amounts for your region. Sessions charged at a <b>home location</b> are priced at kWh × the tariff valid on the charge date, whatever cost was typed in.
-        Other sessions keep the cost entered. Changing a tariff reprices the home sessions of its period. Periods can't overlap; leave the end date empty for “until further notice”.</p>
+    <p class="muted small" style="margin-bottom:12px"><b>⟳ Import from CREG</b> reads the official quarterly amounts for your region. Sessions made with a <a href="/chargers">charger</a> that uses the home tariff (wall box, mobile charger…) are priced at kWh × the tariff valid on the charge date, whatever cost was typed in.
+        Other sessions keep the cost entered. Changing a tariff reprices those sessions in its period. Periods can't overlap; leave the end date empty for “until further notice”.</p>
     <div id="gaps"></div>
     <div class="table-wrap" id="tariffs-table"><p class="muted">Loading…</p></div>
-</div>
-
-<div class="content">
-    <div class="page-head"><h2>Home locations</h2></div>
-    <p class="muted small" style="margin-bottom:12px">Sessions whose location matches one of these names (case and extra spaces don't matter) are home charging.</p>
-    <div id="home-chips"></div>
-    <form id="home-form" style="display:flex;gap:8px;max-width:520px;margin-top:6px">
-        <input type="text" id="home-input" list="dl-known" placeholder="Add a location, e.g. Home, Garage Wavre…" maxlength="200">
-        <datalist id="dl-known"></datalist>
-        <button class="btn" type="submit">Add</button>
-    </form>
 </div>
 
 <div class="modal" id="tariff-modal">
@@ -74,7 +63,7 @@
 <script>
 (() => {
     const form = document.getElementById('tariff-form');
-    let tariffs = [], homes = [], editing = null;
+    let tariffs = [], editing = null;
     const iso = (d) => new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
     const addDays = (s, n) => { const d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return iso(d); };
 
@@ -118,7 +107,7 @@
         const today = iso(new Date());
         const box = document.getElementById('tariffs-table');
         if (!tariffs.length) { box.innerHTML = '<div class="empty-state"><h3>No tariff period yet</h3><p>Use ＋ Next quarter or ＋ Add a period.</p></div>'; return; }
-        box.innerHTML = `<table><thead><tr><th>Period</th><th>Label</th><th class="num">Price / kWh</th><th class="num">Home sessions</th><th class="num">kWh</th><th class="num hide-sm">Amount</th><th></th></tr></thead><tbody>
+        box.innerHTML = `<table><thead><tr><th>Period</th><th>Label</th><th class="num">Price / kWh</th><th class="num">Sessions</th><th class="num">kWh</th><th class="num hide-sm">Amount</th><th></th></tr></thead><tbody>
             ${tariffs.map(t => {
                 const current = t.valid_from <= today && (!t.valid_to || today <= t.valid_to);
                 return `<tr>
@@ -131,23 +120,10 @@
             }).join('')}</tbody></table>`;
     }
 
-    function renderHomes() {
-        document.getElementById('home-chips').innerHTML = homes.length
-            ? homes.map((h, i) => `<span class="chip">🏠 ${EV.esc(h)}<button title="Remove" data-rm="${i}">✕</button></span>`).join('')
-            : '<p class="note">No home location: no session is priced at the home tariff.</p>';
-    }
-
-    async function saveHomes(list) {
-        try { homes = (await EV.api('PUT', '/api/tariffs/home-locations', { locations: list })).locations; renderHomes(); load(); }
-        catch (err) { EV.toast(err.message, true); }
-    }
-
     async function load() {
         try {
-            const [t, h, s] = await Promise.all([EV.api('GET', '/api/tariffs'), EV.api('GET', '/api/tariffs/home-locations'), EV.api('GET', '/api/sessions/suggestions')]);
-            tariffs = t; homes = h.locations;
-            document.getElementById('dl-known').innerHTML = s.locations.map(l => `<option value="${EV.esc(l)}">`).join('');
-            render(); renderHomes();
+            tariffs = await EV.api('GET', '/api/tariffs');
+            render();
         } catch (err) { EV.toast(err.message, true); }
     }
 
@@ -259,16 +235,6 @@
     document.getElementById('tariffs-table').addEventListener('click', (e) => {
         const b = e.target.closest('[data-edit]');
         if (b) open(tariffs.find(t => t.id === Number(b.dataset.edit)));
-    });
-    document.getElementById('home-chips').addEventListener('click', (e) => {
-        const b = e.target.closest('[data-rm]');
-        if (b) saveHomes(homes.filter((_, i) => i !== Number(b.dataset.rm)));
-    });
-    document.getElementById('home-form').addEventListener('submit', (e) => {
-        e.preventDefault();
-        const input = document.getElementById('home-input');
-        if (input.value.trim()) saveHomes([...homes, input.value.trim()]);
-        input.value = '';
     });
     load();
 })();

@@ -15,8 +15,8 @@ from ..auth import current_user, require_admin
 from ..config import CONFIG
 from ..database import get_db
 from ..models import ChargeSession, Tariff, User
-from ..pricing import Pricing, get_setting, home_locations, set_setting
-from ..schemas import CregApply, CregRegion, HomeLocations, TariffIn, TariffOut
+from ..pricing import Pricing, get_setting, set_setting
+from ..schemas import CregApply, CregRegion, TariffIn, TariffOut
 
 router = APIRouter(prefix="/api/tariffs", tags=["tariffs"])
 
@@ -44,7 +44,7 @@ def list_tariffs(_: User = Depends(current_user), db: Session = Depends(get_db))
     pricing = Pricing(db)
     usage: dict[int, list[float]] = {}
     for s in db.scalars(select(ChargeSession)):
-        if pricing.is_home(s.location):
+        if pricing.is_home(s):
             t = pricing.tariff_on(s.charge_date)
             if t:
                 usage.setdefault(t.id, []).append(s.kwh)
@@ -86,23 +86,6 @@ def delete_tariff(tariff_id: int, _: User = Depends(require_admin), db: Session 
     db.delete(t)
     db.commit()
     return Response(status_code=204)
-
-
-@router.get("/home-locations", response_model=HomeLocations)
-def get_home_locations(_: User = Depends(current_user), db: Session = Depends(get_db)) -> HomeLocations:
-    return HomeLocations(locations=home_locations(db))
-
-
-@router.put("/home-locations", response_model=HomeLocations)
-def put_home_locations(body: HomeLocations, _: User = Depends(require_admin), db: Session = Depends(get_db)) -> HomeLocations:
-    seen: dict[str, str] = {}
-    for loc in body.locations:
-        loc = " ".join(loc.split())[:200]
-        if loc:
-            seen.setdefault(loc.casefold(), loc)
-    set_setting(db, "home_locations", list(seen.values()))
-    db.commit()
-    return HomeLocations(locations=list(seen.values()))
 
 
 # ── Import from the CREG ─────────────────────────────────────────────────────

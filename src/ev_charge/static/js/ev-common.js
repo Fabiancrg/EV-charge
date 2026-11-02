@@ -60,6 +60,22 @@
         }
         return data;
     };
+    EV.loadChargers = async () => { EV.chargers = await EV.api('GET', '/api/chargers'); return EV.chargers; };
+
+    /* Reimbursement status: label, badge (icon + text, never colour alone) */
+    EV.STATUSES = [
+        ['in_progress', 'In progress', '⏳', 'badge-info'],
+        ['not_recorded', 'Not recorded', '⚠', 'badge-err'],
+        ['recorded', 'Recorded', '✓', 'badge-warn'],
+        ['invoiced', 'Invoiced', '🧾', 'badge-info'],
+        ['paid', 'Paid', '✔', 'badge-ok'],
+    ];
+    EV.statusLabel = (st) => (EV.STATUSES.find(x => x[0] === st) || [null, ''])[1];
+    EV.statusBadge = (st) => {
+        const x = EV.STATUSES.find(y => y[0] === st);
+        return x ? `<span class="badge ${x[3]}">${x[2]} ${x[1]}</span>` : '';
+    };
+
     EV.loadCars = async () => {
         const cars = await EV.api('GET', '/api/cars');
         cars.forEach(c => { EV.carColorIndex[c.id] = c.color_index; });
@@ -137,20 +153,35 @@
     let afterSave = null;
     let tariffs = null;
 
-    const normLoc = (v) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
-    // Home charging is priced at the home tariff of the date: the cost field is then informative only
+    const chargerOf = (id) => (EV.chargers || []).find(c => c.id === Number(id));
+    // A charger using the home tariff prices the session at the CREG tariff of its date: the cost field is then informative only
     function updateHomeCost() {
         const f = document.getElementById('session-form');
         const hint = document.getElementById('sf-cost-hint');
-        const home = (suggestions?.home_locations || []).some(h => normLoc(h) === normLoc(f.location.value));
+        const charger = chargerOf(f.charger_id.value);
+        const home = !!(charger && charger.uses_home_tariff);
         f.cost.disabled = home;
+        document.getElementById('sf-charger-hint').textContent = charger?.reimbursement_company ? `Reimbursed by ${charger.reimbursement_company}` : '';
         if (!home) { hint.textContent = 'Optional'; return; }
         const d = f.charge_date.value;
         const t = (tariffs || []).find(t => t.valid_from <= d && (!t.valid_to || d <= t.valid_to));
         const kwh = Number(f.kwh.value);
         hint.textContent = t
             ? `🏠 Home tariff: ${EV.money(t.price_per_kwh, 4)}/kWh${kwh ? ` → ${EV.money(kwh * t.price_per_kwh)}` : ''}`
-            : '🏠 Home charging — no tariff for this date yet';
+            : '🏠 No tariff for this date yet';
+    }
+    // The reimbursement status only applies to sessions to be reimbursed
+    function updateStatus() {
+        const f = document.getElementById('session-form');
+        document.getElementById('sf-status').style.display = f.to_reimburse.checked ? '' : 'none';
+        if (f.to_reimburse.checked && !f.reimbursement_status.value) f.reimbursement_status.value = f.charger_id.value ? 'recorded' : 'not_recorded';
+    }
+    function fillChargers(current) {
+        const f = document.getElementById('session-form');
+        const list = (EV.chargers || []).filter(c => c.active || c.id === current);
+        f.charger_id.innerHTML = '<option value="">— none (public charger…) —</option>' +
+            list.map(c => `<option value="${c.id}">${EV.esc(c.name)}${c.reimbursement_company ? ' · ' + EV.esc(c.reimbursement_company) : ''}</option>`).join('');
+        document.getElementById('sf-charger-field').style.display = list.length ? '' : 'none';
     }
 
     async function refreshSuggestions(carId) {
@@ -181,6 +212,8 @@
         const active = EV.cars.filter(c => c.active || (session && c.id === session.car_id));
         if (!active.length) { EV.toast('Add a car first (Cars page)', true); return; }
         if (!tariffs) tariffs = await EV.api('GET', '/api/tariffs').catch(() => []);
+        if (!EV.chargers) await EV.loadChargers();
+        fillChargers(session?.charger_id);
         f.car_id.innerHTML = active.map(c => `<option value="${c.id}">${EV.esc(c.name)}${c.license_plate ? ' · ' + EV.esc(c.license_plate) : ''}</option>`).join('');
         editingId = session ? session.id : null;
         afterSave = opts.onSaved || null;
@@ -199,6 +232,7 @@
         await refreshSuggestions(Number(f.car_id.value));
         updateDuration();
         updateHomeCost();
+        updateStatus();
         EV.openModal('session-modal');
     };
 
@@ -222,6 +256,7 @@
                 await refreshSuggestions(Number(keep.car_id));
                 updateDuration();
                 updateHomeCost();
+                updateStatus();
                 f.odometer.focus();
             } else {
                 EV.closeModal('session-modal');
@@ -248,15 +283,27 @@
         f.start_time.addEventListener('input', updateDuration);
         f.end_time.addEventListener('input', updateDuration);
         f.kwh.addEventListener('input', () => { updateDuration(); updateHomeCost(); });
-        f.location.addEventListener('input', updateHomeCost);
         f.charge_date.addEventListener('change', updateHomeCost);
-        // A known location pre-fills the provider and the reimbursement flag used there last time
+        // A charger's sessions are reimbursed, and recorded by the charger by default
+        f.charger_id.addEventListener('change', () => {
+            if (f.charger_id.value) {
+                f.to_reimburse.checked = true;
+                if (!f.reimbursement_status.value || f.reimbursement_status.value === 'not_recorded') f.reimbursement_status.value = 'recorded';
+            }
+            updateHomeCost();
+            updateStatus();
+        });
+        f.to_reimburse.addEventListener('change', updateStatus);
+        // A known location pre-fills the provider, charger and reimbursement flag used there last time
         f.location.addEventListener('change', () => {
             const last = suggestions?.by_location?.[f.location.value];
             if (!last || editingId) return;
             if (!f.provider.value && last.provider) f.provider.value = last.provider;
+            if (last.charger_id && chargerOf(last.charger_id)?.active) f.charger_id.value = last.charger_id;
             f.to_reimburse.checked = !!last.to_reimburse;
+            f.reimbursement_status.value = '';
             updateHomeCost();
+            updateStatus();
         });
     });
 })();

@@ -39,8 +39,8 @@ def test_session_crud_and_derived_values(client, car):
     assert s["duration_minutes"] == 480
     assert s["avg_power_kw"] == round(30.5 / 8, 1)
     assert s["location"] == "Home" and s["provider"] is None
-    # "Home" is a home location: priced at the home tariff, and there is none yet
-    assert s["home"] is True and s["missing_tariff"] is True and s["cost"] is None and s["entered_cost"] == 12.2
+    # No charger: the location doesn't matter, the cost entered is kept
+    assert s["home"] is False and s["cost"] == 12.2 and s["cost_source"] == "entered" and s["reimbursement_status"] is None
     s2 = _session(client, car["id"], charge_date="2026-03-05", odometer=1350, to_reimburse=True, location="Office", cost=12.2)
     assert s2["price_per_kwh"] == 0.4 and s2["cost_source"] == "entered" and s2["created_by"] == "Ada Admin"
     rows = client.get("/api/sessions").json()
@@ -55,7 +55,8 @@ def test_session_crud_and_derived_values(client, car):
     assert len(client.get("/api/sessions?q=home").json()) == 1
     assert len(client.get("/api/sessions?date_from=2026-03-02").json()) == 1
 
-    r = client.patch("/api/sessions/reimburse", json={"ids": [s["id"], s2["id"]], "to_reimburse": True})
+    assert s2["reimbursement_status"] == "not_recorded"  # to be reimbursed, no charger
+    r = client.patch("/api/sessions/bulk", json={"ids": [s["id"], s2["id"]], "to_reimburse": True})
     assert r.json()["updated"] == 2
     assert len(client.get("/api/sessions?to_reimburse=true").json()) == 2
 

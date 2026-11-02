@@ -10,7 +10,7 @@ On first start, every page leads to **/setup**, where you create the first admin
 
 | Role | Can do |
 |---|---|
-| **Administrator** | Everything: cars, every session, tariffs and home locations, users. |
+| **Administrator** | Everything: cars, chargers, every session, tariffs, users. |
 | **Driver** | Works only with the **cars assigned to them**, on the Users page. A driver can add, edit, delete, import and export those cars' sessions, and see their dashboard, reports and reimbursement statements. Their cars are read-only for them, and the Tariffs and Users pages aren't available. |
 
 Details:
@@ -27,13 +27,36 @@ Details:
 
 The app still listens on `127.0.0.1` by default. To reach it from your phone or another computer, set `host` to `0.0.0.0`, and use HTTPS: set `ssl_certfile`/`ssl_keyfile`, or put it behind a reverse proxy that terminates HTTPS.
 
+## Chargers and reimbursement status
+
+The **Chargers** page (administrators) lists the chargers whose sessions are reimbursed: a home wall box such as a Zaptec Go, a mobile charger such as an Ohme…
+
+- **Fields:** name, brand, model, serial number, the **reimbursing company** (the one that pays the sessions back, e.g. *50five* or *Enco e-Mobility*), whether its sessions are priced at the home tariff (yes by default), notes, active flag.
+- **In a session:** picking a charger makes the session *to be reimbursed* and, when the charger uses the home tariff, prices it at the CREG tariff of its date (see below). Location no longer matters.
+- **Rules:** a charger used by sessions can't be deleted; mark it inactive. An inactive charger isn't offered for new sessions, and older sessions keep it.
+
+Each session to be reimbursed has a **reimbursement status**:
+
+| Status | Meaning |
+|---|---|
+| ⏳ **In progress** | Still being recorded (reserved for a future automatic link with the charger) |
+| ⚠ **Not recorded** | The session wasn't exported to the reimbursing company |
+| ✓ **Recorded** | The charger recorded it with the reimbursing company (default for a charger's session) |
+| 🧾 **Invoiced** | The invoice from the reimbursing company was received |
+| ✔ **Paid** | The amount was paid |
+
+- **Defaults:** a new session to be reimbursed starts as *Recorded* with a charger, *Not recorded* without one. A session not to be reimbursed has no status. After upgrading, sessions already flagged *to be reimbursed* start as *Not recorded*.
+- **Sessions page:** charger and status columns, *Status* and *Charger* filters (*Not paid yet* shows everything but *Paid*), and bulk *Set status…* / *Set charger…* for the selected rows. A typical flow is: filter a quarter → select all → *Invoiced* when the invoice arrives → *Paid* when the money is in.
+- **Reimbursement statement:** filters on status and **reimbursing company**, so the statement for 50five can be checked against its invoice. The charger and status are shown per session, totals per status, and both appear in the Excel and CSV exports.
+- **Import:** a *Charger* column (matched on the charger's name or serial number) and a *Status* column are recognised. Statuses can be written as *Paid*, *payé*, *betaald*, *facturé*, *niet geregistreerd*… Without a charger column, one charger can be set for every row, and without a status column, a status for every row to be reimbursed.
+
 ## Home charging tariffs
 
-The **Tariffs** page (administrators) holds the price per kWh of home charging, as periods (usually quarters, e.g. the CREG reimbursement rate) and the list of **home locations**.
+The **Tariffs** page (administrators) holds the price per kWh of home charging, as periods (usually quarters: the CREG reimbursement rate).
 
-- **Which sessions:** a session whose location matches a home location is home charging. Matching ignores case and extra spaces. Its cost is **kWh × the tariff valid on its charge date**, whatever cost was typed in; the form shows the tariff and the resulting amount.
+- **Which sessions:** sessions made with a charger that uses the home tariff. Their cost is **kWh × the tariff valid on its charge date**, whatever cost was typed in; the form shows the tariff and the resulting amount.
 - **Other sessions:** they keep the cost entered.
-- **Repricing:** costs are computed when read. Adding or changing a tariff, or a home location, reprices the matching sessions everywhere: the list, reports, statements and exports.
+- **Repricing:** costs are computed when read. Adding or changing a tariff, or the charger of a session, reprices the matching sessions everywhere: the list, reports, statements and exports.
 - **Periods:**
   - Periods can't overlap.
   - An empty end date means "until further notice".
@@ -51,7 +74,7 @@ The **Tariffs** page (administrators) holds the price per kWh of home charging, 
 - **Warnings:**
   - The dashboard reminds administrators when no tariff covers today, with a link to the import.
   - The Tariffs page shows gaps between periods, and a last period that has ended.
-  - Home sessions on a date with no tariff show 🏠 *no tariff* and count as 0.
+  - Charger sessions on a date with no tariff show 🏠 *no tariff* and count as 0.
   - The reports point those sessions out.
 
 ## Pages
@@ -62,19 +85,21 @@ The **Tariffs** page (administrators) holds the price per kWh of home charging, 
 | **Sessions** `/sessions` | Every session with filters (car, period presets including this/last quarter or custom dates, reimbursement, text search on location/provider/notes); filters are kept in the URL. Sortable columns, pages of 25/50/100 rows or all (remembered per browser), a totals footer for the whole filtered set (kWh, cost, to reimburse). Click a row (or ✏) to edit or delete it, and ⧉ to duplicate it as a new session. Select rows to mark them *to reimburse* / *not to reimburse* in bulk. ⬇ *Export CSV* exports the filtered rows (`;`-separated, opens in Excel). ⬆ *Import* starts the Excel/CSV import wizard. |
 | **Reports** `/reports` | Car and period filters (default: last 12 months). Stat tiles (sessions, kWh, km, kWh/100 km, average per session, cost, average price per kWh, to reimburse). Charts: kWh per month (stacked by car), km per month, to reimburse vs. not, kWh by provider, kWh by location, and, when one car with a lease is selected, **lease mileage** (odometer readings against the allowance line). A monthly summary table repeats the numbers. |
 | **Reimbursement** `/reimbursement` | A printable statement of the sessions flagged *to be reimbursed* in a period (default: last quarter) for a car. Each session is priced with the home tariff or the cost entered, and totals are split into home and other charging, with signature lines. *🖨 Print / PDF* uses the browser's print (save as PDF). *⬇ Excel* and *⬇ CSV* export the same rows. |
-| **Tariffs** `/tariffs` | Home charging price periods and home locations (administrators, see above). |
+| **Chargers** `/chargers` | Chargers whose sessions are reimbursed, and the company paying them back (administrators, see above). |
+| **Tariffs** `/tariffs` | Home charging price periods and the CREG import (administrators, see above). |
 | **Users** `/users` | Accounts, roles and the cars assigned to each driver (administrators). |
 | **Cars** `/cars` | Add and edit cars: identity (name, make, model, year, plate, VIN, colour), specs (usable battery, max AC/DC power, WLTP range and consumption), leasing (company, contract, start/end, km per year, monthly cost, odometer at start), notes, active flag. A car with sessions can't be deleted; mark it inactive instead. |
 
 ### Charging session fields
 
-Car, **charge date**, odometer (km), location, provider, **kWh**, start time, end time, *to be reimbursed* flag. Cost and notes are optional. An end time earlier than the start time means the session ended the next day.
+Car, **charge date**, odometer (km), location, provider, **kWh**, start time, end time, *to be reimbursed* flag and its **reimbursement status**. Charger, cost and notes are optional. An end time earlier than the start time means the session ended the next day.
 
 Derived values: duration, average power (kW), price per kWh, and **Δ km** since the car's previous reading. A negative Δ km is flagged ⚠ in the list because it usually means a typo in the odometer.
 
 The session form helps you fill it in:
 - it suggests the locations and providers you used before
-- picking a known location fills in the provider and the reimbursement flag used there last time
+- picking a known location fills in the provider, charger and reimbursement flag used there last time
+- picking a charger ticks *to be reimbursed*, sets the status to *Recorded* and shows the tariff amount
 - it shows the car's last odometer reading
 - *Save & add another* keeps the car and the date for the next entry
 
@@ -165,13 +190,14 @@ Every endpoint needs a signed-in user (session cookie); drivers only see and cha
 | Method & path | |
 |---|---|
 | `GET/POST /api/cars`, `GET/PUT/DELETE /api/cars/{id}` | Cars, with session count, total kWh, last odometer and lease status |
-| `GET/POST /api/sessions`, `GET/PUT/DELETE /api/sessions/{id}` | Sessions. Filters: `car_id` (repeatable), `date_from`, `date_to`, `to_reimburse`, `q`, `limit` |
-| `PATCH /api/sessions/reimburse` | `{"ids": [...], "to_reimburse": true}` |
+| `GET/POST /api/sessions`, `GET/PUT/DELETE /api/sessions/{id}` | Sessions. Filters: `car_id`, `status`, `charger_id` (repeatable; `0` = no charger), `date_from`, `date_to`, `to_reimburse`, `q`, `limit` |
 | `GET /api/sessions/export.csv` | Same filters as the list |
 | `GET /api/sessions/suggestions?car_id=` | Values that pre-fill the session form |
 | `GET /api/reports` | Report data. Filters: `car_id`, `date_from`, `date_to` |
-| `GET /api/reports/reimbursement` | Reimbursement statement. Same filters, `fmt=json\|csv\|xlsx` |
-| `GET/POST /api/tariffs`, `PUT/DELETE /api/tariffs/{id}`, `GET/PUT /api/tariffs/home-locations` | Tariff periods and home locations (changes: administrators) |
+| `GET /api/reports/reimbursement` | Reimbursement statement. Same filters plus `status` (repeatable) and `company` (empty: sessions without a charger), `fmt=json\|csv\|xlsx` |
+| `GET/POST /api/tariffs`, `PUT/DELETE /api/tariffs/{id}` | Tariff periods (changes: administrators) |
+| `GET/POST /api/chargers`, `PUT/DELETE /api/chargers/{id}` | Chargers (changes: administrators) |
+| `PATCH /api/sessions/bulk` | `{"ids": [...], "reimbursement_status": "paid", "charger_id": 1, "clear_charger": false, "to_reimburse": true}`: only the fields given change |
 | `GET /api/tariffs/creg?region=`, `POST /api/tariffs/creg/upload`, `POST /api/tariffs/creg/apply` | CREG import: preview (from the website or a saved page), then apply the chosen quarters (administrators) |
 | `POST /api/auth/login\|logout\|password\|setup`, `GET /api/auth/me` | Sign-in and own account |
 | `GET/POST /api/users`, `PUT/DELETE /api/users/{id}` | Users (administrators) |

@@ -19,9 +19,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import Car, ChargeSession
+from .models import Car, Charger, ChargeSession
+from .schemas import ReimbursementStatus, default_status
 
-FIELDS = ("car", "charge_date", "odometer", "location", "provider", "kwh", "start_time", "end_time", "duration", "to_reimburse", "cost", "notes")
+FIELDS = (
+    "car", "charge_date", "odometer", "location", "provider", "kwh", "start_time", "end_time", "duration",
+    "to_reimburse", "cost", "notes", "charger", "reimbursement_status",
+)  # fmt: skip
 DateOrder = Literal["auto", "dmy", "mdy", "ymd"]
 
 
@@ -33,6 +37,8 @@ class ImportRequest(BaseModel):
     create_missing_cars: bool = False  # unknown names in the car column become new cars
     date_order: DateOrder = "auto"
     default_to_reimburse: bool = False  # when there is no reimbursement column
+    charger_id: int | None = None  # every row was charged with this charger (no charger column)
+    default_status: ReimbursementStatus | None = None  # for rows to be reimbursed without a status column/value
     skip_duplicates: bool = True
 
 
@@ -43,6 +49,7 @@ class ParsedRow:
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     car_name: str | None = None
+    charger_name: str | None = None
     values: dict[str, Any] = field(default_factory=dict)
 
 
@@ -51,6 +58,25 @@ class ParsedRow:
 _TRUE = {"yes", "y", "true", "1", "x", "oui", "o", "ja", "j", "si", "vrai", "waar", "ok", "✓", "✔", "business", "pro", "professional", "professionnel", "company", "work"}
 _FALSE = {"no", "n", "false", "0", "non", "nee", "neen", "faux", "onwaar", "-", "private", "prive", "privé", "personal", "perso", "personnel"}
 _EXCEL_EPOCH = date(1899, 12, 30)
+_STATUS_WORDS = {  # compared after norm(): lower case, no accents
+    "in_progress": ("in progress", "in_progress", "ongoing", "pending", "en cours", "bezig", "lopend", "in behandeling", "in uitvoering"),
+    "not_recorded": (
+        "not recorded",
+        "not_recorded",
+        "unrecorded",
+        "not exported",
+        "missing",
+        "non enregistre",
+        "pas enregistre",
+        "non exporte",
+        "niet geregistreerd",
+        "niet geexporteerd",
+        "ontbreekt",
+    ),
+    "recorded": ("recorded", "exported", "registered", "enregistre", "exporte", "geregistreerd", "geexporteerd"),
+    "invoiced": ("invoiced", "invoice", "billed", "facture", "facturee", "gefactureerd", "factuur"),
+    "paid": ("paid", "reimbursed", "refunded", "settled", "paye", "payee", "rembourse", "betaald", "terugbetaald", "vereffend"),
+}
 
 
 def norm(text: str) -> str:
@@ -161,6 +187,17 @@ def parse_time(raw: str) -> time | None:
     return time(hour % 24 if hour == 24 else hour, minute)
 
 
+def parse_status(raw: str) -> str | None:
+    """'Paid', 'facturé', 'niet geregistreerd'… → a reimbursement status. Empty → None."""
+    v = norm(raw).replace("-", " ")
+    if not v:
+        return None
+    for status, words in _STATUS_WORDS.items():  # "not recorded" is checked before "recorded"
+        if v in words or any(len(w) > 4 and w in v for w in words):
+            return status
+    raise ValueError
+
+
 def parse_duration(raw: str) -> int | None:
     """Minutes from '90', '1:30', '1h30', '1.5 h', '45 min'. Empty → None."""
     s = norm(raw).replace(",", ".")
@@ -194,6 +231,15 @@ def _cars_lookup(db: Session, scope: set[int] | None) -> dict[str, Car]:
     return lookup
 
 
+def _chargers_lookup(db: Session) -> dict[str, Charger]:
+    lookup: dict[str, Charger] = {}
+    for c in db.scalars(select(Charger)):
+        for key in (c.name, c.serial_number):
+            if key:
+                lookup.setdefault(re.sub(r"[\s\-.]", "", norm(key)), c)
+    return lookup
+
+
 def _dup_key(car_key: Any, d: date, kwh: float, odometer: int | None) -> tuple:
     return (car_key, d, round(kwh, 2), odometer)
 
@@ -206,6 +252,8 @@ def parse_rows(db: Session, req: ImportRequest, scope: set[int] | None = None) -
         col = mapping.get("charge_date", mapping.get("start_time"))
         order = detect_date_order([r[col] for r in req.rows if col is not None and col < len(r)]) if col is not None else "dmy"
     cars = _cars_lookup(db, scope)
+    chargers = _chargers_lookup(db)
+    fixed_charger = db.get(Charger, req.charger_id) if req.charger_id else None
     fixed_car = db.get(Car, req.car_id) if req.car_id and (scope is None or req.car_id in scope) else None
     existing = {_dup_key(s.car_id, s.charge_date, s.kwh, s.odometer) for s in db.scalars(select(ChargeSession))}
     seen: set[tuple] = set()
@@ -266,6 +314,14 @@ def parse_rows(db: Session, req: ImportRequest, scope: set[int] | None = None) -
         if cost is not None and cost < 0:
             p.errors.append("negative cost")
         reimb = parse("to_reimburse", "reimbursement", parse_bool)
+        status = parse("reimbursement_status", "status", parse_status)
+        charger: Charger | None = None
+        if cell.get("charger"):
+            charger = chargers.get(re.sub(r"[\s\-.]", "", norm(cell["charger"])))
+            if charger is None:
+                p.errors.append(f'unknown charger "{cell["charger"]}" (add it on the Chargers page)')
+        elif fixed_charger is not None:
+            charger = fixed_charger
         if charge_date and charge_date > date.today() + timedelta(days=1):
             p.warnings.append("date in the future")
 
@@ -278,10 +334,14 @@ def parse_rows(db: Session, req: ImportRequest, scope: set[int] | None = None) -
             "kwh": round(kwh, 3) if kwh is not None else None,
             "start_time": start_t,
             "end_time": end_t,
-            "to_reimburse": reimb if reimb is not None else ("to_reimburse" not in mapping and req.default_to_reimburse),
+            # Without a value: a charger's sessions, and sessions with a status, are to be reimbursed
+            "to_reimburse": reimb if reimb is not None else bool(charger or status or ("to_reimburse" not in mapping and req.default_to_reimburse)),
             "cost": round(cost, 2) if cost is not None else None,
             "notes": cell.get("notes") or None,
+            "charger_id": charger.id if charger else None,
         }
+        p.values["reimbursement_status"] = default_status(p.values["to_reimburse"], status or req.default_status, p.values["charger_id"])
+        p.charger_name = charger.name if charger else None
         for key, limit in (("location", 200), ("provider", 200)):
             if p.values[key] and len(p.values[key]) > limit:
                 p.values[key] = p.values[key][:limit]
@@ -353,6 +413,8 @@ def row_out(r: ParsedRow) -> dict[str, Any]:
         "start_time": v["start_time"].strftime("%H:%M") if v.get("start_time") else None,
         "end_time": v["end_time"].strftime("%H:%M") if v.get("end_time") else None,
         "to_reimburse": v.get("to_reimburse"),
+        "reimbursement_status": v.get("reimbursement_status"),
+        "charger_name": r.charger_name,
         "cost": v.get("cost"),
         "notes": v.get("notes"),
     }

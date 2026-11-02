@@ -89,7 +89,7 @@
             const today = EV.today();
             const tariffs = await EV.api('GET', '/api/tariffs');
             if (tariffs.some(t => t.valid_from <= today && (!t.valid_to || today <= t.valid_to))) return;
-            document.getElementById('tariff-note').innerHTML = `<div class="content" style="padding:14px 20px"><div class="note" style="margin:0">⚠ No home charging tariff covers today: home sessions of this quarter have no cost yet.
+            document.getElementById('tariff-note').innerHTML = `<div class="content" style="padding:14px 20px"><div class="note" style="margin:0">⚠ No home charging tariff covers today: this quarter's charger sessions have no cost yet.
                 <a href="/tariffs">Import it from the CREG →</a></div></div>`;
         } catch (err) { /* not essential */ }
     }
