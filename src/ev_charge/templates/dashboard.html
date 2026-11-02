@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Dashboard · EV Charge{% endblock %}
 {% block content %}
+<div id="tariff-note"></div>
 <div class="content">
     <div class="page-head">
         <h2>My cars</h2>
@@ -81,6 +82,18 @@
         }));
     }
 
+    async function tariffReminder() {
+        // Administrators: remind when no home tariff covers today (a new CREG quarter is usually published)
+        if (!EV.isAdmin()) return;
+        try {
+            const today = EV.today();
+            const tariffs = await EV.api('GET', '/api/tariffs');
+            if (tariffs.some(t => t.valid_from <= today && (!t.valid_to || today <= t.valid_to))) return;
+            document.getElementById('tariff-note').innerHTML = `<div class="content" style="padding:14px 20px"><div class="note" style="margin:0">⚠ No home charging tariff covers today: home sessions of this quarter have no cost yet.
+                <a href="/tariffs">Import it from the CREG →</a></div></div>`;
+        } catch (err) { /* not essential */ }
+    }
+
     async function load() {
         try {
             const [cars, recent] = await Promise.all([EV.loadCars(), EV.api('GET', '/api/sessions?limit=10')]);
@@ -96,6 +109,7 @@
     });
     document.addEventListener('ev:themechange', load);
     load();
+    tariffReminder();
 })();
 </script>
 {% endblock %}
