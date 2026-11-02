@@ -52,7 +52,7 @@ def list_tariffs(_: User = Depends(current_user), db: Session = Depends(get_db))
     for t in sorted(pricing.tariffs, key=lambda t: t.valid_from, reverse=True):
         o = TariffOut.model_validate(t)
         o.sessions = len(usage.get(t.id, []))
-        o.kwh = round(sum(usage.get(t.id, [])), 2)
+        o.kwh = round(sum(usage.get(t.id, [])), 3)
         out.append(o)
     return out
 

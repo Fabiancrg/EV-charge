@@ -87,7 +87,8 @@
     EV.esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const nf = (d) => new Intl.NumberFormat(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
     EV.num = (v, d = 0) => (v === null || v === undefined || v === '') ? '—' : nf(d).format(v);
-    EV.kwh = (v) => v == null ? '—' : `${EV.num(v, v >= 100 ? 0 : 1)} kWh`;
+    // Up to 3 decimals, without trailing zeros (12.5 kWh, 30.125 kWh)
+    EV.kwh = (v) => v == null ? '—' : `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(v)} kWh`;
     EV.km = (v) => v == null ? '—' : `${EV.num(v)} km`;
     EV.money = (v, d = 2) => {
         if (v == null) return '—';

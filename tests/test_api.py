@@ -115,3 +115,15 @@ def test_duration_wraps_midnight():
 
     assert duration_minutes(time(23, 0), time(1, 30)) == 150
     assert duration_minutes(time(8, 0), None) is None
+
+
+def test_kwh_keeps_three_decimals(client, car):
+    s = _session(client, car["id"], kwh=30.125)
+    assert s["kwh"] == 30.125
+    _session(client, car["id"], kwh=0.005, charge_date="2026-03-02")
+    assert client.get("/api/reports").json()["totals"]["kwh"] == 30.13
+    assert client.get(f"/api/cars/{car['id']}").json()["total_kwh"] == 30.13
+    # The import tells 30.125 and 30.126 apart (not duplicates)
+    body = {"rows": [["2026-03-01", "30,126"], ["2026-03-01", "30.125"]], "mapping": {"charge_date": 0, "kwh": 1}, "car_id": car["id"]}
+    rows = client.post("/api/import/sessions/preview", json=body).json()["rows"]
+    assert [(r["kwh"], r["status"]) for r in rows] == [(30.126, "ok"), (30.125, "duplicate")]

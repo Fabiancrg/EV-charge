@@ -46,7 +46,10 @@ Each session to be reimbursed has a **reimbursement status**:
 | 💰 **Paid** | The amount was paid |
 
 - **Defaults:** a new session to be reimbursed starts as *Recorded* with a charger, *Not recorded* without one. A session not to be reimbursed has no status. After upgrading, sessions already flagged *to be reimbursed* start as *Not recorded*.
-- **Sessions page:** charger and status columns, *Status* and *Charger* filters (*Not paid yet* shows everything but *Paid*), and bulk *Set status…* / *Set charger…* for the selected rows. A typical flow is: filter a quarter → select all → *Invoiced* when the invoice arrives → *Paid* when the money is in.
+- **Sessions page:** charger and status columns, *Status* and *Charger* filters (*Not paid yet* shows everything but *Paid*), and bulk *Set status…* / *Set charger…* for the selected rows.
+  - *☑ Select all N matching* selects every session matching the filters, on all pages; changing a filter starts a new selection.
+  - Changes to more than 25 sessions ask for confirmation.
+  - Typical flows: filter *Charger: No charger* plus a period or a search → select all matching → *Set charger…*. Or filter a quarter → select all matching → *Invoiced* when the invoice arrives → *Paid* when the money is in.
 - **Reimbursement statement:** filters on status and **reimbursing company**, so the statement for 50five can be checked against its invoice. The charger and status are shown per session, totals per status, and both appear in the Excel and CSV exports.
 - **Import:** a *Charger* column (matched on the charger's name or serial number) and a *Status* column are recognised. Statuses can be written as *Paid*, *payé*, *betaald*, *facturé*, *niet geregistreerd*… Without a charger column, one charger can be set for every row, and without a status column, a status for every row to be reimbursed.
 

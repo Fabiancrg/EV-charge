@@ -123,7 +123,7 @@ def car_out(db: Session, car: Car, today: date | None = None) -> CarOut:
     last = max(with_odo, key=session_sort_key) if with_odo else None
     out = CarOut.model_validate({**{k: getattr(car, k) for k in CarIn.model_fields}, "id": car.id})
     out.session_count = len(sessions)
-    out.total_kwh = round(sum(s.kwh for s in sessions), 2)
+    out.total_kwh = round(sum(s.kwh for s in sessions), 3)
     out.last_odometer = last.odometer if last else None
     out.last_charge_date = max((s.charge_date for s in sessions), default=None)
     out.lease = lease_status(car, out.last_odometer, today)

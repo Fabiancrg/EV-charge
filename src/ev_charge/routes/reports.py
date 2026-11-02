@@ -99,7 +99,7 @@ def reimbursement(
     for r in range(first, ws.max_row + 1):
         ws.cell(r, 1).number_format = "yyyy-mm-dd"
         ws.cell(r, 1).value = date.fromisoformat(ws.cell(r, 1).value)
-        ws.cell(r, col["kwh"]).number_format = "0.00"
+        ws.cell(r, col["kwh"]).number_format = "0.000"
         ws.cell(r, col["price_per_kwh"]).number_format = "0.0000"
         ws.cell(r, col["amount"]).number_format = "#,##0.00"
     ws.append(total)

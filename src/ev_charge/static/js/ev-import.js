@@ -296,7 +296,8 @@
         const fmt = (r, k) => {
             const v = r[k];
             if (k === 'charge_date') return v ? EV.date(v) : '';
-            if (k === 'kwh' || k === 'cost') return v == null ? '' : EV.num(v, 2);
+            if (k === 'kwh') return v == null ? '' : EV.num(v, 3);
+            if (k === 'cost') return v == null ? '' : EV.num(v, 2);
             if (k === 'odometer') return v == null ? '' : EV.num(v);
             if (k === 'to_reimburse') return v ? '💶 Yes' : '';
             if (k === 'reimbursement_status') return EV.statusBadge(v);

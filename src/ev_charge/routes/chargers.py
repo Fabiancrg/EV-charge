@@ -42,7 +42,7 @@ def list_chargers(user: User = Depends(current_user), db: Session = Depends(get_
         o = ChargerOut.model_validate(c)
         used = usage.get(c.id, [])
         o.sessions = len(used)
-        o.kwh = round(sum(s.kwh for s in used), 2)
+        o.kwh = round(sum(s.kwh for s in used), 3)
         o.last_used = max((s.charge_date for s in used), default=None)
         out.append(o)
     return out
