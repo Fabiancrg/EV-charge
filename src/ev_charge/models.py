@@ -110,6 +110,7 @@ class Charger(Base):
     # Sessions created from the charger (live or history) go to this car, at this location
     default_car_id: Mapped[int | None] = mapped_column(ForeignKey("cars.id", ondelete="SET NULL"))
     default_location: Mapped[str | None] = mapped_column(String(200))
+    default_provider: Mapped[str | None] = mapped_column(String(200))  # e.g. the home electricity supplier
     # Connection to the charger's cloud API (connectors/): kind ("ohme"), encrypted credentials, polling
     connector: Mapped[str | None] = mapped_column(String(30))
     connector_secret: Mapped[str | None] = mapped_column(Text)  # encrypted JSON (secretbox)

@@ -20,6 +20,9 @@
             <option value="in_progress">⏳ In progress</option><option value="not_recorded">⚠ Not recorded</option><option value="recorded">✓ Recorded</option>
             <option value="invoiced">🧾 Invoiced</option><option value="paid">💰 Paid</option></select>
         <select id="bulk-charger" style="width:auto;padding:5px 8px"><option value="">Set charger…</option></select>
+        <span style="display:inline-flex;gap:4px"><input type="text" id="bulk-provider" list="dl-bulk-providers" placeholder="Set provider…" style="width:170px;padding:5px 8px">
+            <datalist id="dl-bulk-providers"></datalist>
+            <button class="btn btn-ghost btn-sm" id="bulk-provider-set" title="Set this provider on the selected sessions (empty: clear it)">Set</button></span>
         <button class="btn btn-ghost btn-sm" data-bulk="true">💶 Mark to reimburse</button>
         <button class="btn btn-ghost btn-sm" data-bulk="false">Mark not to reimburse</button>
         <button class="btn btn-ghost btn-sm" id="bulk-clear" title="Unselect all">✕ Clear selection</button>
@@ -212,6 +215,16 @@
         // A status only applies to sessions to be reimbursed: setting one flags them
         if (st) bulk({ reimbursement_status: st, to_reimburse: true }, `Set the status “${EV.statusLabel(st)}”`);
     });
+    document.getElementById('bulk-provider-set').addEventListener('click', () => {
+        const input = document.getElementById('bulk-provider');
+        const v = input.value.trim();
+        if (!v && !confirm('Clear the provider of the selected sessions?')) return;
+        bulk(v ? { provider: v } : { clear_provider: true }, v ? `Set the provider “${v}”` : 'Clear the provider').then(() => { input.value = ''; });
+    });
+    document.getElementById('bulk-provider').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('bulk-provider-set').click(); });
+    EV.api('GET', '/api/sessions/suggestions').then(sg => {
+        document.getElementById('dl-bulk-providers').innerHTML = sg.providers.map(v => `<option value="${EV.esc(v)}">`).join('');
+    }).catch(() => {});
     document.getElementById('bulk-charger').addEventListener('change', (e) => {
         const v = e.target.value;
         e.target.value = '';

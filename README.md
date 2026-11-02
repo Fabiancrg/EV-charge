@@ -32,6 +32,11 @@ The app still listens on `127.0.0.1` by default. To reach it from your phone or 
 The **Chargers** page (administrators) lists the chargers whose sessions are reimbursed: a home wall box such as a Zaptec Go, a mobile charger such as an Ohme…
 
 - **Fields:** name, brand, model, serial number, the **reimbursing company** (the one that pays the sessions back, e.g. *50five* or *Enco e-Mobility*), whether its sessions are priced at the home tariff (yes by default), notes, active flag.
+- **Defaults for its sessions:** car, location, and **provider**. The provider is who supplies the electricity, e.g. your home energy supplier. Don't use the reimbursing company: it pays you back but doesn't supply the electricity.
+- **Where the defaults apply:**
+  - sessions created live or imported from the charger's history get them
+  - picking the charger in the session form fills in the provider
+  - setting the charger in bulk fills in empty providers
 - **In a session:** picking a charger makes the session *to be reimbursed* and, when the charger uses the home tariff, prices it at the CREG tariff of its date (see below). Location no longer matters.
 - **Rules:** a charger used by sessions can't be deleted; mark it inactive. An inactive charger isn't offered for new sessions, and older sessions keep it.
 
@@ -46,7 +51,7 @@ Each session to be reimbursed has a **reimbursement status**:
 | 💰 **Paid** | The amount was paid |
 
 - **Defaults:** a new session to be reimbursed starts as *Recorded* with a charger, *Not recorded* without one. A session not to be reimbursed has no status. After upgrading, sessions already flagged *to be reimbursed* start as *Not recorded*.
-- **Sessions page:** charger and status columns, *Status* and *Charger* filters (*Not paid yet* shows everything but *Paid*), and bulk *Set status…* / *Set charger…* for the selected rows.
+- **Sessions page:** charger and status columns, *Status* and *Charger* filters (*Not paid yet* shows everything but *Paid*), and bulk *Set status…* / *Set charger…* / *Set provider…* for the selected rows. An empty provider clears it.
   - *☑ Select all N matching* selects every session matching the filters, on all pages; changing a filter starts a new selection.
   - Changes to more than 25 sessions ask for confirmation.
   - Typical flows: filter *Charger: No charger* plus a period or a search → select all matching → *Set charger…*. Or filter a quarter → select all matching → *Invoiced* when the invoice arrives → *Paid* when the money is in.
@@ -235,7 +240,7 @@ Every endpoint needs a signed-in user (session cookie); drivers only see and cha
 | `GET/POST /api/chargers`, `PUT/DELETE /api/chargers/{id}` | Chargers, with their live state (changes: administrators) |
 | `GET /api/chargers/connectors`, `PUT /api/chargers/{id}/connection`, `POST /api/chargers/{id}/poll` | Charger APIs available, connect/disconnect a charger (tests the login), read it now |
 | `GET /api/chargers/{id}/history?date_from=&date_to=&car_id=`, `POST /api/chargers/{id}/history/apply` | History import: preview, then add/link the chosen sessions (administrators) |
-| `PATCH /api/sessions/bulk` | `{"ids": [...], "reimbursement_status": "paid", "charger_id": 1, "clear_charger": false, "to_reimburse": true}`: only the fields given change |
+| `PATCH /api/sessions/bulk` | `{"ids": [...], "reimbursement_status": "paid", "charger_id": 1, "clear_charger": false, "provider": "Engie", "clear_provider": false, "to_reimburse": true}`: only the fields given change |
 | `GET /api/tariffs/creg?region=`, `POST /api/tariffs/creg/upload`, `POST /api/tariffs/creg/apply` | CREG import: preview (from the website or a saved page), then apply the chosen quarters (administrators) |
 | `POST /api/auth/login\|logout\|password\|setup`, `GET /api/auth/me` | Sign-in and own account |
 | `GET/POST /api/users`, `PUT/DELETE /api/users/{id}` | Users (administrators) |

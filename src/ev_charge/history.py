@@ -99,7 +99,7 @@ def apply(db: Session, c: Charger, rebuilt: list[Rebuilt], keys: set[str], car_i
         if r.key in keys and item["status"] == "new":
             db.add(
                 ChargeSession(
-                    car_id=car_id, charge_date=r.start.date(), location=c.default_location, kwh=r.kwh,
+                    car_id=car_id, charge_date=r.start.date(), location=c.default_location, provider=c.default_provider, kwh=r.kwh,
                     start_time=r.start.time().replace(second=0, microsecond=0), end_time=r.end.time().replace(second=0, microsecond=0),
                     to_reimburse=True, reimbursement_status="recorded", charger_id=c.id, external_ref=_ref(c, r),
                     notes=f"Imported from the {c.name} charging history" + ("" if r.exact else " (times rounded to the hour)"),
@@ -110,6 +110,7 @@ def apply(db: Session, c: Charger, rebuilt: list[Rebuilt], keys: set[str], car_i
             s = db.get(ChargeSession, item["match"]["id"])
             if s is not None:
                 s.charger_id = c.id
+                s.provider = s.provider or c.default_provider
                 s.to_reimburse = True
                 s.reimbursement_status = s.reimbursement_status or "recorded"
                 linked += 1

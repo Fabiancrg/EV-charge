@@ -100,6 +100,7 @@ def apply_reading(db: Session, c: Charger, r: LiveReading, now: datetime) -> str
                 car_id=c.default_car_id,
                 charge_date=start.date(),
                 location=c.default_location,
+                provider=c.default_provider,
                 kwh=kwh,
                 start_time=start.time().replace(second=0, microsecond=0),
                 end_time=now.time().replace(second=0, microsecond=0),

@@ -298,7 +298,13 @@
         f.kwh.addEventListener('input', () => { updateDuration(); updateHomeCost(); });
         f.charge_date.addEventListener('change', updateHomeCost);
         // A charger's sessions are reimbursed, and recorded by the charger by default
+        let lastCharger = null;
+        f.charger_id.addEventListener('focus', () => { lastCharger = chargerOf(f.charger_id.value); });
         f.charger_id.addEventListener('change', () => {
+            // The charger's default provider fills an empty provider, or replaces the previous charger's default
+            const ch = chargerOf(f.charger_id.value);
+            if (ch?.default_provider && (!f.provider.value || f.provider.value === lastCharger?.default_provider)) f.provider.value = ch.default_provider;
+            lastCharger = ch;
             if (f.charger_id.value) {
                 f.to_reimburse.checked = true;
                 if (!f.reimbursement_status.value || f.reimbursement_status.value === 'not_recorded') f.reimbursement_status.value = 'recorded';

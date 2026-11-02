@@ -188,9 +188,11 @@ def update_session(session_id: int, body: SessionIn, user: User = Depends(curren
 
 @router.patch("/bulk")
 def bulk_update(body: SessionBulk, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-    """Change the reimbursement flag, reimbursement status and/or charger of the selected sessions."""
+    """Change the reimbursement flag, reimbursement status, charger and/or provider of the selected sessions."""
+    charger = None
     if body.charger_id is not None:
         _check_charger(db, body.charger_id)
+        charger = db.get(Charger, body.charger_id)
     scope = car_scope(user)
     rows = [s for s in db.scalars(select(ChargeSession).where(ChargeSession.id.in_(body.ids))) if scope is None or s.car_id in scope]
     for s in rows:
@@ -200,6 +202,12 @@ def bulk_update(body: SessionBulk, user: User = Depends(current_user), db: Sessi
             s.charger_id = body.charger_id
             if body.to_reimburse is None:
                 s.to_reimburse = True  # a charger's sessions are reimbursed
+            if not s.provider and charger is not None and charger.default_provider:
+                s.provider = charger.default_provider  # fill an empty provider with the charger's default
+        if body.clear_provider:
+            s.provider = None
+        elif body.provider is not None:
+            s.provider = body.provider
         if body.to_reimburse is not None:
             s.to_reimburse = body.to_reimburse
         status = body.reimbursement_status if body.reimbursement_status and s.to_reimburse else s.reimbursement_status
