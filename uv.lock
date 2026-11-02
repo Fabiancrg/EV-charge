@@ -167,6 +167,19 @@ wheels = [
 ]
 
 [[package]]
+name = "aiosmtpd"
+version = "1.4.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "atpublic" },
+    { name = "attrs" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c4/ca/b2b7cc880403ef24be77383edaadfcf0098f5d7b9ddbf3e2c17ef0a6af0d/aiosmtpd-1.4.6.tar.gz", hash = "sha256:5a811826e1a5a06c25ebc3e6c4a704613eb9a1bcf6b78428fbe865f4f6c9a4b8", size = 152775, upload-time = "2024-05-18T11:37:50.029Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/39/d401756df60a8344848477d54fdf4ce0f50531f6149f3b8eaae9c06ae3dc/aiosmtpd-1.4.6-py3-none-any.whl", hash = "sha256:72c99179ba5aa9ae0abbda6994668239b64a5ce054471955fe75f581d2592475", size = 154263, upload-time = "2024-05-18T11:37:47.877Z" },
+]
+
+[[package]]
 name = "alembic"
 version = "1.20.1"
 source = { registry = "https://pypi.org/simple" }
@@ -209,6 +222,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a1/98/7e457a3b014976887a050561955c0b76e1e7e2d6e27b78ecef2ef80518f2/anyio-4.16.0.tar.gz", hash = "sha256:59bb03251907983d1603d27c3087ddb1e93299ea2163adcdba37899a4fb12ffb", size = 310971, upload-time = "2026-11-01T11:20:07.282Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a9/16/7757fb84c819accc7d7e9af5291b261e4abb8627ee040f99e7d35ef2457a/anyio-4.16.0-py3-none-any.whl", hash = "sha256:c66ae634e0b8228396b801741beb3294326d4b6102f7bba4041c0dfb58c29026", size = 134521, upload-time = "2026-11-01T11:20:05.59Z" },
+]
+
+[[package]]
+name = "atpublic"
+version = "9.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/08/3f/23b2643edfae61210baee60eec95873a4ad4fc6a7c096a725f240a0bf4db/atpublic-9.0.0.tar.gz", hash = "sha256:61ea62d8445d2aaa83b6dffaa3d90f99fcec10e16683ee9b13792cdcdafa0966", size = 27443, upload-time = "2026-10-13T01:49:05.987Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/34/d1/875c831006b60a9b93d8d5aba734fde33402d9136785d824fa0ba8765731/atpublic-9.0.0-py3-none-any.whl", hash = "sha256:449c3c4f0c74df79749d6fe225ba55e2a2fce34b303f0329211e4d6989ed6f6e", size = 11111, upload-time = "2026-10-13T01:49:05.07Z" },
 ]
 
 [[package]]
@@ -424,6 +446,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "aiosmtpd" },
     { name = "httpx" },
     { name = "pytest" },
     { name = "ruff" },
@@ -446,6 +469,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "aiosmtpd", specifier = ">=1.4" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "ruff", specifier = ">=0.15.0" },
