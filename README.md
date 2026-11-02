@@ -4,28 +4,73 @@ Record the charging sessions of your EV cars and report on them: energy, distanc
 
 Same stack and look as Flow Manager: FastAPI, SQLAlchemy + Alembic (SQLite), Jinja pages that load their data from a JSON API, and Chart.js for the charts (vendored, so it works offline).
 
-## Users and roles
+## Users, roles and permissions
 
-On first start, every page leads to **/setup**, where you create the first administrator. Everybody else gets an account from the **Users** page.
+On first start, every page leads to **/setup**, where you create the first administrator. Users are managed on **Admin → Users & car access**, roles on **Admin → Roles & permissions**.
 
-| Role | Can do |
+**Roles are sets of permissions.** Each user has:
+- a **global role**: its app-wide permissions apply. If the role is marked *all cars*, its car permissions apply to **every car**.
+- a **role on each car** they work with, e.g. *Driver* on the EV6 and *Viewer* on the Model 3. Only the role's car permissions apply, on that car.
+
+| Permission | Allows |
 |---|---|
-| **Administrator** | Everything: cars, chargers, every session, tariffs, users. |
-| **Driver** | Works only with the **cars assigned to them**, on the Users page. A driver can add, edit, delete, import and export those cars' sessions, and see their dashboard, reports and reimbursement statements. Their cars are read-only for them, and the Tariffs and Users pages aren't available. |
+| `users:manage` | Manage users, their global role and their role on each car |
+| `roles:manage` | Create and edit roles |
+| `settings:manage` | Single sign-on settings |
+| `audit:read` | Read the audit log |
+| `cars:manage` | Add and delete cars |
+| `chargers:manage` | Chargers, their connection, history import |
+| `tariffs:manage` | Home charging tariffs, CREG import |
+| `tokens:create` | Create personal API tokens |
+| `car:view` *(per car)* | See the car, its sessions, reports, statements, live charger |
+| `car:edit` *(per car)* | Edit the car (specs, lease) |
+| `sessions:create` / `sessions:edit` / `sessions:import` *(per car)* | Add / edit and delete / import sessions |
+| `reimbursement:manage` *(per car)* | Change the *to be reimbursed* flag and the reimbursement status |
 
-Details:
+- **Wildcards:** `*` means everything, and `sessions:*` means every sessions permission.
+- **Built-in roles** can't be deleted, but their permissions can be changed:
+  - **Administrator:** everything, all cars.
+  - **Driver:** view, add, edit and import sessions, reimbursement, API tokens.
+  - **Viewer:** view only.
+  - **Accountant:** view and reimbursement, all cars.
+- **Upgrading:** former *admin* users become Administrators; former *drivers* get the Driver role, globally and on each car they had.
+- **Safeguard:** there is always at least one active user whose role can manage users.
+- **Admin-level permissions:** `users:manage` and `roles:manage` let their holders give themselves any permission, so keep them for administrators.
+- **Reimbursement without the permission:** when someone without `reimbursement:manage` adds or edits a session, the reimbursement flag and status follow the defaults or stay unchanged.
+- **Bulk changes** skip the sessions on cars where the caller lacks the permission, and the result tells how many were skipped.
 
-- **Sign-in:** username and password.
-  - Passwords are hashed with scrypt and need at least 8 characters.
-  - A sign-in lasts `session_days` (30 by default).
-  - After 8 failed attempts in 15 minutes, sign-in for that username or address is blocked for a while.
-- **Account changes:** everyone can change their own password (👤 menu), which signs out their other browsers. Disabling a user, or changing their password from the Users page, signs them out.
-- **Safeguards:** the last active administrator can't be demoted, disabled or deleted, and you can't delete your own account. Deleting a user keeps their sessions.
-- **Entered by:** each session records who entered it, shown in the sessions list and CSV export.
-- **Locked out?** Run `ev-charge --reset-password USERNAME` on the server. It asks for the new password and reactivates the account.
-- **Cross-site protection:** the cookie is HttpOnly and SameSite=Lax, and requests that change data are refused when they come from another site.
+**Sign-in.**
+- **Password:** passwords are hashed with scrypt and need at least 8 characters. After 8 failed attempts in 15 minutes, sign-in for that username or address is blocked for a while.
+- **Single sign-on:** see below.
+- **Session length:** `session_days`, 30 by default.
+- **Cookie:** HttpOnly and SameSite=Lax. Requests that change data are refused when they come from another site.
+- **Locked out?** Run `ev-charge --reset-password USERNAME` on the server.
 
-The app still listens on `127.0.0.1` by default. To reach it from your phone or another computer, set `host` to `0.0.0.0`, and use HTTPS: set `ssl_certfile`/`ssl_keyfile`, or put it behind a reverse proxy that terminates HTTPS.
+**My account** (👤 menu) lists **where you are signed in**, with browser, IP, last activity and method. You can sign out one session, or all the others. Administrators can *sign a user out everywhere*; disabling a user or changing their password does it too.
+
+**API tokens.** From *My account*, users with `tokens:create` create personal tokens for scripts or Home Assistant:
+- **Use:** send `Authorization: Bearer evc_…`. The API is documented at `/docs`.
+- **Permissions:** a token can only do what its owner can, narrowed to the permissions chosen for it, and it can't manage account settings or create tokens.
+- **Lifetime:** tokens expire after 30 days, 90 days, 1 year or never, and can be revoked. Only a hash is stored; the token is shown once.
+
+**Audit log** (*Admin → Audit log*, `audit:read`). It records sign-ins and failed sign-ins (password or SSO), user, role, token and SSO-settings changes, and **every change made through the app or the API**, such as `cars.update cars:3`, `sessions.bulk` or `chargers.connection`. Each entry has the user, time, IP and details, and the log can be filtered and searched. Events older than `audit_retention_days` (730) are deleted at startup.
+
+## Single sign-on (Authelia, OpenID Connect)
+
+*Admin → Single sign-on* (`settings:manage`) connects EV Charge to an OpenID Connect provider: Authelia, Keycloak, Entra ID, Google… The sign-in page then shows **Sign in with Authelia**.
+
+1. **In Authelia:** add EV Charge as a client. The page shows the `identity_providers.oidc.clients` entry to paste into `configuration.yml`, with the redirect URI `https://<ev-charge>/auth/sso/callback`. Store the secret's digest (`authelia crypto hash generate pbkdf2`).
+2. **In EV Charge:** enter the issuer URL (e.g. `https://auth.example.com`), the client ID and the secret (stored encrypted), and click *Test the provider*. Set the *Redirect URI* when EV Charge is behind a reverse proxy with another public URL.
+3. **Accounts:**
+   - A user is found by their SSO account. Otherwise they're linked to an existing user with the same username (`preferred_username`) or e-mail. Otherwise they're created, if *auto-create* is on, with the chosen default global role.
+   - **Group → role** mappings, from the `groups` claim, set the global role at each sign-in; the first match wins. The role on each car is given on the Users page.
+4. **Password sign-in** can be turned off once you have signed in with SSO yourself; the app refuses to turn it off before, to avoid locking you out. If the provider is down, set `"allow_local_login": true` in config.json (or `ALLOW_LOCAL_LOGIN=1`) and restart.
+
+Technically:
+- the authorization code flow, with PKCE (S256), `state` and `nonce`;
+- the flow state is kept in an encrypted, short-lived cookie;
+- the ID token is received directly from the provider's token endpoint over TLS, so, as OpenID Connect allows, its signature isn't checked, but its issuer, audience, expiry and nonce are;
+- `userinfo` adds the e-mail, name and groups.
 
 ## Chargers and reimbursement status
 
@@ -127,7 +172,8 @@ The **Tariffs** page (administrators) holds the price per kWh of home charging, 
 | **Reimbursement** `/reimbursement` | A printable statement of the sessions flagged *to be reimbursed* in a period (default: last quarter) for a car. Each session is priced with the home tariff or the cost entered, and totals are split into home and other charging, with signature lines. *🖨 Print / PDF* uses the browser's print (save as PDF). *⬇ Excel* and *⬇ CSV* export the same rows. |
 | **Chargers** `/chargers` | Chargers whose sessions are reimbursed, and the company paying them back (administrators, see above). |
 | **Tariffs** `/tariffs` | Home charging price periods and the CREG import (administrators, see above). |
-| **Users** `/users` | Accounts, roles and the cars assigned to each driver (administrators). |
+| **Users**, **Roles**, **Single sign-on**, **Audit log** (Admin menu) | Accounts with their global role and role per car; roles and permissions; OpenID Connect settings; audit log (see above). |
+| **My account** `/account` | Where you are signed in, your API tokens, your permissions. |
 | **Cars** `/cars` | Add and edit cars: identity (name, make, model, year, plate, VIN, colour), specs (usable battery, max AC/DC power, WLTP range and consumption), leasing (company, contract, start/end, km per year, monthly cost, odometer at start), notes, active flag. A car with sessions can't be deleted; mark it inactive instead. |
 
 ### Charging session fields
@@ -207,6 +253,8 @@ Then open http://127.0.0.1:8000. The interactive API docs are at `/docs`.
 | `ssl_certfile` / `ssl_keyfile` | none | Serve HTTPS when both are set |
 | `log_level` | `INFO` | |
 | `session_days` | `30` | How long a sign-in lasts |
+| `allow_local_login` | `false` | Re-allow password sign-in when single sign-on is set to be the only way in (lock-out escape); also `ALLOW_LOCAL_LOGIN=1` |
+| `audit_retention_days` | `730` | Audit events older than this are deleted at startup (`0`: keep all) |
 | `charger_polling` / `charger_poll_seconds` | `true` / `60` | Read the connected chargers in the background (`CHARGER_POLLING=0` disables it) |
 | `creg_url` | the CREG home-charging tariff page (FR) | Page read by *Import from CREG* |
 
@@ -226,7 +274,7 @@ python ev_charge.pyz --config config.json
 
 ## API
 
-Every endpoint needs a signed-in user (session cookie); drivers only see and change their cars' data.
+Every endpoint needs a signed-in user (session cookie) or an API token (`Authorization: Bearer evc_…`), and checks the permissions above: global ones, or per car.
 
 | Method & path | |
 |---|---|
@@ -242,8 +290,13 @@ Every endpoint needs a signed-in user (session cookie); drivers only see and cha
 | `GET /api/chargers/{id}/history?date_from=&date_to=&car_id=`, `POST /api/chargers/{id}/history/apply` | History import: preview, then add/link the chosen sessions (administrators) |
 | `PATCH /api/sessions/bulk` | `{"ids": [...], "reimbursement_status": "paid", "charger_id": 1, "clear_charger": false, "provider": "Engie", "clear_provider": false, "to_reimburse": true}`: only the fields given change |
 | `GET /api/tariffs/creg?region=`, `POST /api/tariffs/creg/upload`, `POST /api/tariffs/creg/apply` | CREG import: preview (from the website or a saved page), then apply the chosen quarters (administrators) |
-| `POST /api/auth/login\|logout\|password\|setup`, `GET /api/auth/me` | Sign-in and own account |
-| `GET/POST /api/users`, `PUT/DELETE /api/users/{id}` | Users (administrators) |
+| `POST /api/auth/login\|logout\|password\|setup`, `GET /api/auth/me` | Sign-in and own account (`me` includes the permissions, global and per car) |
+| `GET /api/auth/sessions`, `DELETE /api/auth/sessions/{id}`, `POST /api/auth/sessions/revoke-others` | My sign-ins |
+| `GET/POST /api/auth/tokens`, `DELETE /api/auth/tokens/{id}` | My API tokens |
+| `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`, `POST /api/users/{id}/signout` | Users, global role and role per car (`users:manage`) |
+| `GET/POST /api/roles`, `PUT/DELETE /api/roles/{id}`, `GET /api/roles/permissions` | Roles and the permission catalogue (`roles:manage`) |
+| `GET/PUT /api/settings/sso`, `POST /api/settings/sso/test` | Single sign-on settings (`settings:manage`) |
+| `GET /api/audit` | Audit log (`audit:read`); filters `action` (or `user.` for a family), `username`, `q`, dates, `limit`/`offset` |
 | `POST /api/import/...` | Import wizard (see above) |
 
 ## Development

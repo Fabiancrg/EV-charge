@@ -4,7 +4,7 @@
 <div class="content">
     <div class="page-head">
         <h2>Cars</h2>
-        {% if user.is_admin %}<button class="btn" id="add-car">＋ Add a car</button>{% endif %}
+        {% if 'cars:manage' in can %}<button class="btn" id="add-car">＋ Add a car</button>{% endif %}
     </div>
     <div class="table-wrap" id="cars-table"><p class="muted">Loading…</p></div>
 </div>
@@ -68,24 +68,26 @@
     function open(car) {
         editing = car;
         document.getElementById('cf-title').textContent = car ? `Edit ${car.name}` : 'New car';
-        document.getElementById('cf-delete').style.display = car && EV.isAdmin() ? '' : 'none';
+        const editable = car ? EV.canCar('car:edit', car.id) : EV.can('cars:manage');
+        document.getElementById('cf-delete').style.display = car && EV.can('cars:manage') ? '' : 'none';
         form.reset();
         if (car) EV.fillForm(form, car); else form.active.checked = true;
         // Drivers see their cars read-only
-        form.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = !EV.isAdmin(); });
-        form.querySelector('button[type=submit]').style.display = EV.isAdmin() ? '' : 'none';
-        if (!EV.isAdmin()) document.getElementById('cf-title').textContent = car.name;
+        // Read-only without the right to edit this car
+        form.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = !editable; });
+        form.querySelector('button[type=submit]').style.display = editable ? '' : 'none';
+        if (!editable) document.getElementById('cf-title').textContent = car.name;
         EV.openModal('car-modal');
     }
 
     function render() {
         const box = document.getElementById('cars-table');
         if (!cars.length) {
-            box.innerHTML = EV.isAdmin() ? '<div class="empty-state"><h3>No car yet</h3><p>Add your first car with ＋ Add a car.</p></div>'
-                : '<div class="empty-state"><h3>No car assigned to you</h3><p>Ask an administrator to assign your car(s) to you.</p></div>';
+            box.innerHTML = EV.can('cars:manage') ? '<div class="empty-state"><h3>No car yet</h3><p>Add your first car with ＋ Add a car.</p></div>'
+                : '<div class="empty-state"><h3>No car for you yet</h3><p>Ask an administrator to give you access to your car(s).</p></div>';
             return;
         }
-        box.innerHTML = `<table><thead><tr><th>Name</th><th>Car</th><th class="hide-sm">Plate</th><th class="num hide-sm">Battery</th><th class="hide-sm">Lease</th><th class="num">Odometer</th><th class="num hide-sm">Sessions</th><th class="hide-sm">Drivers</th><th>Status</th><th></th></tr></thead><tbody>
+        box.innerHTML = `<table><thead><tr><th>Name</th><th>Car</th><th class="hide-sm">Plate</th><th class="num hide-sm">Battery</th><th class="hide-sm">Lease</th><th class="num">Odometer</th><th class="num hide-sm">Sessions</th><th class="hide-sm">Access</th><th>Status</th><th></th></tr></thead><tbody>
             ${cars.map(c => `<tr>
                 <td><strong>${EV.carDot(c.id)}${EV.esc(c.name)}</strong></td>
                 <td>${EV.esc([c.make, c.model, c.year].filter(Boolean).join(' '))}</td>
@@ -96,7 +98,7 @@
                 <td class="num hide-sm">${EV.num(c.session_count)}</td>
                 <td class="hide-sm small">${c.drivers.map(EV.esc).join('<br>') || '<span class="muted">—</span>'}</td>
                 <td>${c.active ? '<span class="badge badge-ok">Active</span>' : '<span class="badge badge-warn">Inactive</span>'}</td>
-                <td>${EV.isAdmin() ? `<button class="btn btn-ghost btn-sm" data-edit="${c.id}">✏ Edit</button>` : `<button class="btn btn-ghost btn-sm" data-edit="${c.id}">👁 View</button>`}</td>
+                <td>${EV.canCar('car:edit', c.id) ? `<button class="btn btn-ghost btn-sm" data-edit="${c.id}">✏ Edit</button>` : `<button class="btn btn-ghost btn-sm" data-edit="${c.id}">👁 View</button>`}</td>
             </tr>`).join('')}</tbody></table>`;
     }
 
@@ -125,7 +127,7 @@
         if (b) open(cars.find(c => c.id === Number(b.dataset.edit)));
     });
     document.addEventListener('ev:themechange', render);
-    load().then(() => { if (EV.isAdmin() && new URLSearchParams(location.search).has('new')) open(null); });
+    load().then(() => { if (EV.can('cars:manage') && new URLSearchParams(location.search).has('new')) open(null); });
 })();
 </script>
 {% endblock %}

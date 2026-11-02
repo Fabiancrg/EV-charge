@@ -144,19 +144,21 @@ class SessionBulk(BaseModel):
     _strip = field_validator("provider", mode="before")(_blank_to_none)
 
 
-Role = Literal["admin", "driver"]
+class CarGrantIO(BaseModel):
+    car_id: int
+    role_id: int
 
 
 class UserIn(BaseModel):
     username: str = Field(min_length=2, max_length=50, pattern=r"^[A-Za-z0-9._@-]+$")
     full_name: str | None = Field(default=None, max_length=100)
     email: str | None = Field(default=None, max_length=200)
-    role: Role = "driver"
+    role_id: int | None = None  # global role (None: no global permission, only the cars below)
     active: bool = True
-    car_ids: list[int] = []
-    password: str | None = Field(default=None, max_length=200)  # required on creation; empty on update: unchanged
+    grants: list[CarGrantIO] = []  # a role on each car
+    password: str | None = Field(default=None, max_length=200)  # empty on update: unchanged; may stay empty for single sign-on users
 
-    _strip = field_validator("full_name", "email", "password", mode="before")(_blank_to_none)
+    _strip = field_validator("full_name", "email", "password", "role_id", mode="before")(_blank_to_none)
 
     @field_validator("username", mode="after")
     @classmethod
@@ -165,21 +167,76 @@ class UserIn(BaseModel):
 
 
 class UserOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     username: str
     full_name: str | None
     email: str | None
-    role: Role
+    role_id: int | None
+    role_name: str | None
     active: bool
-    car_ids: list[int] = []
+    grants: list[CarGrantIO] = []
+    has_password: bool
+    sso: bool  # linked to a single sign-on account
     created_at: datetime
     last_login: datetime | None
 
 
 class Me(UserOut):
     display_name: str
+    permissions: list[str]  # global permissions
+    all_cars: list[str]  # car permissions on every car
+    car_permissions: dict[int, list[str]]  # car permissions per car
+    via_token: bool = False
+
+
+class RoleIn(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+    description: str | None = Field(default=None, max_length=300)
+    permissions: list[str] = Field(default=[], max_length=50)
+    all_cars: bool = False
+
+    _strip = field_validator("name", "description", mode="before")(_blank_to_none)
+
+
+class RoleOut(RoleIn):
+    id: int
+    builtin: bool
+    users: int = 0  # users with this global role
+    car_grants: int = 0  # car roles given with it
+
+
+class TokenIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    permissions: list[str] = Field(min_length=1, max_length=50)
+    expires_days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class TokenOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    prefix: str
+    permissions: list[str]
+    created_at: datetime
+    expires_at: datetime | None
+    last_used_at: datetime | None
+    revoked: bool
+
+
+class TokenCreated(TokenOut):
+    token: str  # shown once
+
+
+class SessionInfo(BaseModel):
+    id: str
+    created_at: datetime
+    last_seen_at: datetime | None
+    expires_at: datetime
+    ip: str | None
+    user_agent: str | None
+    method: str | None
+    current: bool
 
 
 class LoginIn(BaseModel):

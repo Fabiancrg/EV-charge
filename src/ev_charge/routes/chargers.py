@@ -13,10 +13,10 @@ from sqlalchemy.orm import Session
 
 from .. import history as hist
 from .. import live
-from ..auth import car_scope, current_user, require_admin
+from ..auth import Principal, car_scope, current_user, require
 from ..connectors import CONNECTORS, ConnectorError
 from ..database import get_db
-from ..models import Car, Charger, ChargeSession, User
+from ..models import Car, Charger, ChargeSession
 from ..schemas import ChargerConnection, ChargerIn, ChargerOut, HistoryApply
 from ..secretbox import SecretError, decrypt_json, encrypt_json
 
@@ -44,7 +44,7 @@ def _check_car(db: Session, car_id: int | None) -> None:
         raise HTTPException(422, "Unknown car")
 
 
-def charger_out(c: Charger, user: User, usage: list[ChargeSession] | None = None) -> ChargerOut:
+def charger_out(c: Charger, user: Principal, usage: list[ChargeSession] | None = None) -> ChargerOut:
     o = ChargerOut.model_validate({**{k: getattr(c, k) for k in ChargerIn.model_fields}, "id": c.id})
     used = usage or []
     o.sessions = len(used)
@@ -56,7 +56,7 @@ def charger_out(c: Charger, user: User, usage: list[ChargeSession] | None = None
     o.live = live.live_state(c) or None
     o.last_poll_at = c.last_poll_at
     o.last_poll_error = c.last_poll_error
-    if user.is_admin and c.connector and c.connector in CONNECTORS:
+    if user.has("chargers:manage") and c.connector and c.connector in CONNECTORS:
         try:
             config = decrypt_json(c.connector_secret)
         except SecretError:
@@ -67,14 +67,13 @@ def charger_out(c: Charger, user: User, usage: list[ChargeSession] | None = None
     return o
 
 
-def _visible(user: User, c: Charger) -> bool:
-    """Drivers see the live data of the chargers whose default car is theirs."""
-    scope = car_scope(user)
-    return scope is None or (c.default_car_id is not None and c.default_car_id in scope)
+def _visible(user: Principal, c: Charger) -> bool:
+    """The live data of a charger is shown to who manages chargers, or may see its default car."""
+    return user.has("chargers:manage") or (c.default_car_id is not None and user.can("car:view", c.default_car_id))
 
 
 @router.get("", response_model=list[ChargerOut])
-def list_chargers(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[ChargerOut]:
+def list_chargers(user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> list[ChargerOut]:
     scope = car_scope(user)  # usage figures cover the sessions the user can see
     usage: dict[int, list[ChargeSession]] = {}
     for s in db.scalars(select(ChargeSession).where(ChargeSession.charger_id.is_not(None))):
@@ -90,7 +89,7 @@ def list_chargers(user: User = Depends(current_user), db: Session = Depends(get_
 
 
 @router.get("/connectors")
-def connector_types(_: User = Depends(current_user)) -> list[dict[str, Any]]:
+def connector_types(_: Principal = Depends(current_user)) -> list[dict[str, Any]]:
     """Charger APIs EV Charge can connect to, and the credentials each needs."""
     return [{"id": k, "label": cls.label, "fields": [_field(f) for f in cls.fields]} for k, cls in CONNECTORS.items()]
 
@@ -101,7 +100,7 @@ def _field(f: tuple) -> dict[str, Any]:
 
 
 @router.post("", response_model=ChargerOut, status_code=201)
-def create_charger(body: ChargerIn, user: User = Depends(require_admin), db: Session = Depends(get_db)) -> ChargerOut:
+def create_charger(body: ChargerIn, user: Principal = Depends(require("chargers:manage")), db: Session = Depends(get_db)) -> ChargerOut:
     _check_car(db, body.default_car_id)
     c = Charger(**body.model_dump())
     db.add(c)
@@ -110,7 +109,7 @@ def create_charger(body: ChargerIn, user: User = Depends(require_admin), db: Ses
 
 
 @router.put("/{charger_id}", response_model=ChargerOut)
-def update_charger(charger_id: int, body: ChargerIn, user: User = Depends(require_admin), db: Session = Depends(get_db)) -> ChargerOut:
+def update_charger(charger_id: int, body: ChargerIn, user: Principal = Depends(require("chargers:manage")), db: Session = Depends(get_db)) -> ChargerOut:
     c = _get(db, charger_id)
     _check_car(db, body.default_car_id)
     for k, v in body.model_dump().items():
@@ -120,7 +119,7 @@ def update_charger(charger_id: int, body: ChargerIn, user: User = Depends(requir
 
 
 @router.delete("/{charger_id}", status_code=204)
-async def delete_charger(charger_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)) -> Response:
+async def delete_charger(charger_id: int, _: Principal = Depends(require("chargers:manage")), db: Session = Depends(get_db)) -> Response:
     c = _get(db, charger_id)
     count = db.scalar(select(func.count()).select_from(ChargeSession).where(ChargeSession.charger_id == charger_id)) or 0
     if count:
@@ -135,7 +134,7 @@ async def delete_charger(charger_id: int, _: User = Depends(require_admin), db: 
 
 
 @router.put("/{charger_id}/connection", response_model=ChargerOut)
-async def set_connection(charger_id: int, body: ChargerConnection, user: User = Depends(require_admin), db: Session = Depends(get_db)) -> ChargerOut:
+async def set_connection(charger_id: int, body: ChargerConnection, user: Principal = Depends(require("chargers:manage")), db: Session = Depends(get_db)) -> ChargerOut:
     """Store (encrypted) or remove the credentials of the charger's cloud account, and test them."""
     c = _get(db, charger_id)
     await live.forget_connector(c.id)
@@ -181,7 +180,7 @@ async def set_connection(charger_id: int, body: ChargerConnection, user: User = 
 
 
 @router.post("/{charger_id}/poll", response_model=ChargerOut)
-async def poll_now(charger_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> ChargerOut:
+async def poll_now(charger_id: int, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> ChargerOut:
     """Read the charger now (also done in the background every few minutes)."""
     c = _get(db, charger_id)
     if not _visible(user, c):
@@ -216,7 +215,7 @@ async def _rebuilt(c: Charger, date_from: date, date_to: date) -> list[hist.Rebu
 
 @router.get("/{charger_id}/history")
 async def history_preview(
-    charger_id: int, date_from: date, date_to: date, car_id: int | None = None, _: User = Depends(require_admin), db: Session = Depends(get_db)
+    charger_id: int, date_from: date, date_to: date, car_id: int | None = None, _: Principal = Depends(require("chargers:manage")), db: Session = Depends(get_db)
 ) -> dict[str, Any]:
     """Sessions rebuilt from the charger's history, compared with the sessions already recorded (nothing is saved)."""
     c = _get(db, charger_id)
@@ -226,7 +225,7 @@ async def history_preview(
 
 
 @router.post("/{charger_id}/history/apply")
-async def history_apply(charger_id: int, body: HistoryApply, _: User = Depends(require_admin), db: Session = Depends(get_db)) -> dict[str, int]:
+async def history_apply(charger_id: int, body: HistoryApply, _: Principal = Depends(require("chargers:manage")), db: Session = Depends(get_db)) -> dict[str, int]:
     c = _get(db, charger_id)
     _check_car(db, body.car_id)
     rebuilt = await _rebuilt(c, body.date_from, body.date_to)  # fetched again: only the charger's own data is imported

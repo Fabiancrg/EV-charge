@@ -15,7 +15,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from .. import __version__
-from ..auth import user_from_request
+from ..auth import principal_from_request
 from ..config import CONFIG
 from ..database import get_db
 from .auth import me_out, setup_needed
@@ -25,16 +25,18 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templa
 templates.env.globals.update(app_version=__version__, currency=CONFIG.currency, poll_seconds=max(15, CONFIG.charger_poll_seconds))
 
 
-def _page(request: Request, db: Session, template: str, active: str, admin_only: bool = False) -> Response:
-    user = user_from_request(db, request)
+def _page(request: Request, db: Session, template: str, active: str, permission: str | None = None) -> Response:
+    principal = principal_from_request(db, request) if not request.headers.get("authorization") else None
+    user = principal.user if principal else None
     if user is None:
         if setup_needed(db):
             return RedirectResponse("/setup", status_code=303)
         target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
         return RedirectResponse(f"/login?next={quote(target)}", status_code=303)
-    if admin_only and not user.is_admin:
+    if permission and not principal.has(permission):  # type: ignore[union-attr]
         return RedirectResponse("/", status_code=303)
-    return templates.TemplateResponse(request, template, {"active": active, "user": user, "me": me_out(user).model_dump(mode="json")})
+    me = me_out(principal).model_dump(mode="json")  # type: ignore[arg-type]
+    return templates.TemplateResponse(request, template, {"active": active, "user": user, "me": me, "can": set(me["permissions"])})
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -64,30 +66,53 @@ def reimbursement(request: Request, db: Session = Depends(get_db)) -> Response:
 
 @router.get("/tariffs", response_class=HTMLResponse)
 def tariffs(request: Request, db: Session = Depends(get_db)) -> Response:
-    return _page(request, db, "tariffs.html", "tariffs", admin_only=True)
+    return _page(request, db, "tariffs.html", "tariffs", "tariffs:manage")
 
 
 @router.get("/chargers", response_class=HTMLResponse)
 def chargers(request: Request, db: Session = Depends(get_db)) -> Response:
-    return _page(request, db, "chargers.html", "chargers", admin_only=True)
+    return _page(request, db, "chargers.html", "chargers", "chargers:manage")
 
 
 @router.get("/users", response_class=HTMLResponse)
 def users(request: Request, db: Session = Depends(get_db)) -> Response:
-    return _page(request, db, "users.html", "users", admin_only=True)
+    return _page(request, db, "users.html", "users", "users:manage")
+
+
+@router.get("/roles", response_class=HTMLResponse)
+def roles(request: Request, db: Session = Depends(get_db)) -> Response:
+    return _page(request, db, "roles.html", "roles", "roles:manage")
+
+
+@router.get("/settings", response_class=HTMLResponse)
+def settings(request: Request, db: Session = Depends(get_db)) -> Response:
+    return _page(request, db, "settings.html", "settings", "settings:manage")
+
+
+@router.get("/audit", response_class=HTMLResponse)
+def audit(request: Request, db: Session = Depends(get_db)) -> Response:
+    return _page(request, db, "audit.html", "audit", "audit:read")
+
+
+@router.get("/account", response_class=HTMLResponse)
+def account(request: Request, db: Session = Depends(get_db)) -> Response:
+    return _page(request, db, "account.html", "account")
 
 
 @router.get("/login", response_class=HTMLResponse)
 def login(request: Request, db: Session = Depends(get_db)) -> Response:
     if setup_needed(db):
         return RedirectResponse("/setup", status_code=303)
-    if user_from_request(db, request):
+    if principal_from_request(db, request):
         return RedirectResponse("/", status_code=303)
-    return templates.TemplateResponse(request, "login.html", {"mode": "login"})
+    from ..sso import get_config, local_login_allowed, sso_enabled
+
+    sso = {"enabled": sso_enabled(db), "name": get_config(db)["name"], "local_login": local_login_allowed(db)}
+    return templates.TemplateResponse(request, "login.html", {"mode": "login", "sso": sso, "error": request.query_params.get("error")})
 
 
 @router.get("/setup", response_class=HTMLResponse)
 def setup(request: Request, db: Session = Depends(get_db)) -> Response:
     if not setup_needed(db):
         return RedirectResponse("/login", status_code=303)
-    return templates.TemplateResponse(request, "login.html", {"mode": "setup"})
+    return templates.TemplateResponse(request, "login.html", {"mode": "setup", "sso": {"enabled": False, "local_login": True}, "error": None})

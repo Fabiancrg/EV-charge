@@ -51,15 +51,15 @@
         const box = document.getElementById('car-cards');
         const active = cars.filter(c => c.active);
         if (!active.length) {
-            box.innerHTML = EV.isAdmin()
+            box.innerHTML = EV.can('cars:manage')
                 ? `<div class="empty-state" style="grid-column:1/-1"><h3>No car yet</h3><p>Start by adding your car, its specs and lease.</p><p style="margin-top:14px"><a class="btn" href="/cars?new=1">＋ Add a car</a></p></div>`
-                : `<div class="empty-state" style="grid-column:1/-1"><h3>No car assigned to you</h3><p>Ask an administrator to assign your car(s) to you.</p></div>`;
+                : `<div class="empty-state" style="grid-column:1/-1"><h3>No car for you yet</h3><p>Ask an administrator to give you access to your car(s).</p></div>`;
             document.getElementById('log-btn').style.display = 'none';
             return;
         }
         box.innerHTML = active.map(c => `
             <div class="card">
-                <h3><span>${EV.carDot(c.id)}${EV.esc(c.name)}</span><button class="btn btn-sm" data-log="${c.id}">⚡ Log</button></h3>
+                <h3><span>${EV.carDot(c.id)}${EV.esc(c.name)}</span>${EV.canCar('sessions:create', c.id) ? `<button class="btn btn-sm" data-log="${c.id}">⚡ Log</button>` : ''}</h3>
                 <div class="sub">${EV.esc([c.make, c.model, c.year].filter(Boolean).join(' '))}${c.license_plate ? ' · ' + EV.esc(c.license_plate) : ''}</div>
                 <dl class="kv">
                     <dt>Odometer</dt><dd>${EV.km(c.last_odometer)}</dd>
@@ -123,8 +123,8 @@
     setInterval(async () => { if (document.hidden) return; if (await loadLive()) load(); }, 30000);
 
     async function tariffReminder() {
-        // Administrators: remind when no home tariff covers today (a new CREG quarter is usually published)
-        if (!EV.isAdmin()) return;
+        // Tariff managers: remind when no home tariff covers today (a new CREG quarter is usually published)
+        if (!EV.can('tariffs:manage')) return;
         try {
             const today = EV.today();
             const tariffs = await EV.api('GET', '/api/tariffs');

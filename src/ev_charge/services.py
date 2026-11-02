@@ -127,6 +127,6 @@ def car_out(db: Session, car: Car, today: date | None = None) -> CarOut:
     out.last_odometer = last.odometer if last else None
     out.last_charge_date = max((s.charge_date for s in sessions), default=None)
     out.lease = lease_status(car, out.last_odometer, today)
-    out.drivers = [u.full_name or u.username for u in car.drivers]
+    out.drivers = sorted(f"{g.user.full_name or g.user.username} ({g.role.name})" for g in car.grants if g.role is not None)
     out.color_index = sum(1 for cid in db.scalars(select(Car.id)) if cid < car.id)
     return out

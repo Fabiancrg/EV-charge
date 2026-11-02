@@ -105,7 +105,7 @@
         ].join('');
 
         document.getElementById('report-note').innerHTML = t.home_without_tariff
-            ? `<div class="note">⚠ ${EV.num(t.home_without_tariff)} session(s) made with a charger fall outside every tariff period: their cost is missing from the totals.${EV.isAdmin() ? ' <a href="/tariffs">Add the tariff →</a>' : ''}</div>` : '';
+            ? `<div class="note">⚠ ${EV.num(t.home_without_tariff)} session(s) made with a charger fall outside every tariff period: their cost is missing from the totals.${EV.can('tariffs:manage') ? ' <a href="/tariffs">Add the tariff →</a>' : ''}</div>` : '';
         const empty = !t.sessions;
         document.getElementById('empty').style.display = empty ? '' : 'none';
         document.getElementById('charts').style.display = empty ? 'none' : '';
