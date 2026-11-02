@@ -193,7 +193,9 @@ class AuthSession(Base):
 
 
 class ApiToken(Base):
-    """A personal API token (Authorization: Bearer evc_…). Its permissions are a subset of its owner's."""
+    """An API token (Authorization: Bearer evc_…), managed in Settings → API tokens. It has its own access:
+    a role, or chosen permissions, on all cars or on chosen cars. user_id is who created it (it stops working
+    when that user is disabled; sessions it creates are entered in their name)."""
 
     __tablename__ = "api_tokens"
 
@@ -202,13 +204,33 @@ class ApiToken(Base):
     name: Mapped[str] = mapped_column(String(100))
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     prefix: Mapped[str] = mapped_column(String(16))  # shown to recognise the token
-    permissions: Mapped[str] = mapped_column(Text, default="[]")  # JSON list
+    description: Mapped[str | None] = mapped_column(String(300))
+    role_id: Mapped[int | None] = mapped_column(ForeignKey("roles.id", ondelete="SET NULL"))  # access of a role…
+    permissions: Mapped[str] = mapped_column(Text, default="[]")  # …or these permissions (JSON list), when no role
+    car_ids: Mapped[str | None] = mapped_column(Text)  # JSON list of the cars it may access; NULL: all cars
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
 
     user: Mapped[User] = relationship()
+    role: Mapped[Role | None] = relationship()
+
+    @property
+    def permission_set(self) -> set[str]:
+        if self.role is not None:
+            return self.role.permission_set
+        try:
+            return set(json.loads(self.permissions or "[]"))
+        except ValueError:
+            return set()
+
+    @property
+    def car_list(self) -> list[int] | None:
+        try:
+            return None if self.car_ids is None else [int(c) for c in json.loads(self.car_ids)]
+        except ValueError:
+            return []
 
 
 class AuditEvent(Base):

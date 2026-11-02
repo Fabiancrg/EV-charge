@@ -100,8 +100,23 @@ def roles(request: Request, db: Session = Depends(get_db)) -> Response:
 
 
 @router.get("/settings", response_class=HTMLResponse)
-def settings(request: Request, db: Session = Depends(get_db)) -> Response:
+def settings_home() -> Response:
+    return RedirectResponse("/settings/sso", status_code=303)
+
+
+@router.get("/settings/sso", response_class=HTMLResponse)
+def settings_sso(request: Request, db: Session = Depends(get_db)) -> Response:
     return _page(request, db, "settings.html", "settings", "settings:manage")
+
+
+@router.get("/settings/email", response_class=HTMLResponse)
+def settings_email(request: Request, db: Session = Depends(get_db)) -> Response:
+    return _page(request, db, "settings_email.html", "email", "settings:manage")
+
+
+@router.get("/settings/tokens", response_class=HTMLResponse)
+def settings_tokens(request: Request, db: Session = Depends(get_db)) -> Response:
+    return _page(request, db, "tokens.html", "tokens", "tokens:manage")
 
 
 @router.get("/audit", response_class=HTMLResponse)

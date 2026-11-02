@@ -25,6 +25,7 @@ ev-charge = "ev_charge.__main__:main"
 dev = [
     "pytest>=8.0",
     "httpx>=0.28.0",
+    "aiosmtpd>=1.4",
     "ruff>=0.15.0",
 ]
 

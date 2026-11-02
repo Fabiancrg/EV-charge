@@ -93,32 +93,67 @@ def test_role_rules(client):
     assert "users:manage" in {p["name"] for p in cat["global"]} and "sessions:edit" in {p["name"] for p in cat["car"]}
 
 
-def test_api_tokens(client, car):
+def test_api_tokens_have_their_own_access(client, car):
+    other = client.post("/api/cars", json={"name": "Model 3"}).json()
     _session(client, car["id"])
-    r = client.post("/api/auth/tokens", json={"name": "Home Assistant", "permissions": ["car:view"], "expires_days": 30})
-    assert r.status_code == 201
-    raw = r.json()["token"]
-    assert raw.startswith("evc_") and r.json()["prefix"] == raw[:12]
+    s_other = _session(client, other["id"]).json()
+    # A token with the Driver role, on one car only
+    r = client.post("/api/tokens", json={"name": "Home Assistant", "description": "Logs the wall box sessions", "role_id": role_id("Driver"),
+                                         "car_ids": [car["id"]], "expires_days": 30})  # fmt: skip
+    assert r.status_code == 201, r.text
+    tok = r.json()
+    raw = tok["token"]
+    assert raw.startswith("evc_") and tok["prefix"] == raw[:12] and tok["role_name"] == "Driver" and tok["car_ids"] == [car["id"]]
+    assert "sessions:create" in tok["permissions"] and tok["created_by"] == "Ada Admin"
     api = TestClient(app)
     h = {"Authorization": f"Bearer {raw}"}
-    assert len(api.get("/api/sessions", headers=h).json()) == 1
-    assert api.get("/api/auth/me", headers=h).json()["via_token"] is True
-    # Narrowed: the admin's token can't write nor manage users
-    assert api.post("/api/sessions", headers=h, json={"car_id": car["id"], "charge_date": "2026-03-01", "kwh": 5}).status_code == 403
+    assert len(api.get("/api/sessions", headers=h).json()) == 1  # only its car
+    assert api.get(f"/api/sessions/{s_other['id']}", headers=h).status_code == 404
+    assert _session(api, car["id"]).status_code == 401  # no header: not signed in
+    assert api.post("/api/sessions", headers=h, json={"car_id": car["id"], "charge_date": "2026-03-01", "kwh": 5}).status_code == 201
+    assert api.post("/api/sessions", headers=h, json={"car_id": other["id"], "charge_date": "2026-03-01", "kwh": 5}).status_code == 403
     assert api.get("/api/users", headers=h).status_code == 403
-    assert api.post("/api/auth/tokens", headers=h, json={"name": "x", "permissions": ["car:view"]}).status_code == 403
-    assert api.get("/api/auth/sessions", headers=h).status_code == 403  # account pages need a browser sign-in
-    assert api.get("/api/sessions", headers={"Authorization": "Bearer evc_wrong"}).status_code == 401
-    assert client.post("/api/auth/tokens", json={"name": "bad", "permissions": ["root"]}).status_code == 422
-    tid = r.json()["id"]
-    assert client.get("/api/auth/tokens").json()[0]["last_used_at"] is not None
-    assert client.delete(f"/api/auth/tokens/{tid}").status_code == 204
+    assert api.get("/api/tokens", headers=h).status_code == 403  # tokens are managed from a browser
+    assert api.get("/api/auth/sessions", headers=h).status_code == 403
+    me = api.get("/api/auth/me", headers=h).json()
+    assert me["via_token"] and me["car_permissions"] == {str(car["id"]): sorted(me["car_permissions"][str(car["id"])])}
+    # Change its access without changing the secret: chosen permissions, all cars, read only
+    upd = client.put(f"/api/tokens/{tok['id']}", json={"name": "Home Assistant", "permissions": ["car:view"], "car_ids": None})
+    assert upd.status_code == 200 and upd.json()["role_id"] is None and upd.json()["car_ids"] is None
+    assert len(api.get("/api/sessions", headers=h).json()) == 3
+    assert api.post("/api/sessions", headers=h, json={"car_id": car["id"], "charge_date": "2026-03-01", "kwh": 5}).status_code == 403
+    assert client.put(f"/api/tokens/{tok['id']}", json={"name": "x", "permissions": []}).status_code == 422  # no access at all
+    assert client.post("/api/tokens", json={"name": "bad", "permissions": ["root"]}).status_code == 422
+    assert client.post("/api/tokens", json={"name": "bad", "permissions": ["car:view"], "car_ids": [999]}).status_code == 422
+    listed = client.get("/api/tokens").json()
+    assert listed[0]["last_used_at"] is not None and "token" not in listed[0]
+    assert client.post(f"/api/tokens/{tok['id']}/revoke").json()["revoked"] is True
     assert api.get("/api/sessions", headers=h).status_code == 401
-    # A Viewer has no tokens:create
-    viewer = _user(client, "vic", "Viewer")
-    assert viewer.post("/api/auth/tokens", json={"name": "x", "permissions": ["car:view"]}).status_code == 403
-    viewer.close()
+    assert client.delete(f"/api/tokens/{tok['id']}").status_code == 204
+    assert {e["action"] for e in client.get("/api/audit?action=token.").json()["items"]} >= {"token.created", "token.updated", "token.revoked", "token.deleted"}
     api.close()
+
+
+def test_token_rules(client, car, make_driver):
+    dave = make_driver([car["id"]])
+    assert dave.get("/api/tokens").status_code == 403  # Driver has no tokens:manage
+    r = client.post("/api/tokens", json={"name": "ci", "role_id": role_id("Viewer")}).json()
+    viewer_role = role_id("Viewer")
+    # A role used by a token can't be deleted; custom roles only
+    custom = client.post("/api/roles", json={"name": "Robot", "permissions": ["car:view"]}).json()
+    client.put(f"/api/tokens/{r['id']}", json={"name": "ci", "role_id": custom["id"]})
+    assert client.delete(f"/api/roles/{custom['id']}").status_code == 409
+    assert viewer_role
+    # The token stops working when its creator is disabled
+    other_admin = client.post("/api/users", json={"username": "boss2", "role_id": role_id("Administrator"), "password": "boss-password"}).json()
+    boss = TestClient(app)
+    boss.post("/api/auth/login", json={"username": "boss2", "password": "boss-password"})
+    t2 = boss.post("/api/tokens", json={"name": "boss token", "permissions": ["car:view"]}).json()
+    h = {"Authorization": f"Bearer {t2['token']}"}
+    assert boss.get("/api/cars", headers=h).status_code == 200
+    client.put(f"/api/users/{other_admin['id']}", json={"username": "boss2", "role_id": role_id("Administrator"), "active": False})
+    assert TestClient(app).get("/api/cars", headers=h).status_code == 401
+    boss.close()
 
 
 def test_sign_in_sessions(client):

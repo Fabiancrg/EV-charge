@@ -10,7 +10,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import json
 import secrets
 import time
 from collections.abc import Iterable
@@ -249,14 +248,20 @@ class Principal:
         return self.grants.cars_with(permission)
 
 
+def token_grants(token: ApiToken) -> Grants:
+    """An API token's own access: its role (or permissions), on all cars or on its chosen cars."""
+    perms = token.permission_set
+    car_perms = expand(perms, CAR_PERMISSIONS)
+    cars = token.car_list
+    return Grants(
+        global_perms=expand(perms, GLOBAL_PERMISSIONS),
+        all_cars=car_perms if cars is None else set(),
+        per_car={} if cars is None else {c: set(car_perms) for c in cars},
+    )
+
+
 def principal_for(user: User, token: ApiToken | None = None, session: AuthSession | None = None) -> Principal:
-    grants = compute_grants(user)
-    if token is not None:
-        try:
-            allowed = set(json.loads(token.permissions or "[]"))
-        except ValueError:
-            allowed = set()
-        grants = grants.restrict(allowed)
+    grants = token_grants(token) if token is not None else compute_grants(user)
     return Principal(user=user, grants=grants, token=token, session=session)
 
 

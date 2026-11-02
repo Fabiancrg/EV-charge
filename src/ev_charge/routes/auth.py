@@ -1,12 +1,11 @@
-"""Sign-in, sign-out, first-run setup and the current user's own account (password, sessions, API tokens)."""
+"""Sign-in, sign-out, first-run setup and the current user's own account (password, sign-in sessions)."""
 
 from __future__ import annotations
 
-import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import audit
@@ -24,16 +23,13 @@ from ..auth import (
     end_all_sessions,
     end_session,
     hash_password,
-    new_api_token,
     record_failure,
-    require,
     start_session,
     verify_password,
 )
 from ..database import get_db
-from ..models import ApiToken, AuthSession, Role, User
-from ..permissions import valid_permission
-from ..schemas import LoginIn, Me, PasswordChange, SessionInfo, SetupIn, TokenCreated, TokenIn, TokenOut
+from ..models import AuthSession, Role, User
+from ..schemas import LoginIn, Me, PasswordChange, SessionInfo, SetupIn
 from ..sso import local_login_allowed
 from .users import user_out
 
@@ -174,56 +170,5 @@ def revoke_session(session_id: str, request: Request, user: Principal = Depends(
 def revoke_other_sessions(request: Request, user: Principal = Depends(browser_only), db: Session = Depends(get_db)) -> Response:
     end_all_sessions(db, user.id, keep_request=request)
     audit.record(db, request, "session.revoked_others", target=f"user:{user.id}")
-    db.commit()
-    return Response(status_code=204)
-
-
-# ── My API tokens ────────────────────────────────────────────────────────────
-
-
-def token_out(t: ApiToken) -> TokenOut:
-    return TokenOut(id=t.id, name=t.name, prefix=t.prefix, permissions=json.loads(t.permissions or "[]"), created_at=t.created_at,
-                    expires_at=t.expires_at, last_used_at=t.last_used_at, revoked=t.revoked)  # fmt: skip
-
-
-@router.get("/tokens", response_model=list[TokenOut])
-def my_tokens(user: Principal = Depends(browser_only), db: Session = Depends(get_db)) -> list[TokenOut]:
-    return [token_out(t) for t in db.scalars(select(ApiToken).where(ApiToken.user_id == user.id).order_by(ApiToken.created_at.desc()))]
-
-
-@router.post("/tokens", response_model=TokenCreated, status_code=201)
-def create_token(body: TokenIn, request: Request, user: Principal = Depends(require("tokens:create")), db: Session = Depends(get_db)) -> TokenCreated:
-    if user.token is not None:
-        raise HTTPException(403, "An API token can't create tokens")
-    bad = [p for p in body.permissions if not valid_permission(p)]
-    if bad:
-        raise HTTPException(422, f"Unknown permission(s): {', '.join(bad)}")
-    raw, hashed = new_api_token()
-    t = ApiToken(
-        user_id=user.id, name=body.name.strip(), token_hash=hashed, prefix=raw[:12], permissions=json.dumps(sorted(set(body.permissions))),
-        expires_at=datetime.now(UTC) + timedelta(days=body.expires_days) if body.expires_days else None,
-    )  # fmt: skip
-    db.add(t)
-    db.flush()
-    audit.record(db, request, "token.created", target=f"token:{t.id}", details={"name": t.name, "permissions": body.permissions})
-    db.commit()
-    return TokenCreated(**token_out(t).model_dump(), token=raw)
-
-
-@router.delete("/tokens/{token_id}", status_code=204)
-def revoke_token(token_id: int, request: Request, user: Principal = Depends(browser_only), db: Session = Depends(get_db)) -> Response:
-    t = db.get(ApiToken, token_id)
-    if t is None or (t.user_id != user.id and not user.has("users:manage")):
-        raise HTTPException(404, "Token not found")
-    t.revoked = True
-    audit.record(db, request, "token.revoked", target=f"token:{t.id}", details={"name": t.name, "owner": t.user.username})
-    db.commit()
-    return Response(status_code=204)
-
-
-@router.delete("/tokens", status_code=204)
-def purge_revoked(user: Principal = Depends(browser_only), db: Session = Depends(get_db)) -> Response:
-    """Remove my revoked and expired tokens from the list."""
-    db.execute(delete(ApiToken).where(ApiToken.user_id == user.id, ApiToken.revoked.is_(True)))
     db.commit()
     return Response(status_code=204)

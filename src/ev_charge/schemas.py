@@ -207,17 +207,37 @@ class RoleOut(RoleIn):
 
 class TokenIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
-    permissions: list[str] = Field(min_length=1, max_length=50)
-    expires_days: int | None = Field(default=None, ge=1, le=3650)
+    description: str | None = Field(default=None, max_length=300)
+    role_id: int | None = None  # the access of this role…
+    permissions: list[str] = Field(default=[], max_length=50)  # …or these permissions
+    car_ids: list[int] | None = None  # None: all cars
+    expires_days: int | None = Field(default=None, ge=1, le=3650)  # on creation; None: never
+
+    _strip = field_validator("description", mode="before")(_blank_to_none)
+
+
+class TokenUpdate(BaseModel):
+    """Change a token's access without changing its secret."""
+
+    name: str = Field(min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=300)
+    role_id: int | None = None
+    permissions: list[str] = Field(default=[], max_length=50)
+    car_ids: list[int] | None = None
+
+    _strip = field_validator("description", mode="before")(_blank_to_none)
 
 
 class TokenOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     name: str
+    description: str | None
     prefix: str
-    permissions: list[str]
+    role_id: int | None
+    role_name: str | None
+    permissions: list[str]  # the effective permissions (the role's, or the chosen ones)
+    car_ids: list[int] | None
+    created_by: str
     created_at: datetime
     expires_at: datetime | None
     last_used_at: datetime | None

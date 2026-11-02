@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}E-mail · EV Charge{% endblock %}
+{% block content %}
+<div class="content">
+    <div class="page-head"><h2>E-mail (SMTP)</h2></div>
+    <p class="muted small" style="margin-bottom:12px">The SMTP server EV Charge sends its e-mails through. The password is stored encrypted. <i>Send a test e-mail</i> uses the values of the form, saved or not.</p>
+    <div class="form-error" id="m-error"></div>
+    <form id="m-form" autocomplete="off">
+        <fieldset><legend>Server</legend>
+            <div class="form-grid">
+                <div class="field span-all"><label class="check"><input type="checkbox" name="enabled"> Enable e-mail</label></div>
+                <div class="field span-2"><label>SMTP server *</label><input type="text" name="host" maxlength="255" placeholder="smtp.example.com"></div>
+                <div class="field"><label>Port</label><input type="number" name="port" min="1" max="65535"><div class="hint">587 STARTTLS · 465 SSL · 25 none</div></div>
+                <div class="field"><label>Security</label><select name="security"><option value="starttls">STARTTLS</option><option value="ssl">SSL / TLS</option><option value="none">None</option></select></div>
+                <div class="field"><label>Username</label><input type="text" name="username" maxlength="255" autocomplete="off"><div class="hint">Empty: no login</div></div>
+                <div class="field"><label>Password</label><input type="password" name="password" maxlength="500" autocomplete="new-password"><div class="hint" id="m-pw-hint"></div></div>
+                <div class="field span-all"><label class="check"><input type="checkbox" name="verify_certificate"> Check the server's TLS certificate</label></div>
+            </div>
+        </fieldset>
+        <fieldset><legend>Sender</legend>
+            <div class="form-grid">
+                <div class="field span-2"><label>From address *</label><input type="text" name="from_address" maxlength="255" placeholder="ev-charge@example.com"></div>
+                <div class="field"><label>From name</label><input type="text" name="from_name" maxlength="100"></div>
+            </div>
+        </fieldset>
+        <div class="modal-actions" style="align-items:flex-end">
+            <div class="field left" style="display:flex;gap:8px;align-items:flex-end"><div><label class="small">Send a test e-mail to</label><input type="text" id="m-to" value="{{ me.email or '' }}" placeholder="you@example.com"></div>
+                <button type="button" class="btn btn-ghost" id="m-test">📨 Send a test e-mail</button></div>
+            <button type="submit" class="btn">💾 Save</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+    const form = document.getElementById('m-form');
+    const box = document.getElementById('m-error');
+    const ports = { starttls: 587, ssl: 465, none: 25 };
+    function body() { const b = EV.formData(form); b.port = Number(b.port) || 587; b.password = form.password.value; return b; }
+    async function load() {
+        try {
+            const cfg = await EV.api('GET', '/api/settings/email');
+            EV.fillForm(form, { ...cfg, password: '' });
+            document.getElementById('m-pw-hint').textContent = cfg.has_password ? 'Stored (encrypted): leave empty to keep it' : 'Not set';
+        } catch (err) { EV.toast(err.message, true); }
+    }
+    form.security.addEventListener('change', () => { if (Object.values(ports).includes(Number(form.port.value))) form.port.value = ports[form.security.value]; });
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        box.style.display = 'none';
+        try { await EV.api('PUT', '/api/settings/email', body()); EV.toast('E-mail settings saved'); load(); }
+        catch (err) { box.textContent = err.message; box.style.display = 'block'; }
+    });
+    document.getElementById('m-test').addEventListener('click', async (e) => {
+        box.style.display = 'none';
+        e.target.disabled = true; e.target.textContent = 'Sending…';
+        try { const r = await EV.api('POST', '/api/settings/email/test', { ...body(), to: document.getElementById('m-to').value }); EV.toast(r.message); }
+        catch (err) { box.textContent = err.message; box.style.display = 'block'; }
+        finally { e.target.disabled = false; e.target.textContent = '📨 Send a test e-mail'; }
+    });
+    load();
+})();
+</script>
+{% endblock %}

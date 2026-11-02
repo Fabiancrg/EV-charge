@@ -9,7 +9,22 @@ def _session(client, car_id, **kw):
 
 
 def test_pages_render(client, car):
-    for path in ("/", "/cars", "/sessions", "/reports"):
+    for path in (
+        "/",
+        "/cars",
+        "/sessions",
+        "/reports",
+        "/reimbursement",
+        "/chargers",
+        "/tariffs",
+        "/users",
+        "/roles",
+        "/settings/sso",
+        "/settings/email",
+        "/settings/tokens",
+        "/audit",
+        "/account",
+    ):
         r = client.get(path)
         assert r.status_code == 200, path
         assert "EV Charge" in r.text

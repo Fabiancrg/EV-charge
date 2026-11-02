@@ -26,13 +26,15 @@
             <a href="/cars" class="{{ 'active' if active == 'cars' }}">Cars</a>
             {% if 'chargers:manage' in can %}<a href="/chargers" class="{{ 'active' if active == 'chargers' }}">Chargers</a>{% endif %}
             {% if 'tariffs:manage' in can %}<a href="/tariffs" class="{{ 'active' if active == 'tariffs' }}">Tariffs</a>{% endif %}
-            {% if 'users:manage' in can or 'roles:manage' in can or 'settings:manage' in can or 'audit:read' in can %}
+            {% if 'users:manage' in can or 'roles:manage' in can or 'settings:manage' in can or 'audit:read' in can or 'tokens:manage' in can %}
             <div class="user-menu">
-                <button class="nav-btn {{ 'active' if active in ('users', 'roles', 'settings', 'audit') }}" id="admin-btn" aria-haspopup="true">⚙ Settings ▾</button>
+                <button class="nav-btn {{ 'active' if active in ('users', 'roles', 'settings', 'email', 'tokens', 'audit') }}" id="admin-btn" aria-haspopup="true">⚙ Settings ▾</button>
                 <div class="user-dropdown" id="admin-dropdown">
                     {% if 'users:manage' in can %}<a href="/users">👥 Users &amp; car access</a>{% endif %}
                     {% if 'roles:manage' in can %}<a href="/roles">🛡 Roles &amp; permissions</a>{% endif %}
-                    {% if 'settings:manage' in can %}<a href="/settings">🔐 Single sign-on</a>{% endif %}
+                    {% if 'settings:manage' in can %}<a href="/settings/sso">🔐 Single sign-on</a>
+                    <a href="/settings/email">📧 E-mail (SMTP)</a>{% endif %}
+                    {% if 'tokens:manage' in can %}<a href="/settings/tokens">🔑 API tokens</a>{% endif %}
                     {% if 'audit:read' in can %}<a href="/audit">📜 Audit log</a>{% endif %}
                 </div>
             </div>
@@ -42,7 +44,7 @@
                 <button class="nav-btn" id="user-btn" aria-haspopup="true">👤 {{ me.display_name }} ▾</button>
                 <div class="user-dropdown" id="user-dropdown">
                     <div class="muted small" style="padding:8px 14px">{{ me.username }}{% if me.role_name %} · {{ me.role_name }}{% endif %}</div>
-                    <a href="/account">👤 My account (sign-ins, API tokens)</a>
+                    <a href="/account">👤 My account (sign-ins)</a>
                     <button id="pw-btn">🔑 {{ 'Change password' if me.has_password else 'Set a password' }}</button>
                     <button id="logout-btn">↪ Sign out</button>
                 </div>
