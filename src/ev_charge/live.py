@@ -78,7 +78,9 @@ def apply_reading(db: Session, c: Charger, r: LiveReading, now: datetime) -> str
         if r.status in CLOSING:
             _close(current)
             return "closed"
-        if kwh < current.kwh - RESET_TOLERANCE_KWH:  # the counter restarted: a new session without unplugging
+        if kwh <= 0:  # no energy figure in this reading (Ohme sends 0 while it recalculates): keep the session as it is
+            return "updated"
+        if kwh < current.kwh - RESET_TOLERANCE_KWH:  # the counter restarted: a new session (unplug/replug not seen)
             _close(current)
             current = None
             action = "closed"

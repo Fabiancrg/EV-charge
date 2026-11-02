@@ -235,3 +235,63 @@ def test_ohme_connector_maps_the_library(monkeypatch):
     assert len(stats) == 2 and stats[0].energy_wh == 6500  # empty hours dropped
     with pytest.raises(ConnectorError):
         OhmeConnector({"email": "a@b.c"})
+
+
+def test_ohme_reads_the_session_energy_not_the_library_maximum(monkeypatch):
+    """The ohme library keeps max(energy seen); a new session must not start with the previous one's energy."""
+    import asyncio
+
+    import ohme
+
+    from ev_charge.connectors.ohme import OhmeConnector
+
+    class Client:
+        def __init__(self, email, password):
+            self.serial, self.device_info, self.available, self.battery = "OH1", {}, True, 50
+            self.energy = 18_400.0  # the library's carried maximum, from the previous session
+            self.status, self.mode = ohme.ChargerStatus.CHARGING, None
+            self.power = ohme.ChargerPower(watts=7000, amps=30, volts=230)
+            self._charge_session = {"mode": "SMART_CHARGE", "batterySoc": {"wh": 1_250, "percent": 50}}
+
+        async def async_login(self):
+            return True
+
+        async def async_update_device_info(self):
+            pass
+
+        async def async_get_charge_session(self):
+            pass
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(ohme, "OhmeApiClient", Client)
+    conn = OhmeConnector({"email": "a@b.c", "password": "x"})
+
+    async def run():
+        first = await conn.live()
+        conn._client.status = ohme.ChargerStatus.UNPLUGGED
+        unplugged = await conn.live()
+        conn._client.status = ohme.ChargerStatus.CHARGING
+        conn._client._charge_session = {"mode": "SMART_CHARGE"}  # no batterySoc: falls back to the library value
+        fallback = await conn.live()
+        return first, unplugged, fallback
+
+    first, unplugged, fallback = asyncio.run(run())
+    assert first.energy_wh == 1250.0  # not 18 400
+    assert unplugged.energy_wh == 0.0
+    assert fallback.energy_wh == 18_400.0
+
+
+def test_a_new_charge_after_an_unseen_unplug_is_a_new_session(client, charger):
+    cid, t0 = charger["id"], datetime(2026, 11, 2, 18, 0)
+    _apply(cid, LiveReading(status="charging", energy_wh=18_400), t0)
+    # Ohme sends 0 while it recalculates: the session is kept as it is
+    assert _apply(cid, LiveReading(status="charging", energy_wh=0), t0 + timedelta(minutes=1)) == "updated"
+    rows = client.get("/api/sessions").json()
+    assert len(rows) == 1 and rows[0]["kwh"] == 18.4 and rows[0]["reimbursement_status"] == "in_progress"
+    # Unplugged and replugged between two reads: the counter starts again from a small value
+    assert _apply(cid, LiveReading(status="charging", energy_wh=1_250), t0 + timedelta(hours=14)) == "restarted"
+    rows = sorted(client.get("/api/sessions").json(), key=lambda r: r["id"])
+    assert [(r["kwh"], r["reimbursement_status"]) for r in rows] == [(18.4, "recorded"), (1.25, "in_progress")]
+    assert rows[1]["start_time"] == "08:00:00" and rows[1]["charge_date"] == "2026-11-03"
