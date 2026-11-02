@@ -5,11 +5,12 @@
     <div class="page-head">
         <h2>Home charging tariffs</h2>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn" id="creg-btn" title="Read the quarterly tariffs published by the CREG">⟳ Import from CREG</button>
             <button class="btn btn-ghost" id="add-quarter" title="New period for the quarter after the last one">＋ Next quarter</button>
-            <button class="btn" id="add-tariff">＋ Add a period</button>
+            <button class="btn btn-ghost" id="add-tariff">＋ Add a period</button>
         </div>
     </div>
-    <p class="muted small" style="margin-bottom:12px">Sessions charged at a <b>home location</b> are priced at kWh × the tariff valid on the charge date, whatever cost was typed in.
+    <p class="muted small" style="margin-bottom:12px"><b>⟳ Import from CREG</b> reads the official quarterly amounts for your region. Sessions charged at a <b>home location</b> are priced at kWh × the tariff valid on the charge date, whatever cost was typed in.
         Other sessions keep the cost entered. Changing a tariff reprices the home sessions of its period. Periods can't overlap; leave the end date empty for “until further notice”.</p>
     <div id="gaps"></div>
     <div class="table-wrap" id="tariffs-table"><p class="muted">Loading…</p></div>
@@ -44,6 +45,28 @@
                 <button type="submit" class="btn">💾 Save</button>
             </div>
         </form>
+    </div>
+</div>
+<div class="modal" id="creg-modal">
+    <div class="modal-box" style="max-width:900px">
+        <h3><span>⟳ Import tariffs from the CREG</span><button class="icon-btn" data-close title="Close">✕</button></h3>
+        <div class="form-error"></div>
+        <p class="muted small" style="margin-bottom:12px">The CREG publishes, per quarter and per region, the maximum amount per kWh an employer can pay back for charging a company car at home
+            (set by the SPF Finances, circular 2024/C/77). Choose the region of the driver's home, check the quarters, then apply. Nothing changes until you click Apply.</p>
+        <div class="form-grid" style="align-items:end">
+            <div class="field"><label>Region</label><select id="creg-region">
+                <option value="wallonia">Wallonia</option><option value="brussels">Brussels</option><option value="flanders">Flanders</option></select></div>
+            <div class="field span-2" style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn btn-ghost" id="creg-refresh" type="button">⟳ Check the CREG website</button>
+                <label class="btn btn-ghost" title="If this server can't reach the internet: save the CREG page from your browser (HTML only) and upload it">⬆ Upload the saved page<input type="file" id="creg-file" accept=".html,.htm,text/html" hidden></label>
+            </div>
+        </div>
+        <div id="creg-body" style="margin-top:14px"><p class="muted">Checking…</p></div>
+        <div class="modal-actions">
+            <span class="muted small left" id="creg-source"></span>
+            <button type="button" class="btn btn-ghost" data-close>Close</button>
+            <button type="button" class="btn" id="creg-apply" disabled>Apply</button>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -144,6 +167,94 @@
         catch (err) { EV.formError('tariff-modal', err); }
     });
     document.getElementById('add-tariff').addEventListener('click', () => open(null));
+
+    // ── Import from the CREG ────────────────────────────────────────────
+    let creg = null;  // last preview
+    const STATUS = {
+        new: '<span class="badge badge-ok">＋ New</span>',
+        changed: '<span class="badge badge-warn">✎ Price differs</span>',
+        same: '<span class="badge badge-info">✓ Up to date</span>',
+        conflict: '<span class="badge badge-err">✖ Overlaps</span>',
+    };
+    const cregBody = () => document.getElementById('creg-body');
+    function cregError(msg) {
+        cregBody().innerHTML = '';
+        EV.formError('creg-modal', new Error(msg));
+        document.getElementById('creg-apply').disabled = true;
+    }
+    function renderCreg() {
+        document.querySelector('#creg-modal .form-error').style.display = 'none';
+        document.getElementById('creg-region').value = creg.region;
+        const src = creg.source.startsWith('http') ? `<a href="${EV.esc(creg.source)}" target="_blank" rel="noopener">CREG page ↗</a>` : EV.esc(creg.source);
+        document.getElementById('creg-source').innerHTML = `Source: ${src}`;
+        const pending = creg.items.filter(i => i.status === 'new' || i.status === 'changed').length;
+        cregBody().innerHTML = `
+            <p style="margin-bottom:8px">${creg.items.length} quarter(s) published for <b>${EV.esc(creg.regions[creg.region])}</b>${pending ? ` — <b>${pending}</b> to add or update` : ' — your tariffs are up to date'}.</p>
+            <div class="imp-grid" style="max-height:52vh"><table><thead><tr><th><input type="checkbox" id="creg-all" title="Select all"></th><th>Quarter</th><th>Period</th><th class="num">CREG price</th><th>Your tariff</th><th>Status</th></tr></thead><tbody>
+            ${creg.items.map((i, n) => {
+                const selectable = i.status === 'new' || i.status === 'changed';
+                const cur = i.current ? `${EV.money(i.current.price_per_kwh, 4)}${i.status === 'conflict' ? ` <span class="muted small">(${EV.date(i.current.valid_from)} → ${i.current.valid_to ? EV.date(i.current.valid_to) : '…'})</span>` : ''}` : '<span class="muted">—</span>';
+                return `<tr class="${selectable ? '' : 'imp-above'}"><td><input type="checkbox" data-n="${n}" ${selectable ? 'checked' : 'disabled'}></td>
+                    <td><b>${EV.esc(i.key.replace('-', ' '))}</b></td><td>${EV.date(i.valid_from)} → ${EV.date(i.valid_to)}</td>
+                    <td class="num"><b>${EV.money(i.price_per_kwh, 4)}</b></td><td>${cur}</td><td>${STATUS[i.status]}</td></tr>`;
+            }).join('')}</tbody></table></div>
+            ${creg.items.some(i => i.status === 'conflict') ? '<p class="muted small" style="margin-top:8px">“Overlaps”: one of your periods covers part of this quarter with other dates. Edit or delete it first to import the quarter.</p>' : ''}`;
+        const boxes = () => [...cregBody().querySelectorAll('input[data-n]:not(:disabled)')];
+        const update = () => {
+            const n = boxes().filter(b => b.checked).length;
+            const apply = document.getElementById('creg-apply');
+            apply.disabled = !n;
+            apply.textContent = n ? `Apply ${n} quarter(s)` : 'Apply';
+            document.getElementById('creg-all').checked = n && n === boxes().length;
+        };
+        cregBody().addEventListener('change', (e) => {
+            if (e.target.id === 'creg-all') boxes().forEach(b => { b.checked = e.target.checked; });
+            update();
+        });
+        update();
+    }
+    async function cregCheck() {
+        cregBody().innerHTML = '<p class="muted">Reading the CREG website…</p>';
+        document.getElementById('creg-apply').disabled = true;
+        try { creg = await EV.api('GET', `/api/tariffs/creg?region=${document.getElementById('creg-region').value}`); renderCreg(); }
+        catch (err) { cregError(`${err.message}`); }
+    }
+    document.getElementById('creg-btn').addEventListener('click', async () => {
+        EV.openModal('creg-modal');
+        cregBody().innerHTML = '<p class="muted">Reading the CREG website…</p>';
+        try { creg = await EV.api('GET', '/api/tariffs/creg'); renderCreg(); }  // the server remembers the last region
+        catch (err) { cregError(err.message); }
+    });
+    document.getElementById('creg-refresh').addEventListener('click', cregCheck);
+    document.getElementById('creg-region').addEventListener('change', async () => {
+        const file = creg && !creg.source.startsWith('http') ? lastFile : null;
+        if (file) uploadCreg(file); else cregCheck();
+    });
+    let lastFile = null;
+    async function uploadCreg(file) {
+        lastFile = file;
+        const form = new FormData();
+        form.append('region', document.getElementById('creg-region').value);
+        form.append('file', file);
+        cregBody().innerHTML = '<p class="muted">Reading the file…</p>';
+        try {
+            const r = await fetch('/api/tariffs/creg/upload', { method: 'POST', body: form });
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.detail || r.statusText);
+            creg = data; renderCreg();
+        } catch (err) { cregError(err.message); }
+    }
+    document.getElementById('creg-file').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) uploadCreg(f); });
+    document.getElementById('creg-apply').addEventListener('click', async () => {
+        const items = [...cregBody().querySelectorAll('input[data-n]:checked')].map(b => creg.items[Number(b.dataset.n)]);
+        if (!items.length) return;
+        try {
+            const r = await EV.api('POST', '/api/tariffs/creg/apply', { region: creg.region, source: creg.source, items });
+            EV.toast(`${r.created} quarter(s) added, ${r.updated} updated${r.skipped.length ? `, ${r.skipped.length} skipped (overlap)` : ''}`);
+            EV.closeModal('creg-modal');
+            load();
+        } catch (err) { EV.formError('creg-modal', err); }
+    });
     document.getElementById('add-quarter').addEventListener('click', () => open(null, nextQuarter()));
     document.getElementById('tariffs-table').addEventListener('click', (e) => {
         const b = e.target.closest('[data-edit]');

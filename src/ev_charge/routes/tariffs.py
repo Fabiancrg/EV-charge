@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+import asyncio
+from datetime import UTC, datetime
+from typing import Any
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .. import creg
 from ..auth import current_user, require_admin
+from ..config import CONFIG
 from ..database import get_db
 from ..models import ChargeSession, Tariff, User
-from ..pricing import Pricing, home_locations, set_setting
-from ..schemas import HomeLocations, TariffIn, TariffOut
+from ..pricing import Pricing, get_setting, home_locations, set_setting
+from ..schemas import CregApply, CregRegion, HomeLocations, TariffIn, TariffOut
 
 router = APIRouter(prefix="/api/tariffs", tags=["tariffs"])
 
@@ -97,3 +103,94 @@ def put_home_locations(body: HomeLocations, _: User = Depends(require_admin), db
     set_setting(db, "home_locations", list(seen.values()))
     db.commit()
     return HomeLocations(locations=list(seen.values()))
+
+
+# ── Import from the CREG ─────────────────────────────────────────────────────
+
+
+def _creg_label(key: str, region: str) -> str:
+    year, quarter = key.split("-")
+    return f"CREG {quarter} {year} ({creg.REGIONS[region]})"
+
+
+def _creg_preview(db: Session, quarters: list[creg.QuarterRate], region: str, source: str) -> dict[str, Any]:
+    """Compare the CREG quarters with the tariffs already stored: new / same / changed / conflict."""
+    tariffs = db.scalars(select(Tariff)).all()
+    items = []
+    for q in quarters:
+        price = q.rates.get(region)
+        if price is None:
+            continue
+        exact = next((t for t in tariffs if t.valid_from == q.valid_from and t.valid_to == q.valid_to), None)
+        overlap = next((t for t in tariffs if t.valid_from <= q.valid_to and (t.valid_to is None or t.valid_to >= q.valid_from)), None)
+        if exact is not None:
+            status = "same" if round(exact.price_per_kwh, 6) == round(price, 6) else "changed"
+            other = exact
+        elif overlap is not None:
+            status, other = "conflict", overlap
+        else:
+            status, other = "new", None
+        items.append({
+            "key": q.key, "label": _creg_label(q.key, region), "valid_from": q.valid_from.isoformat(), "valid_to": q.valid_to.isoformat(),
+            "price_per_kwh": price, "status": status,
+            "current": {"id": other.id, "valid_from": other.valid_from.isoformat(), "valid_to": other.valid_to.isoformat() if other.valid_to else None,
+                        "price_per_kwh": other.price_per_kwh, "label": other.label} if other else None,
+        })  # fmt: skip
+    return {
+        "source": source,
+        "fetched_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "region": region,
+        "regions": creg.REGIONS,
+        "items": items,
+    }
+
+
+@router.get("/creg")
+async def creg_preview(region: CregRegion | None = None, _: User = Depends(require_admin), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Fetch the CREG page and compare its quarterly tariffs for a region with the stored ones (nothing is saved)."""
+    region = region or get_setting(db, "creg_region", "wallonia")
+    try:
+        html = await asyncio.to_thread(creg.fetch_page, CONFIG.creg_url)
+        quarters = creg.parse_creg(html)
+    except creg.CregError as e:
+        raise HTTPException(502, str(e)) from None
+    return _creg_preview(db, quarters, region, CONFIG.creg_url)
+
+
+@router.post("/creg/upload")
+async def creg_preview_upload(region: CregRegion = Form(...), file: UploadFile = File(...), _: User = Depends(require_admin), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Same preview from the CREG page saved in a browser (when this server can't reach the internet)."""
+    raw = await file.read(creg.MAX_PAGE_BYTES + 1)
+    if len(raw) > creg.MAX_PAGE_BYTES:
+        raise HTTPException(422, "The file is too large for the CREG page")
+    try:
+        quarters = creg.parse_creg(raw.decode("utf-8", errors="replace"))
+    except creg.CregError as e:
+        raise HTTPException(422, str(e)) from None
+    return _creg_preview(db, quarters, region, f"uploaded file {file.filename or ''}".strip())
+
+
+@router.post("/creg/apply")
+def creg_apply(body: CregApply, _: User = Depends(require_admin), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Create the selected quarters, or update the price of a quarter already stored with the same dates."""
+    created, updated, skipped = 0, 0, []
+    note = f"Imported from the CREG ({body.source or CONFIG.creg_url}) on {datetime.now(UTC).date().isoformat()}"
+    for item in sorted(body.items, key=lambda i: i.valid_from):
+        if item.valid_to < item.valid_from:
+            raise HTTPException(422, f"{item.key}: the period ends before it starts")
+        exact = db.scalar(select(Tariff).where(Tariff.valid_from == item.valid_from, Tariff.valid_to == item.valid_to))
+        if exact is not None:
+            exact.price_per_kwh = item.price_per_kwh
+            exact.label = _creg_label(item.key, body.region)
+            exact.notes = note
+            updated += 1
+            continue
+        if _overlap(db, TariffIn(valid_from=item.valid_from, valid_to=item.valid_to, price_per_kwh=item.price_per_kwh)):
+            skipped.append(item.key)
+            continue
+        db.add(Tariff(valid_from=item.valid_from, valid_to=item.valid_to, price_per_kwh=item.price_per_kwh, label=_creg_label(item.key, body.region), notes=note))
+        db.flush()
+        created += 1
+    set_setting(db, "creg_region", body.region)
+    db.commit()
+    return {"created": created, "updated": updated, "skipped": skipped}

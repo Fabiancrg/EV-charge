@@ -25,6 +25,8 @@ class AppConfig(BaseModel):
     currency: str = "EUR"  # Shown next to costs (ISO code, e.g. EUR, USD, CHF)
     log_level: str = "INFO"
     session_days: int = 30  # how long a sign-in lasts
+    # Page of the CREG home charging reimbursement tariffs (Tariffs → Import from CREG); the Dutch page works too
+    creg_url: str = "https://www.creg.be/fr/consommateurs/prix-et-tarifs/tarif-de-remboursement-pour-la-recharge-a-domicile-des-voitures-de-0"
     # Optional HTTPS: both must be set (no certificate is generated)
     ssl_certfile: str | None = None
     ssl_keyfile: str | None = None

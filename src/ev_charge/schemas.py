@@ -198,3 +198,19 @@ class TariffOut(TariffIn):
 
 class HomeLocations(BaseModel):
     locations: list[str] = Field(max_length=50)
+
+
+CregRegion = Literal["wallonia", "brussels", "flanders"]
+
+
+class CregItem(BaseModel):
+    key: str = Field(pattern=r"^20\d{2}-Q[1-4]$")
+    valid_from: date
+    valid_to: date
+    price_per_kwh: float = Field(gt=0, le=10)
+
+
+class CregApply(BaseModel):
+    region: CregRegion
+    items: list[CregItem] = Field(min_length=1, max_length=200)
+    source: str | None = Field(default=None, max_length=500)

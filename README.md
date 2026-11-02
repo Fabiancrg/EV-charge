@@ -38,7 +38,18 @@ The **Tariffs** page (administrators) holds the price per kWh of home charging, 
   - Periods can't overlap.
   - An empty end date means "until further notice".
   - *＋ Next quarter* pre-fills the quarter after the last period, with the last price.
+- **⟳ Import from CREG:** reads the official quarterly amounts from the [CREG page](https://www.creg.be/fr/consommateurs/prix-et-tarifs/tarif-de-remboursement-pour-la-recharge-a-domicile-des-voitures-de-0). These are the maximum amounts per kWh an employer can pay back for home charging, set by the SPF Finances (circular 2024/C/77).
+  - Choose the region of the driver's home: Wallonia, Brussels or Flanders. The choice is remembered.
+  - Each published quarter is compared with your tariffs:
+    - *new*: nothing covers it yet
+    - *price differs*: same dates, other price
+    - *up to date*
+    - *overlaps*: one of your periods covers part of the quarter with other dates; edit or delete it first
+  - New and changed quarters are pre-selected, and nothing is saved until you click *Apply*. Imported periods are labelled `CREG Q4 2026 (Wallonia)` and record their source and date.
+  - The page is read on the server (Python standard library, honouring `HTTPS_PROXY`). If the server can't reach the internet, save the CREG page from your browser (HTML only) and use *Upload the saved page*. Its URL is the `creg_url` setting; the Dutch page works too.
+  - Columns are found by their region names, so the import survives the columns being reordered. If the CREG changes the page layout, the import says so and you enter the tariff by hand.
 - **Warnings:**
+  - The dashboard reminds administrators when no tariff covers today, with a link to the import.
   - The Tariffs page shows gaps between periods, and a last period that has ended.
   - Home sessions on a date with no tariff show 🏠 *no tariff* and count as 0.
   - The reports point those sessions out.
@@ -131,6 +142,7 @@ Then open http://127.0.0.1:8000. The interactive API docs are at `/docs`.
 | `ssl_certfile` / `ssl_keyfile` | none | Serve HTTPS when both are set |
 | `log_level` | `INFO` | |
 | `session_days` | `30` | How long a sign-in lasts |
+| `creg_url` | the CREG home-charging tariff page (FR) | Page read by *Import from CREG* |
 
 The database schema is created and migrated (Alembic) at startup. To add a migration after changing `models.py`:
 
@@ -160,6 +172,7 @@ Every endpoint needs a signed-in user (session cookie); drivers only see and cha
 | `GET /api/reports` | Report data. Filters: `car_id`, `date_from`, `date_to` |
 | `GET /api/reports/reimbursement` | Reimbursement statement. Same filters, `fmt=json\|csv\|xlsx` |
 | `GET/POST /api/tariffs`, `PUT/DELETE /api/tariffs/{id}`, `GET/PUT /api/tariffs/home-locations` | Tariff periods and home locations (changes: administrators) |
+| `GET /api/tariffs/creg?region=`, `POST /api/tariffs/creg/upload`, `POST /api/tariffs/creg/apply` | CREG import: preview (from the website or a saved page), then apply the chosen quarters (administrators) |
 | `POST /api/auth/login\|logout\|password\|setup`, `GET /api/auth/me` | Sign-in and own account |
 | `GET/POST /api/users`, `PUT/DELETE /api/users/{id}` | Users (administrators) |
 | `POST /api/import/...` | Import wizard (see above) |
