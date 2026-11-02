@@ -147,6 +147,7 @@ input[type=text], input[type=number], input[type=date], input[type=time], input[
     transition: border-color 0.2s;
 }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+input:disabled, select:disabled, textarea:disabled { background: var(--bg-surface-alt); color: var(--text-muted); cursor: not-allowed; }
 textarea { min-height: 70px; resize: vertical; }
 .check { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500; }
 .check input { width: 18px; height: 18px; accent-color: var(--accent); }
@@ -227,3 +228,27 @@ legend { padding: 0 6px; font-weight: 600; color: var(--text-secondary); }
 .imp-grid td.small { white-space: normal; min-width: 200px; }
 .imp-err-text { color: var(--badge-err-text); }
 .imp-missing { color: var(--badge-err-text); margin-right: auto; font-size: var(--font-sm); align-self: center; }
+
+/* User menu */
+.user-menu { position: relative; }
+.user-dropdown { display: none; position: absolute; right: 0; top: 100%; margin-top: 6px; min-width: 210px; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: var(--shadow-dropdown); z-index: 900; overflow: hidden; }
+.user-dropdown.open { display: block; }
+.user-dropdown button { display: block; width: 100%; text-align: left; padding: 10px 14px; background: none; border: none; color: var(--text-primary); font: inherit; cursor: pointer; }
+.user-dropdown button:hover { background: var(--accent-bg); }
+
+/* Pagination */
+.pager { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-top: 12px; font-size: var(--font-sm); color: var(--text-secondary); }
+.pager select { width: auto; padding: 4px 8px; }
+.pager .btn { padding: 4px 10px; }
+
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 12px; border-radius: 16px; background: var(--accent-bg); color: var(--text-primary); margin: 0 6px 6px 0; }
+.chip button { background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: var(--font-md); line-height: 1; padding: 0 4px; }
+.note { padding: 10px 14px; border-radius: 8px; background: var(--badge-warn-bg); color: var(--badge-warn-text); margin-bottom: 14px; }
+
+@media print {
+    body { background: #fff !important; padding: 0; color: #000; }
+    header, .no-print, #toast, .container > p.muted { display: none !important; }
+    .content { box-shadow: none; padding: 0; border-radius: 0; }
+    th { background: #eee !important; color: #000; }
+    a { color: inherit; text-decoration: none; }
+}

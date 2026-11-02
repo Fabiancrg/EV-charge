@@ -12,13 +12,35 @@
     };
     document.getElementById('theme-toggle')?.addEventListener('click', () => EV.setTheme(EV.theme() === 'dark' ? 'light' : 'dark'));
 
+    /* ── User menu: change password, sign out ─────────────────────────── */
+    EV.isAdmin = () => EV.me?.role === 'admin';
+    const userBtn = document.getElementById('user-btn');
+    if (userBtn) {
+        const dd = document.getElementById('user-dropdown');
+        userBtn.addEventListener('click', (e) => { e.stopPropagation(); dd.classList.toggle('open'); });
+        document.addEventListener('click', () => dd.classList.remove('open'));
+        document.getElementById('logout-btn').addEventListener('click', async () => {
+            await fetch('/api/auth/logout', { method: 'POST' });
+            location.href = '/login';
+        });
+        document.getElementById('pw-btn').addEventListener('click', () => { document.getElementById('pw-form').reset(); EV.openModal('pw-modal'); });
+        document.getElementById('pw-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                await EV.api('POST', '/api/auth/password', EV.formData(e.target));
+                EV.closeModal('pw-modal');
+                EV.toast('Password changed');
+            } catch (err) { EV.formError('pw-modal', err); }
+        });
+    }
+
     /* ── Car colours: categorical palette, fixed order, indexed by car (colour follows the car) ── */
     const PALETTE = {
         light: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'],
         dark:  ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'],
     };
     EV.seriesColor = (i) => { const p = PALETTE[EV.theme() === 'dark' ? 'dark' : 'light']; return p[i % p.length]; };
-    EV.carColorIndex = {};  // car id → index (cars sorted by id), filled by EV.loadCars()
+    EV.carColorIndex = {};  // car id → palette index (the server ranks all cars by id), filled by EV.loadCars()
     EV.carColor = (carId) => EV.seriesColor(EV.carColorIndex[carId] ?? 0);
     EV.carDot = (carId) => `<span class="car-dot" style="background:${EV.carColor(carId)}"></span>`;
 
@@ -27,6 +49,7 @@
         const opts = { method, headers: {} };
         if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
         const r = await fetch(url, opts);
+        if (r.status === 401 && !url.startsWith('/api/auth/')) { location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`; throw new Error('Signed out'); }
         if (r.status === 204) return null;
         const data = await r.json().catch(() => null);
         if (!r.ok) {
@@ -39,7 +62,7 @@
     };
     EV.loadCars = async () => {
         const cars = await EV.api('GET', '/api/cars');
-        [...cars].sort((a, b) => a.id - b.id).forEach((c, i) => { EV.carColorIndex[c.id] = i; });
+        cars.forEach(c => { EV.carColorIndex[c.id] = c.color_index; });
         EV.cars = cars;
         return cars;
     };
@@ -112,6 +135,23 @@
     let suggestions = null;
     let editingId = null;
     let afterSave = null;
+    let tariffs = null;
+
+    const normLoc = (v) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    // Home charging is priced at the home tariff of the date: the cost field is then informative only
+    function updateHomeCost() {
+        const f = document.getElementById('session-form');
+        const hint = document.getElementById('sf-cost-hint');
+        const home = (suggestions?.home_locations || []).some(h => normLoc(h) === normLoc(f.location.value));
+        f.cost.disabled = home;
+        if (!home) { hint.textContent = 'Optional'; return; }
+        const d = f.charge_date.value;
+        const t = (tariffs || []).find(t => t.valid_from <= d && (!t.valid_to || d <= t.valid_to));
+        const kwh = Number(f.kwh.value);
+        hint.textContent = t
+            ? `🏠 Home tariff: ${EV.money(t.price_per_kwh, 4)}/kWh${kwh ? ` → ${EV.money(kwh * t.price_per_kwh)}` : ''}`
+            : '🏠 Home charging — no tariff for this date yet';
+    }
 
     async function refreshSuggestions(carId) {
         const qs = carId ? `?car_id=${carId}` : '';
@@ -140,6 +180,7 @@
         if (!EV.cars) await EV.loadCars();
         const active = EV.cars.filter(c => c.active || (session && c.id === session.car_id));
         if (!active.length) { EV.toast('Add a car first (Cars page)', true); return; }
+        if (!tariffs) tariffs = await EV.api('GET', '/api/tariffs').catch(() => []);
         f.car_id.innerHTML = active.map(c => `<option value="${c.id}">${EV.esc(c.name)}${c.license_plate ? ' · ' + EV.esc(c.license_plate) : ''}</option>`).join('');
         editingId = session ? session.id : null;
         afterSave = opts.onSaved || null;
@@ -147,7 +188,7 @@
         document.getElementById('sf-delete').style.display = session ? '' : 'none';
         document.getElementById('sf-again').style.display = session ? 'none' : '';
         if (session) {
-            EV.fillForm(f, session);
+            EV.fillForm(f, { ...session, cost: session.entered_cost });
         } else {
             f.reset();
             f.charge_date.value = EV.today();
@@ -157,6 +198,7 @@
         }
         await refreshSuggestions(Number(f.car_id.value));
         updateDuration();
+        updateHomeCost();
         EV.openModal('session-modal');
     };
 
@@ -179,6 +221,7 @@
                 f.car_id.value = keep.car_id; f.charge_date.value = keep.charge_date;
                 await refreshSuggestions(Number(keep.car_id));
                 updateDuration();
+                updateHomeCost();
                 f.odometer.focus();
             } else {
                 EV.closeModal('session-modal');
@@ -204,13 +247,16 @@
         f.car_id.addEventListener('change', () => refreshSuggestions(Number(f.car_id.value)));
         f.start_time.addEventListener('input', updateDuration);
         f.end_time.addEventListener('input', updateDuration);
-        f.kwh.addEventListener('input', updateDuration);
+        f.kwh.addEventListener('input', () => { updateDuration(); updateHomeCost(); });
+        f.location.addEventListener('input', updateHomeCost);
+        f.charge_date.addEventListener('change', updateHomeCost);
         // A known location pre-fills the provider and the reimbursement flag used there last time
         f.location.addEventListener('change', () => {
             const last = suggestions?.by_location?.[f.location.value];
             if (!last || editingId) return;
             if (!f.provider.value && last.provider) f.provider.value = last.provider;
             f.to_reimburse.checked = !!last.to_reimburse;
+            updateHomeCost();
         });
     });
 })();

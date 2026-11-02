@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import Car, ChargeSession
+from .pricing import Pricing
 from .services import duration_minutes, session_sort_key, years_between
 
 TOP_N = 7  # providers / locations shown individually; the rest fold into "Other"
@@ -52,6 +53,11 @@ def build_report(db: Session, car_ids: list[int] | None = None, date_from: date 
         return (date_from is None or s.charge_date >= date_from) and (date_to is None or s.charge_date <= date_to)
 
     sessions = sorted((s for s in every if in_range(s)), key=session_sort_key)
+    pricing = Pricing(db)
+    prices = {s.id: pricing.price(s) for s in sessions}
+
+    def cost(s: ChargeSession) -> float | None:  # home tariff for home charging, else the cost entered
+        return prices[s.id].cost
 
     # Distance and consumption: pairs of consecutive odometer readings per car (whole history, so the first
     # session in the range still gets its distance); a pair counts when its later session is in the range.
@@ -81,15 +87,15 @@ def build_report(db: Session, car_ids: list[int] | None = None, date_from: date 
         row = table[months[i]]
         row["sessions"] += 1
         row["kwh"] += s.kwh
-        row["cost"] += s.cost or 0
+        row["cost"] += cost(s) or 0
         if s.to_reimburse:
             row["kwh_to_reimburse"] += s.kwh
-            row["cost_to_reimburse"] += s.cost or 0
+            row["cost_to_reimburse"] += cost(s) or 0
         for groups, key in ((providers, s.provider), (locations, s.location)):
             g = groups[key or "(not set)"]
             g["kwh"] += s.kwh
             g["sessions"] += 1
-            g["cost"] += s.cost or 0
+            g["cost"] += cost(s) or 0
         minutes_total += duration_minutes(s.start_time, s.end_time) or 0
 
     for s, delta in km_pairs:
@@ -98,7 +104,7 @@ def build_report(db: Session, car_ids: list[int] | None = None, date_from: date 
         table[months[i]]["km"] += delta
 
     total_kwh = sum(s.kwh for s in sessions)
-    with_cost = [s for s in sessions if s.cost is not None]
+    with_cost = [s for s in sessions if cost(s) is not None]
     km_total = sum(d for _, d in km_pairs)
     kwh_for_km = sum(s.kwh for s, _ in km_pairs)
     reimbursable = [s for s in sessions if s.to_reimburse]
@@ -123,13 +129,15 @@ def build_report(db: Session, car_ids: list[int] | None = None, date_from: date 
             "kwh": round(total_kwh, 2),
             "km": km_total,
             "consumption_kwh_100km": round(kwh_for_km / km_total * 100, 1) if km_total else None,
-            "cost": round(sum(s.cost for s in with_cost), 2) if with_cost else None,  # type: ignore[misc]
-            "avg_price_per_kwh": round(sum(s.cost for s in with_cost) / sum(s.kwh for s in with_cost), 3) if with_cost else None,  # type: ignore[misc]
+            "cost": round(sum(cost(s) or 0 for s in with_cost), 2) if with_cost else None,
+            "avg_price_per_kwh": round(sum(cost(s) or 0 for s in with_cost) / sum(s.kwh for s in with_cost), 3) if with_cost else None,
+            "home_kwh": round(sum(s.kwh for s in sessions if prices[s.id].home), 2),
+            "home_without_tariff": sum(prices[s.id].missing_tariff for s in sessions),
             "avg_kwh_per_session": round(total_kwh / len(sessions), 1) if sessions else None,
             "charging_hours": round(minutes_total / 60, 1),
             "sessions_to_reimburse": len(reimbursable),
             "kwh_to_reimburse": round(sum(s.kwh for s in reimbursable), 2),
-            "cost_to_reimburse": round(sum(s.cost or 0 for s in reimbursable), 2),
+            "cost_to_reimburse": round(sum(cost(s) or 0 for s in reimbursable), 2),
         },
         "months": months,
         "kwh_by_month": {str(k): [round(v, 2) for v in vals] for k, vals in kwh_by_month.items()},
@@ -139,4 +147,40 @@ def build_report(db: Session, car_ids: list[int] | None = None, date_from: date 
         "by_location": _ranked(locations),
         "monthly": [{"month": m, **{k: round(v, 2) for k, v in table[m].items()}} for m in months],
         "lease": lease,
+    }
+
+
+def build_reimbursement(db: Session, car_ids: list[int] | None, date_from: date | None, date_to: date | None) -> dict[str, Any]:
+    """Sessions flagged "to be reimbursed", priced (home tariff or cost entered), for a printable statement."""
+    pricing = Pricing(db)
+    cars = {c.id: c for c in db.scalars(select(Car))}
+    rows = []
+    for s in sorted(db.scalars(select(ChargeSession).where(ChargeSession.to_reimburse.is_(True))), key=session_sort_key):
+        if car_ids and s.car_id not in car_ids:
+            continue
+        if (date_from and s.charge_date < date_from) or (date_to and s.charge_date > date_to):
+            continue
+        p = pricing.price(s)
+        unit = p.tariff_price if p.home else (round(p.cost / s.kwh, 4) if p.cost is not None and s.kwh else None)
+        rows.append({
+            "id": s.id, "charge_date": s.charge_date.isoformat(), "car_id": s.car_id, "car_name": cars[s.car_id].name,
+            "license_plate": cars[s.car_id].license_plate, "odometer": s.odometer, "location": s.location, "provider": s.provider,
+            "kwh": s.kwh, "start_time": s.start_time.strftime("%H:%M") if s.start_time else None,
+            "end_time": s.end_time.strftime("%H:%M") if s.end_time else None, "home": p.home, "price_per_kwh": unit,
+            "amount": p.cost, "missing_price": p.cost is None, "notes": s.notes,
+        })  # fmt: skip
+    used_cars = sorted({r["car_id"] for r in rows} | set(car_ids or []), key=lambda i: cars[i].name if i in cars else "")
+    return {
+        "cars": [{"id": i, "name": cars[i].name, "license_plate": cars[i].license_plate, "make": cars[i].make, "model": cars[i].model} for i in used_cars if i in cars],
+        "date_from": date_from.isoformat() if date_from else None,
+        "date_to": date_to.isoformat() if date_to else None,
+        "rows": rows,
+        "totals": {
+            "sessions": len(rows),
+            "kwh": round(sum(r["kwh"] for r in rows), 2),
+            "home_kwh": round(sum(r["kwh"] for r in rows if r["home"]), 2),
+            "amount": round(sum(r["amount"] or 0 for r in rows), 2),
+            "home_amount": round(sum(r["amount"] or 0 for r in rows if r["home"]), 2),
+            "missing_price": sum(r["missing_price"] for r in rows),
+        },
     }

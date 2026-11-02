@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Users · EV Charge{% endblock %}
+{% block content %}
+<div class="content">
+    <div class="page-head">
+        <h2>Users</h2>
+        <button class="btn" id="add-user">＋ Add a user</button>
+    </div>
+    <p class="muted small" style="margin-bottom:12px"><b>Administrators</b> can do everything. <b>Drivers</b> see only the cars assigned to them: they record, edit and import those cars' sessions, and see their reports and reimbursement statements.</p>
+    <div class="table-wrap" id="users-table"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="modal" id="user-modal">
+    <div class="modal-box" style="max-width:620px">
+        <h3><span id="uf-title">User</span><button class="icon-btn" data-close title="Close">✕</button></h3>
+        <div class="form-error"></div>
+        <form id="user-form" autocomplete="off">
+            <div class="form-grid">
+                <div class="field"><label>Username *</label><input type="text" name="username" required minlength="2" maxlength="50" pattern="[A-Za-z0-9._@\-]+" autocapitalize="none" autofocus></div>
+                <div class="field"><label>Full name</label><input type="text" name="full_name" maxlength="100"></div>
+                <div class="field span-2"><label>E-mail</label><input type="text" name="email" maxlength="200"></div>
+                <div class="field"><label>Role</label><select name="role"><option value="driver">Driver</option><option value="admin">Administrator</option></select></div>
+                <div class="field"><label id="uf-pw-label">Password *</label><input type="password" name="password" minlength="8" autocomplete="new-password"><div class="hint" id="uf-pw-hint">At least 8 characters</div></div>
+                <div class="field span-all" id="uf-cars"><label>Cars this driver works with</label><div id="uf-car-list" class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px 12px"></div></div>
+                <div class="field span-all"><label class="check"><input type="checkbox" name="active" checked> Active (can sign in)</label></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-danger left" id="uf-delete">🗑 Delete</button>
+                <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+                <button type="submit" class="btn">💾 Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+    const form = document.getElementById('user-form');
+    let users = [], cars = [], editing = null;
+    const carName = (id) => (cars.find(c => c.id === id) || {}).name || `#${id}`;
+    const when = (iso) => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'never';
+
+    function toggleCars() { document.getElementById('uf-cars').style.display = form.role.value === 'admin' ? 'none' : ''; }
+
+    function open(u) {
+        editing = u;
+        form.reset();
+        document.getElementById('uf-title').textContent = u ? `Edit ${u.username}` : 'New user';
+        document.getElementById('uf-delete').style.display = u && u.id !== EV.me.id ? '' : 'none';
+        document.getElementById('uf-pw-label').textContent = u ? 'New password' : 'Password *';
+        document.getElementById('uf-pw-hint').textContent = u ? 'Leave empty to keep the current one. Changing it signs the user out.' : 'At least 8 characters';
+        form.password.required = !u;
+        document.getElementById('uf-car-list').innerHTML = cars.length
+            ? cars.map(c => `<label class="check"><input type="checkbox" value="${c.id}" ${u && u.car_ids.includes(c.id) ? 'checked' : ''}> ${EV.carDot(c.id)}${EV.esc(c.name)}${c.active ? '' : ' <span class="muted">(inactive)</span>'}</label>`).join('')
+            : '<span class="muted">No car yet: add cars on the Cars page.</span>';
+        if (u) EV.fillForm(form, { ...u, password: '' }); else { form.active.checked = true; form.role.value = 'driver'; }
+        toggleCars();
+        EV.openModal('user-modal');
+    }
+
+    function render() {
+        document.getElementById('users-table').innerHTML = `<table><thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Cars</th><th class="hide-sm">Last sign-in</th><th>Status</th><th></th></tr></thead><tbody>
+            ${users.map(u => `<tr>
+                <td><strong>${EV.esc(u.username)}</strong>${u.id === EV.me.id ? ' <span class="muted small">(you)</span>' : ''}</td>
+                <td>${EV.esc(u.full_name || '')}${u.email ? `<br><span class="muted small">${EV.esc(u.email)}</span>` : ''}</td>
+                <td>${u.role === 'admin' ? '<span class="badge badge-info">Administrator</span>' : '<span class="badge">Driver</span>'}</td>
+                <td>${u.role === 'admin' ? '<span class="muted">all cars</span>' : (u.car_ids.map(id => EV.carDot(id) + EV.esc(carName(id))).join('<br>') || '<span class="badge badge-warn">no car</span>')}</td>
+                <td class="hide-sm">${when(u.last_login)}</td>
+                <td>${u.active ? '<span class="badge badge-ok">Active</span>' : '<span class="badge badge-err">Disabled</span>'}</td>
+                <td><button class="btn btn-ghost btn-sm" data-edit="${u.id}">✏ Edit</button></td>
+            </tr>`).join('')}</tbody></table>`;
+    }
+
+    async function load() {
+        try { [users, cars] = await Promise.all([EV.api('GET', '/api/users'), EV.loadCars()]); render(); }
+        catch (err) { EV.toast(err.message, true); }
+    }
+
+    form.role.addEventListener('change', toggleCars);
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = EV.formData(form);
+        body.car_ids = body.role === 'admin' ? [] : [...document.querySelectorAll('#uf-car-list input:checked')].map(i => Number(i.value));
+        try {
+            const saved = editing ? await EV.api('PUT', `/api/users/${editing.id}`, body) : await EV.api('POST', '/api/users', body);
+            EV.toast(`${saved.username} saved`);
+            EV.closeModal('user-modal');
+            if (editing && editing.id === EV.me.id && saved.role !== 'admin') { location.href = '/'; return; }
+            load();
+        } catch (err) { EV.formError('user-modal', err); }
+    });
+    document.getElementById('uf-delete').addEventListener('click', async () => {
+        if (!editing || !confirm(`Delete ${editing.username}? Their sessions are kept.`)) return;
+        try { await EV.api('DELETE', `/api/users/${editing.id}`); EV.toast('User deleted'); EV.closeModal('user-modal'); load(); }
+        catch (err) { EV.formError('user-modal', err); }
+    });
+    document.getElementById('add-user').addEventListener('click', () => open(null));
+    document.getElementById('users-table').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-edit]');
+        if (b) open(users.find(u => u.id === Number(b.dataset.edit)));
+    });
+    load();
+})();
+</script>
+{% endblock %}

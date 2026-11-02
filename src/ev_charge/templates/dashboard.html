@@ -46,7 +46,10 @@
         const box = document.getElementById('car-cards');
         const active = cars.filter(c => c.active);
         if (!active.length) {
-            box.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><h3>No car yet</h3><p>Start by adding your car, its specs and lease.</p><p style="margin-top:14px"><a class="btn" href="/cars?new=1">＋ Add a car</a></p></div>`;
+            box.innerHTML = EV.isAdmin()
+                ? `<div class="empty-state" style="grid-column:1/-1"><h3>No car yet</h3><p>Start by adding your car, its specs and lease.</p><p style="margin-top:14px"><a class="btn" href="/cars?new=1">＋ Add a car</a></p></div>`
+                : `<div class="empty-state" style="grid-column:1/-1"><h3>No car assigned to you</h3><p>Ask an administrator to assign your car(s) to you.</p></div>`;
+            document.getElementById('log-btn').style.display = 'none';
             return;
         }
         box.innerHTML = active.map(c => `

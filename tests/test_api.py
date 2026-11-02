@@ -20,7 +20,7 @@ def test_car_crud_and_validation(client, car):
     assert client.post("/api/cars", json={"name": "Ioniq 5"}).status_code == 409
     assert client.post("/api/cars", json={"name": "  "}).status_code == 422
     assert client.post("/api/cars", json={"name": "X", "lease_start": "2026-01-01", "lease_end": "2025-01-01"}).status_code == 422
-    body = {k: v for k, v in car.items() if k not in ("id", "session_count", "total_kwh", "last_odometer", "last_charge_date", "lease")}
+    body = {k: v for k, v in car.items() if k not in ("id", "session_count", "total_kwh", "last_odometer", "last_charge_date", "lease", "drivers")}
     body |= {"battery_kwh": 74, "license_plate": " 1-ABC-123 ", "vin": ""}
     r = client.put(f"/api/cars/{car['id']}", json=body)
     assert r.status_code == 200
@@ -38,9 +38,11 @@ def test_session_crud_and_derived_values(client, car):
     s = _session(client, car["id"], odometer=1000, start_time="22:30", end_time="06:30", cost=12.2, location=" Home ", provider="")
     assert s["duration_minutes"] == 480
     assert s["avg_power_kw"] == round(30.5 / 8, 1)
-    assert s["price_per_kwh"] == 0.4
     assert s["location"] == "Home" and s["provider"] is None
-    s2 = _session(client, car["id"], charge_date="2026-03-05", odometer=1350, to_reimburse=True, location="Office")
+    # "Home" is a home location: priced at the home tariff, and there is none yet
+    assert s["home"] is True and s["missing_tariff"] is True and s["cost"] is None and s["entered_cost"] == 12.2
+    s2 = _session(client, car["id"], charge_date="2026-03-05", odometer=1350, to_reimburse=True, location="Office", cost=12.2)
+    assert s2["price_per_kwh"] == 0.4 and s2["cost_source"] == "entered" and s2["created_by"] == "Ada Admin"
     rows = client.get("/api/sessions").json()
     assert [r["id"] for r in rows] == [s2["id"], s["id"]]  # newest first
     assert rows[0]["km_since_previous"] == 350

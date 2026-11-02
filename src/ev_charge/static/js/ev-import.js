@@ -219,8 +219,9 @@
             </tbody></table></div>
             <div class="form-grid" style="margin-top:14px">
                 ${hasCarCol
-                    ? `<div class="field span-2"><label class="check"><input type="checkbox" id="imp-create" ${state.createMissing ? 'checked' : ''}> Create the cars that don't exist yet</label>
+                    ? (EV.isAdmin() ? `<div class="field span-2"><label class="check"><input type="checkbox" id="imp-create" ${state.createMissing ? 'checked' : ''}> Create the cars that don't exist yet</label>
                         <div class="hint">The car column is matched on the car name or license plate.</div></div>`
+                        : '<div class="field span-2"><div class="hint">The car column is matched on the name or license plate of your cars.</div></div>')
                     : `<div class="field span-2"><label>Car for every row *</label><select id="imp-car">${state.cars.map(c => `<option value="${c.id}" ${c.id === state.carId ? 'selected' : ''}>${esc(c.name)}${c.license_plate ? ' · ' + esc(c.license_plate) : ''}</option>`).join('') || '<option value="">(add a car first)</option>'}</select></div>`}
                 <div class="field"><label>Dates are written</label>
                     <select id="imp-order">${[['auto', 'Detect automatically'], ['dmy', 'day/month/year'], ['mdy', 'month/day/year'], ['ymd', 'year-month-day']].map(([k, l]) => `<option value="${k}" ${k === state.dateOrder ? 'selected' : ''}>${l}</option>`).join('')}</select></div>

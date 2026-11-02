@@ -183,9 +183,11 @@ def parse_duration(raw: str) -> int | None:
 # ── Rows → sessions ──────────────────────────────────────────────────────────
 
 
-def _cars_lookup(db: Session) -> dict[str, Car]:
+def _cars_lookup(db: Session, scope: set[int] | None) -> dict[str, Car]:
     lookup: dict[str, Car] = {}
     for car in db.scalars(select(Car)):
+        if scope is not None and car.id not in scope:
+            continue
         for key in (car.name, car.license_plate):
             if key:
                 lookup.setdefault(re.sub(r"[\s\-.]", "", norm(key)), car)
@@ -196,14 +198,15 @@ def _dup_key(car_key: Any, d: date, kwh: float, odometer: int | None) -> tuple:
     return (car_key, d, round(kwh, 2), odometer)
 
 
-def parse_rows(db: Session, req: ImportRequest) -> list[ParsedRow]:
+def parse_rows(db: Session, req: ImportRequest, scope: set[int] | None = None) -> list[ParsedRow]:
+    """scope: the car ids the user may import into (None: every car)."""
     mapping = {k: v for k, v in req.mapping.items() if k in FIELDS and v is not None and v >= 0}
     order = req.date_order
     if order == "auto":
         col = mapping.get("charge_date", mapping.get("start_time"))
         order = detect_date_order([r[col] for r in req.rows if col is not None and col < len(r)]) if col is not None else "dmy"
-    cars = _cars_lookup(db)
-    fixed_car = db.get(Car, req.car_id) if req.car_id else None
+    cars = _cars_lookup(db, scope)
+    fixed_car = db.get(Car, req.car_id) if req.car_id and (scope is None or req.car_id in scope) else None
     existing = {_dup_key(s.car_id, s.charge_date, s.kwh, s.odometer) for s in db.scalars(select(ChargeSession))}
     seen: set[tuple] = set()
     out: list[ParsedRow] = []
@@ -229,7 +232,7 @@ def parse_rows(db: Session, req: ImportRequest) -> list[ParsedRow]:
             car = cars.get(re.sub(r"[\s\-.]", "", norm(cell["car"])))
             p.car_name = car.name if car else cell["car"]
             if car is None and not req.create_missing_cars:
-                p.errors.append(f'unknown car "{cell["car"]}"')
+                p.errors.append(f'unknown car "{cell["car"]}"' + (" (or not assigned to you)" if scope is not None else ""))
         elif fixed_car is not None:
             car, p.car_name = fixed_car, fixed_car.name
         else:
@@ -313,8 +316,8 @@ def summary(rows: list[ParsedRow], req: ImportRequest) -> dict[str, Any]:
     }
 
 
-def import_rows(db: Session, req: ImportRequest) -> dict[str, Any]:
-    rows = parse_rows(db, req)
+def import_rows(db: Session, req: ImportRequest, scope: set[int] | None = None, user_id: int | None = None) -> dict[str, Any]:
+    rows = parse_rows(db, req, scope)
     info = summary(rows, req)
     created: dict[str, Car] = {}
     for name in info["new_cars"]:
@@ -328,7 +331,7 @@ def import_rows(db: Session, req: ImportRequest) -> dict[str, Any]:
         values = dict(r.values)
         if values["car_id"] is None:
             values["car_id"] = created[norm(r.car_name or "")].id
-        db.add(ChargeSession(**values))
+        db.add(ChargeSession(**values, created_by_id=user_id))
         count += 1
     db.commit()
     return {**info, "imported": count, "cars_created": list(info["new_cars"])}

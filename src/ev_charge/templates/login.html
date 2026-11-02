@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ 'Set up' if mode == 'setup' else 'Sign in' }} · EV Charge</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <script>
+        (() => { let t = null; try { t = localStorage.getItem('ev-theme'); } catch (e) {}
+          if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          document.documentElement.setAttribute('data-theme', t); })();
+    </script>
+    <link rel="stylesheet" href="/static/css/app.css?v={{ app_version }}">
+    <style>
+        body { display: flex; align-items: center; justify-content: center; }
+        .login-box { width: 100%; max-width: 400px; }
+        .login-box h1 { font-size: var(--font-xl); margin-bottom: 4px; }
+        .login-box .field { margin-bottom: 14px; }
+        .login-box .btn { width: 100%; justify-content: center; margin-top: 6px; }
+    </style>
+</head>
+<body>
+<div class="content login-box">
+    <h1>⚡ EV Charge</h1>
+    {% if mode == 'setup' %}
+    <p class="muted" style="margin-bottom:18px">Welcome! Create the first <b>administrator</b> account. You can add drivers afterwards (Users page).</p>
+    {% else %}
+    <p class="muted" style="margin-bottom:18px">Sign in to record and follow your charging sessions.</p>
+    {% endif %}
+    <div class="form-error" id="err"></div>
+    <form id="form">
+        <div class="field"><label>Username</label><input type="text" name="username" required autofocus autocomplete="username" autocapitalize="none" spellcheck="false"></div>
+        {% if mode == 'setup' %}
+        <div class="field"><label>Full name</label><input type="text" name="full_name" autocomplete="name"></div>
+        {% endif %}
+        <div class="field"><label>Password</label><input type="password" name="password" required autocomplete="{{ 'new-password' if mode == 'setup' else 'current-password' }}" {{ 'minlength=8' if mode == 'setup' }}>
+            {% if mode == 'setup' %}<div class="hint">At least 8 characters.</div>{% endif %}</div>
+        <button class="btn" type="submit">{{ 'Create administrator' if mode == 'setup' else 'Sign in' }}</button>
+    </form>
+</div>
+<script>
+document.getElementById('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = document.getElementById('err');
+    err.style.display = 'none';
+    const body = Object.fromEntries(new FormData(e.target));
+    const r = await fetch({{ ('/api/auth/setup' if mode == 'setup' else '/api/auth/login')|tojson }}, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (r.ok) {
+        const next = new URLSearchParams(location.search).get('next');
+        location.href = next && next.startsWith('/') && !next.startsWith('//') ? next : '/';
+        return;
+    }
+    const data = await r.json().catch(() => ({}));
+    err.textContent = typeof data.detail === 'string' ? data.detail : (data.detail || []).map(d => d.msg).join('\n') || 'Sign-in failed';
+    err.style.display = 'block';
+});
+</script>
+</body>
+</html>

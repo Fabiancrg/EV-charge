@@ -24,6 +24,7 @@ class AppConfig(BaseModel):
     database_url: str | None = None  # Computed: sqlite:///{data_dir}/ev_charge.db
     currency: str = "EUR"  # Shown next to costs (ISO code, e.g. EUR, USD, CHF)
     log_level: str = "INFO"
+    session_days: int = 30  # how long a sign-in lasts
     # Optional HTTPS: both must be set (no certificate is generated)
     ssl_certfile: str | None = None
     ssl_keyfile: str | None = None
