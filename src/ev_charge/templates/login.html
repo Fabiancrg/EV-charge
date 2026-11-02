@@ -10,7 +10,7 @@
           if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
           document.documentElement.setAttribute('data-theme', t); })();
     </script>
-    <link rel="stylesheet" href="/static/css/app.css?v={{ app_version }}">
+    <link rel="stylesheet" href="/static/css/app.css?v={{ asset_version }}">
     <style>
         body { display: flex; align-items: center; justify-content: center; }
         .login-box { width: 100%; max-width: 400px; }

@@ -8,6 +8,7 @@ import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, Response
@@ -44,7 +45,18 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
 
 
 app = FastAPI(title="EV Charge", version=__version__, lifespan=lifespan)
-app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
+
+
+class _StaticFiles(StaticFiles):
+    """Static files that browsers re-validate (ETag) instead of using a stale copy after an update."""
+
+    async def get_response(self, path: str, scope: Any) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/static", _StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 for module in (auth, sso, users, roles, audit_routes, cars, chargers, sessions, tariffs, imports, reports, ui):
     app.include_router(module.router)
 
