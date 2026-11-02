@@ -227,8 +227,10 @@ class ChargerIn(BaseModel):
     uses_home_tariff: bool = True
     active: bool = True
     notes: str | None = None
+    default_car_id: int | None = None  # car of the sessions created from the charger (live, history)
+    default_location: str | None = Field(default=None, max_length=200)
 
-    _strip = field_validator("name", "brand", "model", "serial_number", "reimbursement_company", "notes", mode="before")(_blank_to_none)
+    _strip = field_validator("name", "brand", "model", "serial_number", "reimbursement_company", "notes", "default_car_id", "default_location", mode="before")(_blank_to_none)
 
 
 class ChargerOut(ChargerIn):
@@ -238,6 +240,27 @@ class ChargerOut(ChargerIn):
     sessions: int = 0
     kwh: float = 0
     last_used: date | None = None
+    connector: str | None = None
+    connector_account: str | None = None  # e.g. the Ohme e-mail (administrators only); never the password
+    poll_enabled: bool = False
+    external_id: str | None = None
+    live: dict[str, Any] | None = None
+    last_poll_at: datetime | None = None
+    last_poll_error: str | None = None
+
+
+class ChargerConnection(BaseModel):
+    connector: str | None = Field(default=None, max_length=30)  # None: disconnect
+    credentials: dict[str, str] = {}  # e.g. {"email": ..., "password": ...}; an empty value keeps the stored one
+    poll_enabled: bool = True
+
+
+class HistoryApply(BaseModel):
+    date_from: date
+    date_to: date
+    keys: list[str] = Field(min_length=1, max_length=5000)
+    car_id: int
+    link_matches: bool = True
 
 
 CregRegion = Literal["wallonia", "brussels", "flanders"]

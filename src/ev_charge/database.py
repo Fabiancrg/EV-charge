@@ -48,16 +48,33 @@ def get_db() -> Generator[Session]:
         db.close()
 
 
-def init_db() -> None:
-    """Bring the schema to the latest Alembic revision."""
+def run_migrations(eng: Engine, revision: str = "head") -> None:
+    """Bring the schema of a database to an Alembic revision."""
     from alembic import command
     from alembic.config import Config
 
     pkg_dir = Path(__file__).parent
     cfg = Config()
     cfg.set_main_option("script_location", str(pkg_dir / "migrations"))
-    cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
-    with engine.begin() as connection:
-        cfg.attributes["connection"] = connection
-        command.upgrade(cfg, "head")
+    cfg.set_main_option("sqlalchemy.url", str(eng.url))
+    with eng.connect() as connection:
+        sqlite = connection.dialect.name == "sqlite"
+        if sqlite:
+            # Migrations that rebuild a table (Alembic "batch" mode) must not trip over foreign keys
+            # referencing it; the pragma only works outside a transaction.
+            connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+            connection.commit()  # end the implicit transaction SQLAlchemy opened for the pragma
+        try:
+            with connection.begin():
+                cfg.attributes["connection"] = connection
+                command.upgrade(cfg, revision)
+        finally:
+            if sqlite:
+                connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+                connection.commit()
+
+
+def init_db() -> None:
+    """Bring the schema to the latest Alembic revision."""
+    run_migrations(engine)
     logger.info(f"Database ready: {DATABASE_URL}")

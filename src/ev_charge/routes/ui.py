@@ -22,7 +22,7 @@ from .auth import me_out, setup_needed
 
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
-templates.env.globals.update(app_version=__version__, currency=CONFIG.currency)
+templates.env.globals.update(app_version=__version__, currency=CONFIG.currency, poll_seconds=max(15, CONFIG.charger_poll_seconds))
 
 
 def _page(request: Request, db: Session, template: str, active: str, admin_only: bool = False) -> Response:

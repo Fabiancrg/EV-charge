@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import check_car_access, current_user, require_admin
 from ..database import get_db
-from ..models import Car, ChargeSession, User
+from ..models import Car, Charger, ChargeSession, User
 from ..schemas import CarIn, CarOut
 from ..services import car_out
 
@@ -73,6 +73,8 @@ def delete_car(car_id: int, _: User = Depends(require_admin), db: Session = Depe
     count = db.scalar(select(func.count()).select_from(ChargeSession).where(ChargeSession.car_id == car_id)) or 0
     if count:
         raise HTTPException(409, f"'{car.name}' has {count} charging session(s): delete them first, or mark the car inactive")
+    for charger in db.scalars(select(Charger).where(Charger.default_car_id == car_id)):
+        charger.default_car_id = None
     db.delete(car)
     db.commit()
     return Response(status_code=204)

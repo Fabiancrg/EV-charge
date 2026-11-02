@@ -76,6 +76,18 @@
         return x ? `<span class="badge ${x[3]}">${x[2]} ${x[1]}</span>` : '';
     };
 
+    /* Live charger state (from the charger's API) */
+    EV.LIVE = {
+        unplugged: ['Unplugged', '⏏', 'badge'], pending_approval: ['Waiting for approval', '⏸', 'badge-warn'], plugged_in: ['Plugged in', '🔌', 'badge-info'],
+        charging: ['Charging', '⚡', 'badge-ok'], paused: ['Paused', '⏸', 'badge-warn'], finished: ['Finished', '✓', 'badge-info'], offline: ['Offline', '⚠', 'badge-err'],
+    };
+    EV.liveBadge = (lv) => { const x = EV.LIVE[lv?.status] || [lv?.status || '?', '', 'badge']; return `<span class="badge ${x[2]}">${x[1]} ${x[0]}</span>`; };
+    EV.ago = (iso) => {
+        if (!iso) return '';
+        const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+        return s < 90 ? 'just now' : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 129600 ? `${Math.round(s / 3600)} h ago` : EV.date(iso.slice(0, 10));
+    };
+
     EV.loadCars = async () => {
         const cars = await EV.api('GET', '/api/cars');
         cars.forEach(c => { EV.carColorIndex[c.id] = c.color_index; });

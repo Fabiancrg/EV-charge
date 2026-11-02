@@ -21,3 +21,4 @@ credentials.key
 credentials.key.dpapi
 config.json
 data/
+secret.key
