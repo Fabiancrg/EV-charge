@@ -6,10 +6,11 @@ from __future__ import annotations
 from typing import Any
 
 from .base import Connector, ConnectorError
+from .homeassistant import HomeAssistantConnector
 from .ohme import OhmeConnector
 from .zaptec import ZaptecConnector
 
-CONNECTORS: dict[str, type] = {"ohme": OhmeConnector, "zaptec": ZaptecConnector}
+CONNECTORS: dict[str, type] = {"ohme": OhmeConnector, "zaptec": ZaptecConnector, "homeassistant": HomeAssistantConnector}
 
 
 def make_connector(kind: str, config: dict[str, Any]) -> Connector:

@@ -63,7 +63,7 @@ def charger_out(c: Charger, user: Principal, usage: list[ChargeSession] | None =
             config = {}
         plain = [f["name"] for f in map(_field, CONNECTORS[c.connector].fields) if not f["secret"]]
         o.connector_settings = {k: config[k] for k in plain if config.get(k)}
-        o.connector_account = config.get("email")
+        o.connector_account = config.get("email") or config.get("url")
     return o
 
 

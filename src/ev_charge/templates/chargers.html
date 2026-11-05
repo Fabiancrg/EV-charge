@@ -19,7 +19,8 @@
         <p class="muted small" style="margin-bottom:12px">EV Charge reads the charger's cloud account to follow the <b>live session</b> (a session is created when charging starts,
             ⏳ <i>In progress</i> while plugged in, ✓ <i>Recorded</i> once unplugged) and to import its <b>charging history</b>.
             The credentials are stored encrypted and checked now. <b>Zaptec</b>: official API, with the Zaptec Portal account; its history lists the exact sessions.
-            <b>Ohme</b>: no official API, the connection uses the same unofficial API as the Ohme app and Home Assistant; its history is hourly.</p>
+            <b>Ohme</b>: no official API, the connection uses the same unofficial API as the Ohme app and Home Assistant; its history is hourly.
+            <b>Home Assistant</b>: when the charger is on a smart plug, its power and energy sensors (long-lived access token from your HA profile); its history is hourly.</p>
         <form id="conn-form" autocomplete="off">
             <div class="form-grid">
                 <div class="field span-all"><label>Charger API</label><select name="connector"></select></div>
