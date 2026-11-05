@@ -1,0 +1,21 @@
+# /etc/ev-charge/update.conf — settings of ev-charge-update.sh (all optional; the defaults are shown)
+
+# Where the builds come from: the "latest" release, rebuilt on each merge to main
+#REPO=Fabiancrg/EV-charge
+#TAG=latest
+
+# The .pyz your ev-charge.service runs (ExecStart=... /opt/ev-charge/ev_charge.pyz --config ...)
+PYZ=/opt/ev-charge/ev_charge.pyz
+SERVICE=ev-charge.service
+# The Python the service runs it with: the build for its version is downloaded
+PYTHON=python3
+
+# Checked after the restart (https and self-signed certificates work too)
+HEALTH_URL=http://127.0.0.1:8000/api/health
+#HEALTH_TIMEOUT=90
+
+# The SQLite database (data_dir/ev_charge.db): copied before each update, put back if the new version fails
+#DB_FILE=/home/evcharge/.ev-charge/ev_charge.db
+
+# The service user's shiv folder (~/.shiv): each version is extracted there; older ones are removed
+#SHIV_DIR=/home/evcharge/.shiv
