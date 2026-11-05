@@ -117,7 +117,7 @@ Each session to be reimbursed has a **reimbursement status**:
 
 ## Charger connection: live sessions and history
 
-A charger can be connected to its cloud account (🔌 on the **Chargers** page, administrators). Supported: **Zaptec** and **Ohme**. Other chargers can be added in `src/ev_charge/connectors/`.
+A charger can be connected to its cloud account (🔌 on the **Chargers** page, administrators). Supported: **Zaptec**, **Ohme** and **Home Assistant** (smart plug sensors). Other chargers can be added in `src/ev_charge/connectors/`.
 
 - **Zaptec** (Go, Go 2, Pro…):
   - Uses Zaptec's **official API** ([docs.zaptec.com](https://docs.zaptec.com)) with the Zaptec Portal / app e-mail and password.
@@ -129,6 +129,13 @@ A charger can be connected to its cloud account (🔌 on the **Chargers** page, 
   - Ohme has no public API. EV Charge uses the open-source [`ohme`](https://github.com/dan-r/ohmepy) library (MIT), the one behind the Home Assistant integration.
   - It logs in with the **Ohme app e-mail and password**; one Ohme account is one charger.
   - The API is unofficial, so Ohme can change it at any time. A broken connection shows its error on the Chargers page and the dashboard; sessions can still be entered by hand.
+- **Home Assistant** (a charger on a smart plug, e.g. an Ohme whose cloud is unreliable):
+  - Reads the plug's **power** sensor (W or kW) and **energy** sensor (kWh or Wh, cumulative or a daily utility meter that resets: a drop is taken as a reset), e.g. `sensor.carplug2_relay_power` and `sensor.ve_plug_2_energy_daily`.
+  - Needs the HA URL and a **long-lived access token** (HA profile → Security). EV Charge must be able to reach Home Assistant.
+  - **Live:** *charging* while the power is above the threshold (100 W by default). The session's energy is what the energy sensor added since charging started, read from HA's recorded history, so it is right even if EV Charge restarts mid-charge, and the session starts when charging really started.
+  - **End of a session:** a plug can't see the car being unplugged, so a session ends once the energy has stopped increasing for the idle time (60 minutes by default, so short pauses don't split it). The plug's standby use (a few W) is ignored.
+  - **History:** the energy per hour from HA's long-term statistics (kept forever for sensors with a state class), else from the recorded history (about 10 days). Sessions are rebuilt as for Ohme.
+  - To switch an existing Ohme charger, open its 🔌 connection and choose *Home Assistant*: its sessions and settings are kept.
 - **Credentials:**
   - They're checked when saved and stored **encrypted**, with a key in `{data_dir}/secret.key` or the `EV_CHARGE_SECRET_KEY` environment variable.
   - Losing the key only means entering the credentials again.

@@ -96,6 +96,9 @@ def apply_reading(db: Session, c: Charger, r: LiveReading, now: datetime) -> str
             c.live_state = json.dumps(state)
             return "no_car"
         since = state.get("charging_since") if action == "idle" else None  # after a restart the new session starts now
+        known = r.extra.get("session_start")  # the connector knows when the session started (e.g. from Home Assistant's history)
+        if isinstance(known, str) and known <= now.isoformat():
+            since = known
         start = datetime.fromisoformat(since) if since else now
         db.add(
             ChargeSession(
