@@ -291,6 +291,35 @@ uv run alembic -c src/ev_charge/alembic.ini revision --autogenerate -m "describe
 python ev_charge.pyz --config config.json
 ```
 
+### Automatic deployment
+
+On each merge to `main`, GitHub Actions (`.github/workflows/build.yml`) runs the tests, builds `ev_charge-py3.12.pyz`, `-py3.13` and `-py3.14` (Linux x86-64) and publishes them, with their SHA-256, to the rolling [`latest` release](https://github.com/Fabiancrg/EV-charge/releases/tag/latest). Pull requests only run the tests.
+
+The server pulls the new build itself (nothing to open on your network): `deploy/ev-charge-update.sh`, run every 10 minutes by a systemd timer,
+- downloads the checksum of the build for the server's Python, and stops there if it's the installed one;
+- downloads the `.pyz`, checks its checksum and that it starts;
+- stops EV Charge, keeps the old `.pyz` (`.prev`) and a copy of the database (`.pre-update`), puts the new one in place, starts EV Charge;
+- waits for `/api/health`; if it doesn't answer within 90 s, puts the old `.pyz` and the database back.
+
+Setup, once, as root (adapt the paths and the user to yours):
+
+```bash
+install -m 755 deploy/ev-charge-update.sh /usr/local/bin/ev-charge-update
+mkdir -p /etc/ev-charge && cp deploy/update.conf.example /etc/ev-charge/update.conf   # then edit PYZ, HEALTH_URL, DB_FILE…
+cp deploy/ev-charge-update.service deploy/ev-charge-update.timer /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now ev-charge-update.timer
+```
+
+`ev-charge-update` runs it now, `FORCE=1 ev-charge-update` reinstalls, `journalctl -u ev-charge-update` shows what it did. The EV Charge service itself runs the `.pyz` from the fixed path set as `PYZ`, e.g.:
+
+```ini
+# /etc/systemd/system/ev-charge.service
+[Service]
+User=evcharge
+ExecStart=/usr/bin/python3 /opt/ev-charge/ev_charge.pyz --config /etc/ev-charge/config.json
+Restart=on-failure
+```
+
 ## API
 
 Every endpoint needs a signed-in user (session cookie) or an API token (`Authorization: Bearer evc_…`), and checks the permissions above: global ones, or per car.

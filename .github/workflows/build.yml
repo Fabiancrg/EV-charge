@@ -1,0 +1,83 @@
+# Tests every push and pull request; on main, builds the .pyz for each supported Python and publishes it
+# to the rolling "latest" release, where deploy/ev-charge-update.sh on the server picks it up.
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run pytest -q
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+    # An older Ubuntu: anything compiled during the build then also runs on servers with an older glibc
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Build ev_charge-py${{ matrix.python }}.pyz
+        run: |
+          uv venv --python ${{ matrix.python }}
+          ./build_shiv.sh --python python3 --output dist/ev_charge-py${{ matrix.python }}.pyz
+      - name: Smoke test
+        run: SHIV_ROOT="$RUNNER_TEMP/shiv" .venv/bin/python dist/ev_charge-py${{ matrix.python }}.pyz --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pyz-${{ matrix.python }}
+          path: dist/*.pyz
+          retention-days: 7
+
+  release:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pyz-*
+          merge-multiple: true
+          path: dist
+      - name: Checksums
+        run: cd dist && for f in *.pyz; do sha256sum "$f" > "$f.sha256"; done && ls -l
+      - name: Publish to the "latest" release
+        run: |
+          notes="Built automatically from ${GITHUB_SHA::7} ($(date -u +%Y-%m-%dT%H:%MZ)). Servers running deploy/ev-charge-update.sh install it."
+          if gh release view latest --repo "$REPO" >/dev/null 2>&1; then
+            # The .pyz files first, the checksums last: a server that sees a new checksum finds the matching file
+            gh release upload latest dist/*.pyz --repo "$REPO" --clobber
+            gh release upload latest dist/*.sha256 --repo "$REPO" --clobber
+            gh api -X PATCH "repos/$REPO/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+            gh release edit latest --repo "$REPO" --notes "$notes"
+          else
+            gh release create latest dist/*.pyz dist/*.sha256 --repo "$REPO" --target "$GITHUB_SHA" --title "Latest build (main)" --notes "$notes" --latest
+          fi

@@ -1,0 +1,8 @@
+[Unit]
+Description=Install the latest EV Charge build
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ev-charge-update /etc/ev-charge/update.conf
