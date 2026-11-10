@@ -184,11 +184,20 @@ def test_preview_matches_lines_without_storing(client, home):
     assert [[s["id"] for s in ln["sessions"]] for ln in data["lines"]] == [[home["a"]["id"]], [home["b"]["id"]], [home["c"]["id"]], []]
     assert data["summary"] | {"sessions_amount": 0} == {
         "lines": 4, "matched": 3, "unmatched": 1, "sessions": 3, "grouped": 0, "document_amount": 7.86, "lines_amount": 7.86, "matched_amount": 7.86, "unmatched_amount": 0,
-        "sessions_amount": 0, "kwh_mismatches": 0, "amount_mismatches": 0, "time_offset_minutes": 0,
+        "sessions_amount": 0, "kwh_mismatches": 0, "price_mismatches": 0, "time_offset_minutes": 0,
     }  # fmt: skip
     assert data["summary"]["sessions_amount"] == pytest.approx(7.86, abs=0.02)  # priced at the same tariff
     assert [s["id"] for s in data["unlisted_sessions"]] == [home["other"]["id"]]
     assert set(_statuses(client).values()) == {"recorded", None}  # nothing changed
+
+    # A few cents because the two meters differ a little isn't a price difference; another tariff is
+    client.put(f"/api/sessions/{home['b']['id']}", json={k: home["b"][k] for k in ("car_id", "charge_date", "start_time", "charger_id", "to_reimburse")} | {"kwh": 11.45})
+    line = _upload(client, eneco_csv(), path="/preview").json()["lines"][1]
+    assert (line["amount_diff"], line["kwh_mismatch"], line["price_mismatch"]) == (0.04, False, False)
+    tariff = client.get("/api/tariffs").json()[0]
+    client.put(f"/api/tariffs/{tariff['id']}", json={"valid_from": "2026-10-01", "valid_to": "2026-12-31", "price_per_kwh": 0.36})
+    data = _upload(client, eneco_csv(), path="/preview").json()
+    assert [ln["price_mismatch"] for ln in data["lines"]] == [True, True, True, False] and data["summary"]["price_mismatches"] == 3
     assert client.get(BASE).json()["documents"] == []
 
     assert _upload(client, b"date;kwh\n1;2\n", path="/preview").status_code == 422
