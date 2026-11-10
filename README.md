@@ -122,16 +122,17 @@ The **Payments** page (for users with *Change the reimbursement flag and status*
 1. **⬆ Import a document.** Two formats are read:
    - **Eneco eMobility**: the CSV *Credit Reimbursement Document* (one row per session);
    - **50five / Last Mile Solutions**: the PDF *Document de remboursement* with its annex of sessions.
-2. **Check the preview.** Each line of the document is matched with the session that started at the same time (within an hour), or, for a session without a start time, on the same day with the same energy. Nothing is stored yet. The preview shows:
+2. **Choose the charger and check the preview.** A document is about **one charger** (mandatory): its lines are matched with that charger's sessions only. The charger is proposed from the first matches; change it if it is wrong. Each line is matched with the session that started at the same time (within an hour), or, for a session without a start time, on the same day with the same energy. Nothing is stored yet. The preview shows:
    - the lines **without a session** (a session you never recorded) and **your sessions of the period that aren't on the document**;
    - sessions whose **energy** or **amount** differs from the document (a tariff to check);
-   - the **charger** the document is about, found from the matches; choose another one to match again with that charger's sessions only.
+   - the lines that cover **several sessions** (⧉): when the company grouped sessions in one line, the sessions started between the start and the end of the line are taken together if their energies add up to the line's.
    - A document written in another time zone (UTC) is recognised: the shift in whole hours that matches best is applied and reported.
 3. **Import.** The matched sessions become **🧾 Invoiced** and the document is a **payment to receive** (amount, due date; *Overdue* once the due date is passed). A document is imported once.
-4. **Fix by hand if needed.** Open the document to link a line without a session to one of your sessions, or to unlink a wrong match (✕).
+4. **Fix by hand if needed.** Open the document to link a line without a session to one of your sessions, to **add more sessions to a line** whose energy doesn't match (a line can have several sessions; a session is on one line only), or to unlink a wrong match (✕).
 5. **💰 Payment received.** Enter the date and the amount received: the document is *Paid*, its sessions become **💰 Paid**, and a difference with the amount of the document is shown. *Not paid after all* puts everything back to *Invoiced*.
 
-- **Which sessions can be matched:** sessions *to be reimbursed*, not *In progress*, on no other document, on a car you manage.
+- **Which sessions can be matched:** sessions of the document's charger, *to be reimbursed*, not *In progress*, on no other document, on a car you manage.
+- A charger with reimbursement documents can't be deleted; mark it inactive.
 - **Deleting a document** (or unlinking a session) puts its sessions back to their default status: *Recorded* with a charger, *Not recorded* without one.
 - The tiles show the total **to receive**, of which **overdue**, and **received**.
 
@@ -353,8 +354,8 @@ Every endpoint needs a signed-in user (session cookie) or an API token (`Authori
 | `GET /api/sessions/suggestions?car_id=` | Values that pre-fill the session form |
 | `GET /api/reports` | Report data. Filters: `car_id`, `date_from`, `date_to` |
 | `GET /api/reports/reimbursement` | Reimbursement statement. Same filters plus `status` (repeatable) and `company` (empty: sessions without a charger), `fmt=json\|csv\|xlsx` |
-| `GET /api/reimbursement-documents`, `POST /api/reimbursement-documents/preview`, `POST /api/reimbursement-documents` | Reimbursement documents with the totals to receive; preview the reconciliation of a file (multipart `file`, optional `?charger_id=`), then import it: the matched sessions become *invoiced* |
-| `GET/DELETE /api/reimbursement-documents/{id}`, `PUT/DELETE /api/reimbursement-documents/{id}/payment`, `PUT /api/reimbursement-documents/{id}/lines/{line_id}` | A document with its lines; payment received `{"paid_date": "2026-11-20", "paid_amount": 51.92, "notes": "…"}` (sessions become *paid*) or cancelled; link a line to a session `{"session_id": 12}` or unlink it (`null`) |
+| `GET /api/reimbursement-documents`, `POST /api/reimbursement-documents/preview`, `POST /api/reimbursement-documents` | Reimbursement documents with the totals to receive; preview the reconciliation of a file (multipart `file`, optional `?charger_id=`: without it a charger is proposed), then import it for a charger (`?charger_id=` required): the matched sessions become *invoiced* |
+| `GET/DELETE /api/reimbursement-documents/{id}`, `PUT/DELETE /api/reimbursement-documents/{id}/payment`, `PUT /api/reimbursement-documents/{id}/lines/{line_id}`, `PUT /api/reimbursement-documents/{id}/charger` | A document with its lines; payment received `{"paid_date": "2026-11-20", "paid_amount": 51.92, "notes": "…"}` (sessions become *paid*) or cancelled; set the session(s) of a line `{"session_ids": [12, 13]}` (empty: unlink); set the charger of a document imported without one `{"charger_id": 1}` |
 | `GET/POST /api/tariffs`, `PUT/DELETE /api/tariffs/{id}` | Tariff periods (changes: administrators) |
 | `GET/POST /api/chargers`, `PUT/DELETE /api/chargers/{id}` | Chargers, with their live state (changes: administrators) |
 | `GET /api/chargers/connectors`, `PUT /api/chargers/{id}/connection`, `POST /api/chargers/{id}/poll` | Charger APIs available, connect/disconnect a charger (tests the login), read it now |

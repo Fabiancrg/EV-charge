@@ -10,6 +10,8 @@
     .doc-lines td, .doc-lines th { padding: 6px 8px; }
     .doc-lines th { position: sticky; top: 0; background: var(--bg-surface); z-index: 1; }
     .doc-lines tr.unmatched td { background: color-mix(in srgb, var(--color-warn, #eda100) 12%, transparent); }
+    .doc-session { display: flex; align-items: flex-start; gap: 4px; margin: 2px 0; }
+    .doc-session .icon-btn { padding: 0 4px; font-size: var(--font-sm); line-height: 1.5; }
     .doc-lines select { max-width: 260px; padding: 3px 6px; font-size: var(--font-sm); }
     .doc-tiles { grid-template-columns: repeat(4, 1fr); margin: 0 0 14px; }
     .doc-tiles .tile .value { font-size: var(--font-lg); }
@@ -24,7 +26,7 @@
         </div>
     </div>
     <p class="muted small" style="margin-bottom:12px">Import the reimbursement document you receive from the reimbursing company (<b>Eneco eMobility</b>: the CSV file; <b>50five / Last Mile Solutions</b>: the PDF).
-        Its sessions are matched with yours and become <b>🧾 Invoiced</b>; the document is then a <b>payment to receive</b>. When the money is on your account, mark it as paid: its sessions become <b>💰 Paid</b>.</p>
+        Choose the <b>charger</b> it is about: its lines are matched with that charger's sessions (a line can cover several sessions), which become <b>🧾 Invoiced</b>; the document is then a <b>payment to receive</b>. When the money is on your account, mark it as paid: its sessions become <b>💰 Paid</b>.</p>
     <div class="tiles" id="tiles"></div>
     <div class="filters" style="margin-bottom:12px">
         <div class="field"><label>Show</label><select id="show"><option value="">All documents</option><option value="to_receive">Payments to receive</option><option value="paid">Paid</option></select></div>
@@ -96,12 +98,12 @@
             $('docs').innerHTML = `<div class="empty-state"><h3>${docs.length ? 'No document with this filter' : 'No reimbursement document yet'}</h3><p>Use ⬆ Import a document when you receive one.</p></div>`;
             return;
         }
-        $('docs').innerHTML = `<table><thead><tr><th>Document</th><th>Date</th><th class="hide-sm">Period</th><th>Due</th><th class="num">Sessions</th><th class="num hide-sm">kWh</th>
+        $('docs').innerHTML = `<table><thead><tr><th>Document</th><th>Date</th><th class="hide-sm">Period</th><th>Due</th><th class="num">Lines matched</th><th class="num hide-sm">kWh</th>
             <th class="num">Amount</th><th>Payment</th><th></th></tr></thead><tbody>
             ${rows.map(d => `<tr data-doc="${d.id}" style="cursor:pointer">
                 <td><strong>${EV.esc(d.number)}</strong><br><span class="muted small">${EV.esc(d.issuer || '')}${d.charger_name ? ` · 🔌 ${EV.esc(d.charger_name)}` : ''}</span></td>
                 <td>${EV.date(d.document_date)}</td><td class="hide-sm">${EV.esc(period(d.period))}</td><td>${d.due_date ? EV.date(d.due_date) : '<span class="muted">—</span>'}</td>
-                <td class="num">${EV.num(d.matched)} / ${EV.num(d.lines)}${d.matched < d.lines ? ' <span class="badge badge-warn" title="Lines of the document without a session">⚠</span>' : ''}</td>
+                <td class="num" title="${EV.num(d.sessions)} session(s) on ${EV.num(d.matched)} of ${EV.num(d.lines)} lines">${EV.num(d.matched)} / ${EV.num(d.lines)}${d.matched < d.lines ? ' <span class="badge badge-warn" title="Lines of the document without a session">⚠</span>' : ''}</td>
                 <td class="num hide-sm">${EV.num(d.kwh, 1)}</td><td class="num"><strong>${EV.money(d.amount)}</strong></td><td>${docStatus(d)}</td>
                 <td>${d.status === 'paid' ? '' : `<button class="btn btn-sm" data-pay="${d.id}">💰 Paid</button>`}</td></tr>`).join('')}</tbody></table>`;
     }
@@ -117,22 +119,24 @@
     function linesTable(data, stored) {
         const free = data.unlisted_sessions;
         const sessionTxt = (s) => `${EV.date(s.charge_date)}${s.start_time ? ' ' + EV.time(s.start_time) : ''} · ${EV.num(s.kwh, 3)} kWh · ${EV.esc(s.car_name)}`;
+        const picker = (l) => stored && free.length && (!l.sessions.length || l.kwh_mismatch) ? `<select data-link="${l.id}"><option value="">${l.sessions.length ? '＋ Add a session of this line…' : '⚠ No session — link one…'}</option>
+            ${free.map(f => `<option value="${f.id}">${sessionTxt(f)}</option>`).join('')}</select>` : '';
         return `<div class="table-wrap doc-lines"><table><thead><tr><th>Document line</th><th class="num">kWh</th><th class="num">Amount</th>
-            <th>Your session</th><th class="num">kWh</th><th class="num">Amount</th><th>Status</th>${stored ? '<th></th>' : ''}</tr></thead><tbody>
+            <th>Your session(s)</th><th class="num">kWh</th><th class="num">Amount</th><th>Status</th></tr></thead><tbody>
             ${data.lines.map(l => {
-                const s = l.session;
-                const amountDiff = s && l.amount_diff != null && Math.abs(l.amount_diff) >= 0.02;
-                return `<tr class="${s ? '' : 'unmatched'}">
+                const ss = l.sessions, many = ss.length > 1;
+                const amountDiff = ss.length && Math.abs(l.amount_diff) >= 0.02;
+                return `<tr class="${ss.length ? '' : 'unmatched'}">
                     <td>${dateTime(l.started_at)}${l.ended_at ? ` → ${l.ended_at.slice(0, 10) === l.started_at.slice(0, 10) ? l.ended_at.slice(11, 16) : dateTime(l.ended_at)}` : ''}<br><span class="muted small">${EV.esc(l.external_id || '')}</span></td>
                     <td class="num">${EV.num(l.kwh, 3)}</td><td class="num">${EV.money(l.amount)}</td>
-                    ${s ? `<td>${EV.date(s.charge_date)} ${EV.time(s.start_time)}${s.end_time ? '–' + EV.time(s.end_time) : ''}<br><span class="muted small">${EV.esc(s.car_name)}${s.charger_name ? ` · 🔌 ${EV.esc(s.charger_name)}` : ''}</span></td>
-                        <td class="num">${EV.num(s.kwh, 3)}${l.kwh_mismatch ? ' <span class="badge badge-warn" title="The energy differs from the document">⚠</span>' : ''}</td>
-                        <td class="num">${s.amount != null ? EV.money(s.amount) : '<span class="badge badge-warn">no price</span>'}${amountDiff ? `<br><span class="badge badge-warn" title="Your amount minus the document's">${diffTxt(l.amount_diff)}</span>` : ''}</td>
-                        <td>${stored ? EV.statusBadge(s.status) : `${EV.statusBadge(s.status)} → ${EV.statusBadge('invoiced')}`}</td>
-                        ${stored ? `<td><button class="icon-btn" data-unlink="${l.id}" title="Unlink this session">✕</button></td>` : ''}`
-                    : `<td colspan="4">${stored && free.length
-                            ? `<select data-link="${l.id}"><option value="">⚠ No session — link one…</option>${free.map(f => `<option value="${f.id}">${sessionTxt(f)}</option>`).join('')}</select>`
-                            : '<span class="badge badge-warn">⚠ No matching session</span>'}</td>${stored ? '<td></td>' : ''}`}
+                    ${ss.length ? `<td>${many ? `<span class="badge badge-info" title="The company grouped these sessions in one line">⧉ ${ss.length} sessions</span>` : ''}
+                            ${ss.map(s => `<div class="doc-session">${stored ? `<button class="icon-btn" data-unlink="${l.id}" data-session="${s.id}" title="Unlink this session">✕</button>` : ''}
+                                <span>${EV.date(s.charge_date)} ${EV.time(s.start_time)}${s.end_time ? '–' + EV.time(s.end_time) : ''}${many ? ` · ${EV.num(s.kwh, 3)} kWh` : ''}
+                                <br><span class="muted small">${EV.esc(s.car_name)}${s.charger_name ? ` · 🔌 ${EV.esc(s.charger_name)}` : ''}</span></span></div>`).join('')}${picker(l)}</td>
+                        <td class="num">${EV.num(l.sessions_kwh, 3)}${l.kwh_mismatch ? ' <span class="badge badge-warn" title="The energy differs from the document">⚠</span>' : ''}</td>
+                        <td class="num">${ss.some(s => s.amount == null) ? '<span class="badge badge-warn">no price</span>' : EV.money(l.sessions_amount)}${amountDiff ? `<br><span class="badge badge-warn" title="Your amount minus the document's">${diffTxt(l.amount_diff)}</span>` : ''}</td>
+                        <td>${[...new Set(ss.map(s => s.status))].map(st => EV.statusBadge(st)).join(' ')}${stored ? '' : ` → ${EV.statusBadge('invoiced')}`}</td>`
+                    : `<td colspan="4">${picker(l) || '<span class="badge badge-warn">⚠ No matching session</span>'}</td>`}
                 </tr>`;
             }).join('')}</tbody></table></div>`;
     }
@@ -142,21 +146,24 @@
         const notes = [];
         if (data.already_imported) notes.push(`⚠ The document ${EV.esc(d.number)} was already imported.`);
         if (t.unmatched) notes.push(`⚠ ${t.unmatched} line(s) of the document (${EV.money(t.unmatched_amount)}) have no matching session: record the missing sessions${stored ? ', then link them here' : ' first, or link them after the import'}.`);
-        if (t.kwh_mismatches) notes.push(`⚠ ${t.kwh_mismatches} session(s) don't have the energy of the document.`);
-        if (t.amount_mismatches) notes.push(`⚠ ${t.amount_mismatches} session(s) aren't priced like the document: check the tariff of their period.`);
+        if (!stored && !d.charger_id) notes.push('⚠ Choose the charger this document is about: its lines are matched with the sessions of that charger.');
+        if (stored && !d.charger_id) notes.push('⚠ This document has no charger: choose it above.');
+        if (t.grouped) notes.push(`ℹ ${t.grouped} line(s) cover several of your sessions (⧉): the company grouped them in one line.`);
+        if (t.kwh_mismatches) notes.push(`⚠ ${t.kwh_mismatches} line(s) don't have the energy of your session(s)${stored ? ': if the company grouped several sessions in one line, add the others with ＋' : ''}.`);
+        if (t.amount_mismatches) notes.push(`⚠ ${t.amount_mismatches} line(s) aren't priced like your session(s): check the energy, or the tariff of their period.`);
         if (Math.abs(gap) >= 0.05) notes.push(`⚠ The lines add up to ${EV.money(t.lines_amount)}, not to the total of the document.`);
         if (t.time_offset_minutes) notes.push(`ℹ The times of the document are shifted by ${t.time_offset_minutes > 0 ? '+' : ''}${t.time_offset_minutes / 60} h from yours (time zone); it was taken into account.`);
         const free = data.unlisted_sessions;
         return `<dl class="doc-meta">
                 <dt>Document</dt><dd><strong>${EV.esc(d.number)}</strong> — ${EV.esc(d.issuer || '')}</dd>
                 <dt>Date</dt><dd>${EV.date(d.document_date)}${d.due_date ? ` · due ${EV.date(d.due_date)}` : ''}${d.period ? ` · ${EV.esc(period(d.period))}` : ''}</dd>
-                <dt>Charger</dt><dd>${stored ? (d.charger_name ? `🔌 ${EV.esc(d.charger_name)}` : '<span class="muted">any</span>')
-                    : `<select id="doc-charger" style="max-width:260px"><option value="">Any charger</option>${(EV.chargers || []).map(c => `<option value="${c.id}" ${c.id === d.charger_id ? 'selected' : ''}>${EV.esc(c.name)}</option>`).join('')}</select>`}</dd>
+                <dt>Charger *</dt><dd>${stored && d.charger_id ? `🔌 ${EV.esc(d.charger_name)}`
+                    : `<select id="doc-charger" style="max-width:260px"><option value="">Choose a charger…</option>${(EV.chargers || []).map(c => `<option value="${c.id}" ${c.id === d.charger_id ? 'selected' : ''}>${EV.esc(c.name)}</option>`).join('')}</select>`}</dd>
                 ${stored ? `<dt>Payment</dt><dd>${docStatus(d).replace('<br>', ' ')}${d.status === 'paid' ? ` — ${EV.money(d.paid_amount)}` : ''}${d.notes ? `<br><span class="muted small">${EV.esc(d.notes)}</span>` : ''}</dd>` : '<dt></dt><dd></dd>'}
             </dl>
             <div class="tiles doc-tiles">
                 <div class="tile"><div class="label">🧾 Document</div><div class="value">${EV.money(d.amount)} <small>${EV.num(d.kwh, 1)} kWh</small></div></div>
-                <div class="tile"><div class="label">✓ Matched sessions</div><div class="value">${EV.num(t.matched)} <small>of ${EV.num(t.lines)} lines · ${EV.money(t.matched_amount)}</small></div></div>
+                <div class="tile"><div class="label">✓ Matched sessions</div><div class="value">${EV.num(t.sessions)} <small>on ${EV.num(t.matched)} of ${EV.num(t.lines)} lines · ${EV.money(t.matched_amount)}</small></div></div>
                 <div class="tile"><div class="label">Your amount for them</div><div class="value">${EV.money(t.sessions_amount)} <small>${Math.abs(t.sessions_amount - t.matched_amount) >= 0.01 ? diffTxt(t.sessions_amount - t.matched_amount) : 'same'}</small></div></div>
                 <div class="tile"><div class="label">⚠ Without session</div><div class="value">${EV.num(t.unmatched)} <small>${EV.money(t.unmatched_amount)}</small></div></div>
             </div>
@@ -172,9 +179,9 @@
         current = null;
         $('doc-title').textContent = 'Import a reimbursement document';
         $('doc-body').innerHTML = body(data, false);
-        const n = data.summary.matched;
+        const n = data.summary.sessions;
         $('doc-actions').innerHTML = `<button type="button" class="btn btn-ghost" data-close>Cancel</button>
-            <button type="button" class="btn" id="doc-import" ${data.already_imported ? 'disabled' : ''}>⬆ Import${n ? ` and mark ${n} session(s) invoiced` : ''}</button>`;
+            <button type="button" class="btn" id="doc-import" ${data.already_imported || !data.document.charger_id ? 'disabled' : ''}>⬆ Import${n ? ` and mark ${n} session(s) invoiced` : ''}</button>`;
     }
     function showDetail(data) {
         current = data;
@@ -198,6 +205,15 @@
         } catch (err) { EV.toast(err.message, true); }
     }
 
+    /* The sessions of a line of the document shown, and their replacement */
+    const lineSessions = (lineId) => current.lines.find(l => l.id === Number(lineId)).sessions.map(s => s.id);
+    async function setSessions(lineId, ids) {
+        const keep = $('doc-body').querySelector('.doc-lines').scrollTop;
+        showDetail(await EV.api('PUT', `${BASE}/${current.document.id}/lines/${lineId}`, { session_ids: ids }));
+        $('doc-body').querySelector('.doc-lines').scrollTop = keep;
+        load();
+    }
+
     $('doc-file').addEventListener('change', async (e) => {
         pending = e.target.files[0];
         e.target.value = '';
@@ -209,12 +225,13 @@
         await previewFile(null);
     });
     $('doc-modal').addEventListener('change', async (e) => {
-        if (e.target.id === 'doc-charger') { $('doc-modal').querySelector('.form-error').style.display = 'none'; await previewFile(e.target.value); }
-        const lineId = e.target.dataset?.link;
-        if (lineId && e.target.value) {
-            try { showDetail(await EV.api('PUT', `${BASE}/${current.document.id}/lines/${lineId}`, { session_id: Number(e.target.value) })); load(); }
-            catch (err) { EV.formError('doc-modal', err); }
-        }
+        $('doc-modal').querySelector('.form-error').style.display = 'none';
+        try {
+            if (e.target.id === 'doc-charger' && !current) await previewFile(e.target.value);
+            else if (e.target.id === 'doc-charger' && e.target.value) { showDetail(await EV.api('PUT', `${BASE}/${current.document.id}/charger`, { charger_id: Number(e.target.value) })); load(); }
+            const lineId = e.target.dataset?.link;
+            if (lineId && e.target.value) { await setSessions(lineId, [...lineSessions(lineId), Number(e.target.value)]); }
+        } catch (err) { EV.formError('doc-modal', err); }
     });
     $('doc-modal').addEventListener('click', async (e) => {
         const btn = e.target.closest('button');
@@ -223,17 +240,16 @@
             if (btn.id === 'doc-import') {
                 btn.disabled = true;
                 const data = await send('', pending, $('doc-charger')?.value);
-                EV.toast(`Document imported: ${data.summary.matched} session(s) invoiced`);
+                EV.toast(`Document imported: ${data.summary.sessions} session(s) invoiced`);
                 showDetail(data);
                 load();
             } else if (btn.dataset.unlink) {
-                showDetail(await EV.api('PUT', `${BASE}/${current.document.id}/lines/${btn.dataset.unlink}`, { session_id: null }));
-                load();
+                await setSessions(btn.dataset.unlink, lineSessions(btn.dataset.unlink).filter(id => id !== Number(btn.dataset.session)));
             } else if (btn.id === 'doc-reopen') {
                 showDetail(await EV.api('DELETE', `${BASE}/${current.document.id}/payment`));
                 load();
             } else if (btn.id === 'doc-delete') {
-                const n = current.summary.matched;
+                const n = current.summary.sessions;
                 if (!confirm(`Delete the document ${current.document.number}?${n ? `\n\nIts ${n} session(s) go back to “Recorded”.` : ''}`)) return;
                 await EV.api('DELETE', `${BASE}/${current.document.id}`);
                 EV.closeModal('doc-modal');
@@ -255,7 +271,7 @@
         if (!paying) return;
         payForm.reset();
         EV.fillForm(payForm, { paid_date: EV.today(), paid_amount: paying.amount, notes: paying.notes });
-        $('pay-intro').innerHTML = `Document <b>${EV.esc(paying.number)}</b> (${EV.esc(paying.issuer || '')}): <b>${EV.money(paying.amount)}</b> to receive. Its ${EV.num(paying.matched)} session(s) become <b>Paid</b>.`;
+        $('pay-intro').innerHTML = `Document <b>${EV.esc(paying.number)}</b> (${EV.esc(paying.issuer || '')}): <b>${EV.money(paying.amount)}</b> to receive. Its ${EV.num(paying.sessions)} session(s) become <b>Paid</b>.`;
         payDiff();
         EV.openModal('pay-modal');
     }
