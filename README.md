@@ -319,7 +319,7 @@ On each merge to `main`, GitHub Actions (`.github/workflows/build.yml`) runs the
 
 The server pulls the new build itself (nothing to open on your network): `deploy/ev-charge-update.sh`, run every 10 minutes by a systemd timer,
 - downloads the checksum of the build for the server's Python, and stops there if it's the installed one;
-- downloads the `.pyz`, checks its checksum and that it starts;
+- downloads the `.pyz`, checks its checksum and that it starts; while a build is being published (about a minute after a merge) the files are replaced one by one, so a missing file or a checksum mismatch is tried again (6 times, 20 s apart);
 - stops EV Charge, keeps the old `.pyz` (`.prev`) and a copy of the database (`.pre-update`), puts the new one in place, starts EV Charge;
 - waits for `/api/health`; if it doesn't answer within 90 s, puts the old `.pyz` and the database back.
 

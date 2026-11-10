@@ -14,6 +14,10 @@ PYTHON=python3
 HEALTH_URL=http://127.0.0.1:8000/api/health
 #HEALTH_TIMEOUT=90
 
+# While a build is being published, its download is tried again: how many times, and the seconds in between
+#RETRIES=6
+#RETRY_DELAY=20
+
 # The SQLite database (data_dir/ev_charge.db): copied before each update, put back if the new version fails
 #DB_FILE=/home/evcharge/.ev-charge/ev_charge.db
 
