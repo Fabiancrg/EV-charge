@@ -125,7 +125,7 @@
             <th>Your session(s)</th><th class="num">kWh</th><th class="num">Amount</th><th>Status</th></tr></thead><tbody>
             ${data.lines.map(l => {
                 const ss = l.sessions, many = ss.length > 1;
-                const amountDiff = ss.length && Math.abs(l.amount_diff) >= 0.02;
+                const cents = ss.length && Math.abs(l.amount_diff) >= 0.01;  // flagged when the price per kWh differs, or the energy
                 return `<tr class="${ss.length ? '' : 'unmatched'}">
                     <td>${dateTime(l.started_at)}${l.ended_at ? ` → ${l.ended_at.slice(0, 10) === l.started_at.slice(0, 10) ? l.ended_at.slice(11, 16) : dateTime(l.ended_at)}` : ''}<br><span class="muted small">${EV.esc(l.external_id || '')}</span></td>
                     <td class="num">${EV.num(l.kwh, 3)}</td><td class="num">${EV.money(l.amount)}</td>
@@ -134,7 +134,9 @@
                                 <span>${EV.date(s.charge_date)} ${EV.time(s.start_time)}${s.end_time ? '–' + EV.time(s.end_time) : ''}${many ? ` · ${EV.num(s.kwh, 3)} kWh` : ''}
                                 <br><span class="muted small">${EV.esc(s.car_name)}${s.charger_name ? ` · 🔌 ${EV.esc(s.charger_name)}` : ''}</span></span></div>`).join('')}${picker(l)}</td>
                         <td class="num">${EV.num(l.sessions_kwh, 3)}${l.kwh_mismatch ? ' <span class="badge badge-warn" title="The energy differs from the document">⚠</span>' : ''}</td>
-                        <td class="num">${ss.some(s => s.amount == null) ? '<span class="badge badge-warn">no price</span>' : EV.money(l.sessions_amount)}${amountDiff ? `<br><span class="badge badge-warn" title="Your amount minus the document's">${diffTxt(l.amount_diff)}</span>` : ''}</td>
+                        <td class="num">${ss.some(s => s.amount == null) ? '<span class="badge badge-warn">no price</span>' : EV.money(l.sessions_amount)}${!cents ? '' : l.price_mismatch ? `<br><span class="badge badge-warn" title="Not the price per kWh of the document: check the tariff of this period">⚠ ${diffTxt(l.amount_diff)}</span>`
+                            : l.kwh_mismatch ? `<br><span class="badge badge-warn" title="Your amount minus the document's: the energy differs">${diffTxt(l.amount_diff)}</span>`
+                            : `<br><span class="muted small" title="Same price per kWh: the small difference in energy between the two meters">${diffTxt(l.amount_diff)}</span>`}</td>
                         <td>${[...new Set(ss.map(s => s.status))].map(st => EV.statusBadge(st)).join(' ')}${stored ? '' : ` → ${EV.statusBadge('invoiced')}`}</td>`
                     : `<td colspan="4">${picker(l) || '<span class="badge badge-warn">⚠ No matching session</span>'}</td>`}
                 </tr>`;
@@ -150,7 +152,7 @@
         if (stored && !d.charger_id) notes.push('⚠ This document has no charger: choose it above.');
         if (t.grouped) notes.push(`ℹ ${t.grouped} line(s) cover several of your sessions (⧉): the company grouped them in one line.`);
         if (t.kwh_mismatches) notes.push(`⚠ ${t.kwh_mismatches} line(s) don't have the energy of your session(s)${stored ? ': if the company grouped several sessions in one line, add the others with ＋' : ''}.`);
-        if (t.amount_mismatches) notes.push(`⚠ ${t.amount_mismatches} line(s) aren't priced like your session(s): check the energy, or the tariff of their period.`);
+        if (t.price_mismatches) notes.push(`⚠ ${t.price_mismatches} line(s) aren't priced at your price per kWh: check the tariff of their period.`);
         if (Math.abs(gap) >= 0.05) notes.push(`⚠ The lines add up to ${EV.money(t.lines_amount)}, not to the total of the document.`);
         if (t.time_offset_minutes) notes.push(`ℹ The times of the document are shifted by ${t.time_offset_minutes > 0 ? '+' : ''}${t.time_offset_minutes / 60} h from yours (time zone); it was taken into account.`);
         const free = data.unlisted_sessions;

@@ -124,7 +124,7 @@ The **Payments** page (for users with *Change the reimbursement flag and status*
    - **50five / Last Mile Solutions**: the PDF *Document de remboursement* with its annex of sessions.
 2. **Choose the charger and check the preview.** A document is about **one charger** (mandatory): its lines are matched with that charger's sessions only. The charger is proposed from the first matches; change it if it is wrong. Each line is matched with the session that started at the same time (within an hour), or, for a session without a start time, on the same day with the same energy. Nothing is stored yet. The preview shows:
    - the lines **without a session** (a session you never recorded) and **your sessions of the period that aren't on the document**;
-   - sessions whose **energy** or **amount** differs from the document (a tariff to check);
+   - lines whose **energy** differs from your session(s), and lines that aren't at your **price per kWh** (a tariff to check). A few cents of difference caused by a slightly different energy on the two meters are shown but not flagged;
    - the lines that cover **several sessions** (⧉): when the company grouped sessions in one line, the sessions started between the start and the end of the line are taken together if their energies add up to the line's.
    - A document written in another time zone (UTC) is recognised: the shift in whole hours that matches best is applied and reported.
 3. **Import.** The matched sessions become **🧾 Invoiced** and the document is a **payment to receive** (amount, due date; *Overdue* once the due date is passed). A document is imported once.
@@ -319,7 +319,7 @@ On each merge to `main`, GitHub Actions (`.github/workflows/build.yml`) runs the
 
 The server pulls the new build itself (nothing to open on your network): `deploy/ev-charge-update.sh`, run every 10 minutes by a systemd timer,
 - downloads the checksum of the build for the server's Python, and stops there if it's the installed one;
-- downloads the `.pyz`, checks its checksum and that it starts;
+- downloads the `.pyz`, checks its checksum and that it starts; while a build is being published (about a minute after a merge) the files are replaced one by one, so a missing file or a checksum mismatch is tried again (6 times, 20 s apart);
 - stops EV Charge, keeps the old `.pyz` (`.prev`) and a copy of the database (`.pre-update`), puts the new one in place, starts EV Charge;
 - waits for `/api/health`; if it doesn't answer within 90 s, puts the old `.pyz` and the database back.
 

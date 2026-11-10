@@ -95,6 +95,12 @@ def _session_brief(s: ChargeSession, pricing: Pricing) -> dict[str, Any]:
     }  # fmt: skip
 
 
+def _price_mismatch(line: Any, kwh: float, amount: float) -> bool:
+    """The line isn't priced at our tariff: its energy at the price per kWh of our session(s) isn't its amount (to the cent).
+    A small difference in energy between the two meters changes the amount by a few cents: that isn't a price difference."""
+    return kwh > 0 and abs(line.kwh * amount / kwh - line.amount) >= 0.02
+
+
 def _line_out(line: Any, sessions: list[ChargeSession], pricing: Pricing, index: int) -> dict[str, Any]:
     """line: a parsed DocLine (preview) or a stored ReimbursementLine; sessions: ours matched with it (several when the company grouped them)."""
     briefs = [_session_brief(s, pricing) for s in sorted(sessions, key=session_sort_key)]
@@ -105,6 +111,7 @@ def _line_out(line: Any, sessions: list[ChargeSession], pricing: Pricing, index:
         "kwh": line.kwh, "amount": line.amount, "sessions": briefs, "sessions_kwh": kwh if briefs else None, "sessions_amount": amount if briefs else None,
         "kwh_mismatch": bool(briefs) and not kwh_close(line.kwh, kwh),
         "amount_diff": round(amount - line.amount, 2) if briefs else None,
+        "price_mismatch": _price_mismatch(line, kwh, amount) if briefs else False,
     }  # fmt: skip
 
 
@@ -118,7 +125,7 @@ def _summary(lines: list[dict[str, Any]], amount: float, offset: int | None = No
         "unmatched_amount": round(sum(ln["amount"] for ln in lines if not ln["sessions"]), 2),
         "sessions_amount": round(sum(ln["sessions_amount"] for ln in matched), 2),
         "kwh_mismatches": sum(ln["kwh_mismatch"] for ln in lines),
-        "amount_mismatches": sum(abs(ln["amount_diff"] or 0) >= 0.02 for ln in lines),
+        "price_mismatches": sum(ln["price_mismatch"] for ln in lines),
         "time_offset_minutes": offset,
     }  # fmt: skip
 

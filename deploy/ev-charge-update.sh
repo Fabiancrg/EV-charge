@@ -4,7 +4,7 @@
 # Run by ev-charge-update.timer (as root). Steps:
 #   1. download the checksum of the build for this server's Python (ev_charge-py3.X.pyz.sha256)
 #   2. same as the installed .pyz? nothing to do
-#   3. download the .pyz, check its checksum, check it starts
+#   3. download the .pyz, check its checksum (tried again while the build is being published), check it starts
 #   4. stop EV Charge, keep the old .pyz and a copy of the database, put the new .pyz in place, start
 #   5. wait for /api/health; if it doesn't answer, put the old .pyz and the database back
 #
@@ -27,6 +27,8 @@ HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-90}"
 DB_FILE="${DB_FILE:-}"            # e.g. /home/evcharge/.ev-charge/ev_charge.db: copied before the update, restored on rollback
 SHIV_DIR="${SHIV_DIR:-}"          # e.g. /home/evcharge/.shiv: old extracted versions are removed (the 2 newest are kept)
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"  # only for a private repository
+RETRIES="${RETRIES:-6}"           # downloads tried while a build is being published…
+RETRY_DELAY="${RETRY_DELAY:-20}"  # …and the seconds between them
 
 log() { echo "ev-charge-update: $*"; }
 
@@ -39,23 +41,33 @@ CURL=(curl -fsSL --retry 3 --retry-delay 5 --connect-timeout 20)
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-if ! "${CURL[@]}" -o "$TMP/sha256" "$BASE/$ASSET.sha256"; then
-    log "no build $ASSET in $REPO release '$TAG' (Python $PYVER on this server); nothing done"
-    exit 1
-fi
-WANT="$(cut -d' ' -f1 "$TMP/sha256")"
-HAVE="$( [[ -f "$PYZ" ]] && sha256sum "$PYZ" | cut -d' ' -f1 || echo none )"
-if [[ "$WANT" == "$HAVE" && -z "${FORCE:-}" ]]; then
-    exit 0  # up to date
-fi
+# While a build is being published its files are replaced one after the other: for a moment the checksum is
+# still the previous one, or the .pyz is missing (404). So a failed download is tried again a few times.
+attempt=1
+while :; do
+    if ! "${CURL[@]}" -o "$TMP/sha256" "$BASE/$ASSET.sha256"; then
+        log "no build $ASSET in $REPO release '$TAG' (Python $PYVER on this server); nothing done"
+        exit 1
+    fi
+    WANT="$(cut -d' ' -f1 "$TMP/sha256")"
+    HAVE="$( [[ -f "$PYZ" ]] && sha256sum "$PYZ" | cut -d' ' -f1 || echo none )"
+    if [[ "$WANT" == "$HAVE" && -z "${FORCE:-}" ]]; then
+        exit 0  # up to date
+    fi
 
-log "new build $ASSET (${WANT:0:12}), installed ${HAVE:0:12}: downloading"
-"${CURL[@]}" -o "$TMP/new.pyz" "$BASE/$ASSET"
-GOT="$(sha256sum "$TMP/new.pyz" | cut -d' ' -f1)"
-if [[ "$GOT" != "$WANT" ]]; then
-    log "checksum mismatch (being published right now?): will try again next time"
-    exit 1
-fi
+    log "build $ASSET (${WANT:0:12}), installed ${HAVE:0:12}: downloading"
+    rm -f "$TMP/new.pyz"
+    if "${CURL[@]}" -o "$TMP/new.pyz" "$BASE/$ASSET" 2>"$TMP/err" && [[ "$(sha256sum "$TMP/new.pyz" | cut -d' ' -f1)" == "$WANT" ]]; then
+        break
+    fi
+    if (( attempt >= RETRIES )); then
+        log "the build is still being published after $RETRIES tries ($(tail -n 1 "$TMP/err")): will try again next time"
+        exit 1
+    fi
+    log "the build is being published right now (file missing or checksum mismatch): trying again in ${RETRY_DELAY}s"
+    sleep "$RETRY_DELAY"
+    attempt=$((attempt + 1))
+done
 if ! SHIV_ROOT="$TMP/shiv" "$PYTHON" "$TMP/new.pyz" --help >/dev/null 2>"$TMP/err"; then
     log "the new build doesn't start with $PYTHON: $(tail -n 3 "$TMP/err")"
     exit 1
