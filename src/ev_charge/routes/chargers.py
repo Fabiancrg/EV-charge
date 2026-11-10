@@ -16,7 +16,7 @@ from .. import live
 from ..auth import Principal, car_scope, current_user, require
 from ..connectors import CONNECTORS, ConnectorError
 from ..database import get_db
-from ..models import Car, Charger, ChargeSession
+from ..models import Car, Charger, ChargeSession, ReimbursementDocument
 from ..schemas import ChargerConnection, ChargerIn, ChargerOut, HistoryApply
 from ..secretbox import SecretError, decrypt_json, encrypt_json
 
@@ -124,6 +124,8 @@ async def delete_charger(charger_id: int, _: Principal = Depends(require("charge
     count = db.scalar(select(func.count()).select_from(ChargeSession).where(ChargeSession.charger_id == charger_id)) or 0
     if count:
         raise HTTPException(409, f"'{c.name}' was used for {count} session(s): mark it inactive instead")
+    if db.scalar(select(func.count()).select_from(ReimbursementDocument).where(ReimbursementDocument.charger_id == charger_id)):
+        raise HTTPException(409, f"'{c.name}' has reimbursement documents: mark it inactive instead")
     await live.forget_connector(c.id)
     db.delete(c)
     db.commit()

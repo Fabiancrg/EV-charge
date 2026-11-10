@@ -6,7 +6,8 @@ Two formats are read:
 - **Last Mile Solutions** (50five…) — the PDF "Document de remboursement" and its annex of sessions.
 
 A document line is matched with the session that started at (nearly) the same time, or, for a session
-without a start time, on the same day with the same energy. Documents may be written in another time zone
+without a start time, on the same day with the same energy; then with several sessions when the company
+grouped them in one line. Documents may be written in another time zone
 (UTC) than the sessions: the whole-hour shift that matches best is found first.
 """
 
@@ -276,18 +277,41 @@ def _assign(pairs: list[tuple[float, int, int, bool]]) -> tuple[dict[int, int], 
     return result, exact
 
 
-def match_lines(lines: list[DocLine], sessions: list[ChargeSession]) -> tuple[dict[int, ChargeSession], int]:
-    """Match document lines with sessions: {line index: session} and the time shift (minutes) applied to the document."""
+GROUP_MARGIN = timedelta(minutes=15)
+
+
+def _grouped(lines: list[DocLine], sessions: list[ChargeSession], result: dict[int, int], offset: int) -> dict[int, list[int]]:
+    """Lines the company made of several sessions: when a line has no session, or one with less energy, the free
+    sessions started between its start and its end are added if together they have the energy of the line."""
+    shift = timedelta(minutes=offset)
+    taken = set(result.values())
+    groups = {i: [j] for i, j in result.items()}
+    for i, line in enumerate(lines):
+        single = result.get(i)
+        if line.ended_at is None or (single is not None and kwh_close(line.kwh, sessions[single].kwh)):
+            continue
+        first, last = line.started_at + shift - GROUP_MARGIN, line.ended_at + shift + GROUP_MARGIN
+        inside = [j for j, s in enumerate(sessions) if j not in taken and (began := _session_start(s)) is not None and first <= began <= last]
+        group = sorted(inside + ([single] if single is not None else []))
+        if len(group) > 1 and kwh_close(line.kwh, sum(sessions[j].kwh for j in group)):
+            groups[i] = group
+            taken.update(group)
+    return groups
+
+
+def match_lines(lines: list[DocLine], sessions: list[ChargeSession]) -> tuple[dict[int, list[ChargeSession]], int]:
+    """Match document lines with sessions: {line index: its session(s)} and the time shift (minutes) applied to the document."""
     best: tuple[int, int, dict[int, int], int] | None = None
     for offset in _OFFSETS:
         result, exact = _assign(_pairs(lines, sessions, offset))
         if best is None or (exact, len(result)) > (best[0], best[1]):
             best = (exact, len(result), result, offset)
     assert best is not None
-    return {i: sessions[j] for i, j in best[2].items()}, best[3]
+    groups = _grouped(lines, sessions, best[2], best[3])
+    return {i: [sessions[j] for j in group] for i, group in groups.items()}, best[3]
 
 
-def main_charger(matches: dict[int, ChargeSession]) -> int | None:
+def main_charger(matches: dict[int, list[ChargeSession]]) -> int | None:
     """The charger most of the matched sessions were made with."""
-    counts = Counter(s.charger_id for s in matches.values() if s.charger_id)
+    counts = Counter(s.charger_id for group in matches.values() for s in group if s.charger_id)
     return counts.most_common(1)[0][0] if counts else None

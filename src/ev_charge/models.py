@@ -111,8 +111,11 @@ class ChargeSession(Base):
     # Where the reimbursement stands (sessions to be reimbursed): in_progress | not_recorded | recorded | invoiced | paid
     # (in_progress: still being recorded, e.g. by a future automatic link with the charger)
     reimbursement_status: Mapped[str | None] = mapped_column(String(20))
+    # The line of the reimbursement document the session is on (a session is on one document)
+    reimbursement_line_id: Mapped[int | None] = mapped_column(ForeignKey("reimbursement_lines.id", ondelete="SET NULL"), index=True)
 
     car: Mapped[Car] = relationship(back_populates="sessions")
+    reimbursement_line: Mapped[ReimbursementLine | None] = relationship(back_populates="sessions")
     created_by: Mapped[User | None] = relationship()
     charger: Mapped[Charger | None] = relationship()
 
@@ -150,7 +153,7 @@ class ReimbursementDocument(Base):
 
 
 class ReimbursementLine(Base):
-    """One session of a reimbursement document, linked to our session when it was matched."""
+    """One line of a reimbursement document, linked to our session(s) when it was matched."""
 
     __tablename__ = "reimbursement_lines"
 
@@ -162,10 +165,10 @@ class ReimbursementLine(Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime)
     kwh: Mapped[float] = mapped_column(Float)
     amount: Mapped[float] = mapped_column(Float)
-    session_id: Mapped[int | None] = mapped_column(ForeignKey("charge_sessions.id", ondelete="SET NULL"), unique=True)  # a session is on one document
 
     document: Mapped[ReimbursementDocument] = relationship(back_populates="lines")
-    session: Mapped[ChargeSession | None] = relationship()
+    # Usually one session; several when the company grouped sessions in one line. Deleting the line frees them.
+    sessions: Mapped[list[ChargeSession]] = relationship(back_populates="reimbursement_line", order_by="ChargeSession.charge_date, ChargeSession.start_time, ChargeSession.id")
 
 
 class Charger(Base):

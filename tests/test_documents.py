@@ -3,7 +3,7 @@
 from datetime import datetime
 
 import pytest
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 from ev_charge.database import run_migrations
 from ev_charge.reconcile import DocumentError, parse_document, parse_lms_text
@@ -181,9 +181,9 @@ def test_preview_matches_lines_without_storing(client, home):
     data = r.json()
     assert data["document"]["number"] == "BEX26-000001" and data["document"]["charger_id"] == home["charger"]["id"]  # found from the matches
     assert not data["already_imported"]
-    assert [ln["session"]["id"] if ln["session"] else None for ln in data["lines"]] == [home["a"]["id"], home["b"]["id"], home["c"]["id"], None]
+    assert [[s["id"] for s in ln["sessions"]] for ln in data["lines"]] == [[home["a"]["id"]], [home["b"]["id"]], [home["c"]["id"]], []]
     assert data["summary"] | {"sessions_amount": 0} == {
-        "lines": 4, "matched": 3, "unmatched": 1, "document_amount": 7.86, "lines_amount": 7.86, "matched_amount": 7.86, "unmatched_amount": 0,
+        "lines": 4, "matched": 3, "unmatched": 1, "sessions": 3, "grouped": 0, "document_amount": 7.86, "lines_amount": 7.86, "matched_amount": 7.86, "unmatched_amount": 0,
         "sessions_amount": 0, "kwh_mismatches": 0, "amount_mismatches": 0, "time_offset_minutes": 0,
     }  # fmt: skip
     assert data["summary"]["sessions_amount"] == pytest.approx(7.86, abs=0.02)  # priced at the same tariff
@@ -197,13 +197,16 @@ def test_preview_matches_lines_without_storing(client, home):
 
 def test_import_then_payment(client, home):
     late = eneco_csv().replace(b"24-11-2026", b"24-11-2025")  # due a year ago
-    r = _upload(client, late, name="BEX26-000001.csv")
+    assert _upload(client, late).status_code == 422  # the charger of the document is mandatory
+    assert _upload(client, late, charger_id=999).status_code == 422
+    r = _upload(client, late, name="BEX26-000001.csv", charger_id=home["charger"]["id"])
     assert r.status_code == 201, r.text
     doc = r.json()["document"]
     assert (doc["status"], doc["overdue"], doc["amount"], doc["matched"], doc["lines"], doc["charger_name"]) == ("to_receive", True, 7.86, 3, 4, "Ohme")
     st = _statuses(client)
     assert [st[home[k]["id"]] for k in ("a", "b", "c", "other", "private")] == ["invoiced", "invoiced", "invoiced", "recorded", None]
-    assert _upload(client, eneco_csv()).status_code == 409  # once only
+    assert _upload(client, eneco_csv(), charger_id=home["charger"]["id"]).status_code == 409  # once only
+    assert client.delete(f"/api/chargers/{home['charger']['id']}").status_code == 409
     assert _upload(client, eneco_csv(), path="/preview").json()["already_imported"]
 
     listing = client.get(BASE).json()
@@ -228,34 +231,80 @@ def test_import_then_payment(client, home):
     assert client.delete(f"{BASE}/{doc['id']}").status_code == 204
     assert set(_statuses(client).values()) == {"recorded", None}
     assert client.get(f"{BASE}/{doc['id']}").status_code == 404
-    assert _upload(client, eneco_csv()).status_code == 201  # and it can be imported again
+    assert _upload(client, eneco_csv(), charger_id=home["charger"]["id"]).status_code == 201  # and it can be imported again
 
 
 def test_link_and_unlink_a_line_by_hand(client, car, home):
-    data = _upload(client, eneco_csv()).json()
+    data = _upload(client, eneco_csv(), charger_id=home["charger"]["id"]).json()
     doc_id, free_line = data["document"]["id"], data["lines"][3]
-    assert free_line["session"] is None and [s["id"] for s in data["unlisted_sessions"]] == [home["other"]["id"]]
+    assert free_line["sessions"] == [] and [s["id"] for s in data["unlisted_sessions"]] == [home["other"]["id"]]
+    url = f"{BASE}/{doc_id}/lines"
 
-    data = client.put(f"{BASE}/{doc_id}/lines/{free_line['id']}", json={"session_id": home["other"]["id"]}).json()
-    assert data["lines"][3]["session"]["id"] == home["other"]["id"] and data["lines"][3]["kwh_mismatch"]  # 8 kWh for 0.007
+    data = client.put(f"{url}/{free_line['id']}", json={"session_ids": [home["other"]["id"]]}).json()
+    assert [s["id"] for s in data["lines"][3]["sessions"]] == [home["other"]["id"]] and data["lines"][3]["kwh_mismatch"]  # 8 kWh for 0.007
     assert data["summary"]["matched"] == 4 and data["unlisted_sessions"] == []
     assert _statuses(client)[home["other"]["id"]] == "invoiced"
 
-    # A session is on one document only; a private session or an unknown one can't be linked
+    # A session is on one line only; a private session, one of another charger or an unknown one can't be linked
     first = data["lines"][0]
-    for bad in (home["other"]["id"], home["private"]["id"], 99999):
-        assert client.put(f"{BASE}/{doc_id}/lines/{first['id']}", json={"session_id": bad}).status_code == 422
-    assert client.put(f"{BASE}/{doc_id}/lines/99999", json={"session_id": None}).status_code == 404
+    wallbox = client.post("/api/chargers", json={"name": "Wall box"}).json()
+    elsewhere = _session(client, car["id"], "2026-10-01", "09:30", 2.7, charger_id=wallbox["id"])
+    for bad in (home["other"]["id"], home["private"]["id"], elsewhere["id"], 99999):
+        assert client.put(f"{url}/{first['id']}", json={"session_ids": [home["a"]["id"], bad]}).status_code == 422
+    assert client.put(f"{url}/99999", json={"session_ids": []}).status_code == 404
+    assert client.put(f"{BASE}/{doc_id}/charger", json={"charger_id": wallbox["id"]}).status_code == 422  # its sessions are the Ohme's
 
-    data = client.put(f"{BASE}/{doc_id}/lines/{free_line['id']}", json={"session_id": None}).json()
-    assert data["lines"][3]["session"] is None and _statuses(client)[home["other"]["id"]] == "recorded"
+    data = client.put(f"{url}/{free_line['id']}", json={"session_ids": []}).json()
+    assert data["lines"][3]["sessions"] == [] and _statuses(client)[home["other"]["id"]] == "recorded"
 
-    # Linked once the document is paid: the session is paid too; a deleted session frees its line
+    # Linked once the document is paid: the session is paid too; a deleted session leaves its line
     client.put(f"{BASE}/{doc_id}/payment", json={})
-    client.put(f"{BASE}/{doc_id}/lines/{free_line['id']}", json={"session_id": home["other"]["id"]})
+    client.put(f"{url}/{free_line['id']}", json={"session_ids": [home["other"]["id"]]})
     assert _statuses(client)[home["other"]["id"]] == "paid"
     assert client.delete(f"/api/sessions/{home['other']['id']}").status_code == 204
     assert client.get(f"{BASE}/{doc_id}").json()["summary"]["matched"] == 3
+
+
+def test_a_line_grouping_several_sessions(client, car):
+    """The company made one line of sessions we recorded separately: found when their energies add up, or added by hand."""
+    client.post("/api/tariffs", json={"valid_from": "2026-10-01", "price_per_kwh": 0.3779})
+    ohme = client.post("/api/chargers", json={"name": "Ohme"}).json()
+    rows = [
+        ("ID_1", "01-10-2026", "18:00:00", "02-10-2026", "07:00:00", "202610", "12,000", "-4,53"),  # three sessions in the night
+        ("ID_2", "03-10-2026", "18:00:00", "04-10-2026", "07:00:00", "202610", "9,000", "-3,40"),  # two sessions, the second far from the total
+    ]
+    night = [
+        _session(client, car["id"], day, start, kwh, charger_id=ohme["id"])
+        for day, start, kwh in (("2026-10-01", "18:01", 5), ("2026-10-01", "23:30", 4), ("2026-10-02", "04:10", 3.02))
+    ]
+    x = _session(client, car["id"], "2026-10-03", "18:02", 5, charger_id=ohme["id"])
+    y = _session(client, car["id"], "2026-10-04", "02:00", 2.5, charger_id=ohme["id"])
+
+    data = _upload(client, eneco_csv(rows, total="-7,93"), path="/preview").json()
+    one, two = data["lines"]
+    assert [s["id"] for s in one["sessions"]] == [n["id"] for n in night]
+    assert (one["sessions_kwh"], one["kwh_mismatch"], one["sessions_amount"], one["amount_diff"]) == (12.02, False, 4.54, 0.01)
+    assert [s["id"] for s in two["sessions"]] == [x["id"]] and two["kwh_mismatch"]  # 5 + 2.5 isn't 9: only the session started with the line
+    assert (data["summary"]["sessions"], data["summary"]["matched"], data["summary"]["grouped"]) == (4, 2, 1)
+    assert [s["id"] for s in data["unlisted_sessions"]] == [y["id"]]
+
+    data = _upload(client, eneco_csv(rows, total="-7,93"), charger_id=ohme["id"]).json()
+    doc, two = data["document"], data["lines"][1]
+    assert (doc["matched"], doc["sessions"]) == (2, 4) and set(_statuses(client).values()) == {"invoiced", "recorded"}
+
+    # Add the second session of the line by hand, then pay: the five sessions are paid
+    data = client.put(f"{BASE}/{doc['id']}/lines/{two['id']}", json={"session_ids": [x["id"], y["id"]]}).json()
+    assert (data["lines"][1]["sessions_kwh"], data["summary"]["sessions"], data["summary"]["grouped"]) == (7.5, 5, 2)
+    client.put(f"{BASE}/{doc['id']}/payment", json={})
+    assert set(_statuses(client).values()) == {"paid"}
+
+    # Remove one of the three sessions of the first line: it is free again, the others stay
+    data = client.put(f"{BASE}/{doc['id']}/lines/{data['lines'][0]['id']}", json={"session_ids": [night[0]["id"], night[2]["id"]]}).json()
+    assert [s["id"] for s in data["unlisted_sessions"]] == [night[1]["id"]] and data["lines"][0]["kwh_mismatch"]
+    st = _statuses(client)
+    assert (st[night[0]["id"]], st[night[1]["id"]], st[night[2]["id"]]) == ("paid", "recorded", "paid")
+    assert client.delete(f"{BASE}/{doc['id']}").status_code == 204
+    assert set(_statuses(client).values()) == {"recorded"}
 
 
 def test_document_in_another_time_zone_and_chosen_charger(client, car):
@@ -271,7 +320,7 @@ def test_document_in_another_time_zone_and_chosen_charger(client, car):
     _session(client, car["id"], "2026-07-02", "08:50", 5, charger_id=wallbox["id"])  # at the document's clock time, on another charger
     data = _upload(client, eneco_csv(rows, total="-5,32"), path="/preview").json()
     assert data["summary"]["time_offset_minutes"] == 120 and data["document"]["charger_id"] == ohme["id"] and data["document"]["period"] == "2026-07"
-    assert [ln["session"]["id"] for ln in data["lines"]] == [a["id"], b["id"]]
+    assert [[s["id"] for s in ln["sessions"]] for ln in data["lines"]] == [[a["id"]], [b["id"]]]
     assert data["unlisted_sessions"] == []  # the wall box isn't this document's charger
 
     data = _upload(client, eneco_csv(rows, total="-5,32"), path="/preview", charger_id=wallbox["id"]).json()
@@ -281,9 +330,9 @@ def test_document_in_another_time_zone_and_chosen_charger(client, car):
 def test_lms_pdf_import(client, car):
     zap = client.post("/api/chargers", json={"name": "Zaptec", "reimbursement_company": "50five"}).json()
     s = _session(client, car["id"], "2026-12-01", "17:30", 9.8, end_time="06:19", charger_id=zap["id"])
-    data = _upload(client, minimal_pdf(LMS_TEXT), name="Document_de_remboursement.pdf").json()
+    data = _upload(client, minimal_pdf(LMS_TEXT), name="Document_de_remboursement.pdf", charger_id=zap["id"]).json()
     assert (data["document"]["source"], data["document"]["due_date"], data["document"]["overdue"], data["summary"]["matched"]) == ("lms", None, False, 1)
-    assert data["lines"][0]["session"]["id"] == s["id"] and data["lines"][0]["started_at"] == "2026-12-01T17:34:00"
+    assert data["lines"][0]["sessions"][0]["id"] == s["id"] and data["lines"][0]["started_at"] == "2026-12-01T17:34:00"
 
 
 def test_documents_follow_the_car_permissions(client, car, make_driver, home):
@@ -294,18 +343,35 @@ def test_documents_follow_the_car_permissions(client, car, make_driver, home):
 
     # Dave doesn't manage the car of these sessions: nothing matches for him, and he can't see the administrator's document
     assert _upload(dave, eneco_csv(), path="/preview").json()["summary"]["matched"] == 0
-    doc_id = _upload(client, eneco_csv()).json()["document"]["id"]
+    doc_id = _upload(client, eneco_csv(), charger_id=home["charger"]["id"]).json()["document"]["id"]
     assert dave.get(BASE).json()["documents"] == [] and dave.get(f"{BASE}/{doc_id}").status_code == 404
     assert dave.put(f"{BASE}/{doc_id}/payment", json={}).status_code == 404 and dave.delete(f"{BASE}/{doc_id}").status_code == 404
     assert client.get("/payments").status_code == 200 and "Payments" in client.get("/").text
     assert viewer.get("/payments", follow_redirects=False).status_code == 303 and 'href="/payments"' not in viewer.get("/").text
 
 
-def test_migration_creates_the_document_tables(tmp_path):
+def test_migrations_create_the_document_tables_and_keep_the_links(tmp_path):
     eng = create_engine(f"sqlite:///{tmp_path / 'v7.db'}")
     run_migrations(eng, "007")
     assert "reimbursement_documents" not in inspect(eng).get_table_names()
+    run_migrations(eng, "008")  # one session per line, linked from the line
+    with eng.begin() as conn:
+        conn.execute(text("INSERT INTO cars (id, name, active, created_at, updated_at) VALUES (1, 'EV6', 1, '2026-01-01', '2026-01-01')"))
+        conn.execute(
+            text(
+                "INSERT INTO charge_sessions (id, car_id, charge_date, kwh, to_reimburse, created_at, updated_at) VALUES (7, 1, '2026-02-01', 12.5, 1, '2026-02-01', '2026-02-01')"
+            )
+        )
+        conn.execute(text("INSERT INTO reimbursement_documents (id, source, number, amount, kwh, created_at) VALUES (1, 'eneco', 'X', 5, 13.5, '2026-03-01')"))
+        conn.execute(
+            text(
+                "INSERT INTO reimbursement_lines (id, document_id, position, started_at, kwh, amount, session_id) "
+                "VALUES (3, 1, 0, '2026-02-01 10:00:00', 12.5, 4, 7), (4, 1, 1, '2026-02-02 10:00:00', 1, 1, NULL)"
+            )
+        )
     run_migrations(eng)
-    assert {"reimbursement_documents", "reimbursement_lines"} <= set(inspect(eng).get_table_names())
-    assert {"session_id", "started_at", "amount"} <= {c["name"] for c in inspect(eng).get_columns("reimbursement_lines")}
+    assert "session_id" not in {c["name"] for c in inspect(eng).get_columns("reimbursement_lines")}
+    with eng.connect() as conn:
+        assert conn.execute(text("SELECT id, reimbursement_line_id FROM charge_sessions")).all() == [(7, 3)]
+        assert conn.execute(text("SELECT id, document_id FROM reimbursement_lines ORDER BY id")).all() == [(3, 1), (4, 1)]
     eng.dispose()

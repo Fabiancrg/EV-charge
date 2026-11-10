@@ -36,8 +36,12 @@ class PaymentIn(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
 
 
-class LineLink(BaseModel):
-    session_id: int | None  # null: unlink
+class LineSessions(BaseModel):
+    session_ids: list[int] = Field(max_length=50)  # the sessions of the line (usually one); empty: unlink
+
+
+class ChargerIn(BaseModel):
+    charger_id: int
 
 
 # ── Reading ──────────────────────────────────────────────────────────────────
@@ -48,14 +52,17 @@ def _documents(db: Session, user: Principal) -> list[ReimbursementDocument]:
     scope = car_scope(user, "reimbursement:manage")
     docs = db.scalars(
         select(ReimbursementDocument)
-        .options(selectinload(ReimbursementDocument.lines).joinedload(ReimbursementLine.session), joinedload(ReimbursementDocument.charger))
+        .options(
+            selectinload(ReimbursementDocument.lines).selectinload(ReimbursementLine.sessions).options(joinedload(ChargeSession.car), joinedload(ChargeSession.charger)),
+            joinedload(ReimbursementDocument.charger),
+        )
         .order_by(ReimbursementDocument.document_date.desc(), ReimbursementDocument.id.desc())
     ).all()
     if scope is None:
         return list(docs)
 
     def visible(d: ReimbursementDocument) -> bool:
-        cars = {ln.session.car_id for ln in d.lines if ln.session is not None}
+        cars = {s.car_id for ln in d.lines for s in ln.sessions}
         return cars <= scope and (bool(cars) or d.created_by_id == user.id)
 
     return [d for d in docs if visible(d)]
@@ -76,7 +83,7 @@ def _document_out(d: ReimbursementDocument, today: date) -> dict[str, Any]:
         "charger_name": d.charger.name if d.charger else None, "status": "paid" if paid else "to_receive",
         "overdue": not paid and d.due_date is not None and d.due_date < today, "paid_date": d.paid_date, "paid_amount": d.paid_amount,
         "difference": round(d.paid_amount - d.amount, 2) if paid and d.paid_amount is not None else None, "notes": d.notes,
-        "lines": len(d.lines), "matched": sum(ln.session_id is not None for ln in d.lines), "created_at": d.created_at,
+        "lines": len(d.lines), "matched": sum(bool(ln.sessions) for ln in d.lines), "sessions": sum(len(ln.sessions) for ln in d.lines), "created_at": d.created_at,
     }  # fmt: skip
 
 
@@ -88,26 +95,28 @@ def _session_brief(s: ChargeSession, pricing: Pricing) -> dict[str, Any]:
     }  # fmt: skip
 
 
-def _line_out(line: Any, session: ChargeSession | None, pricing: Pricing, index: int) -> dict[str, Any]:
-    """line: a parsed DocLine (preview) or a stored ReimbursementLine."""
-    brief = _session_brief(session, pricing) if session is not None else None
-    amount = brief["amount"] if brief else None
+def _line_out(line: Any, sessions: list[ChargeSession], pricing: Pricing, index: int) -> dict[str, Any]:
+    """line: a parsed DocLine (preview) or a stored ReimbursementLine; sessions: ours matched with it (several when the company grouped them)."""
+    briefs = [_session_brief(s, pricing) for s in sorted(sessions, key=session_sort_key)]
+    kwh = round(sum(b["kwh"] for b in briefs), 3)
+    amount = round(sum(b["amount"] or 0 for b in briefs), 2)
     return {
         "id": getattr(line, "id", None), "index": index, "external_id": line.external_id, "started_at": line.started_at, "ended_at": line.ended_at,
-        "kwh": line.kwh, "amount": line.amount, "session": brief,
-        "kwh_mismatch": session is not None and not kwh_close(line.kwh, session.kwh),
-        "amount_diff": round(amount - line.amount, 2) if amount is not None else None,
+        "kwh": line.kwh, "amount": line.amount, "sessions": briefs, "sessions_kwh": kwh if briefs else None, "sessions_amount": amount if briefs else None,
+        "kwh_mismatch": bool(briefs) and not kwh_close(line.kwh, kwh),
+        "amount_diff": round(amount - line.amount, 2) if briefs else None,
     }  # fmt: skip
 
 
 def _summary(lines: list[dict[str, Any]], amount: float, offset: int | None = None) -> dict[str, Any]:
-    matched = [ln for ln in lines if ln["session"]]
+    matched = [ln for ln in lines if ln["sessions"]]
     return {
-        "lines": len(lines), "matched": len(matched), "unmatched": len(lines) - len(matched),
+        "lines": len(lines), "matched": len(matched), "unmatched": len(lines) - len(matched), "sessions": sum(len(ln["sessions"]) for ln in matched),
+        "grouped": sum(len(ln["sessions"]) > 1 for ln in matched),
         "document_amount": amount, "lines_amount": round(sum(ln["amount"] for ln in lines), 2),
         "matched_amount": round(sum(ln["amount"] for ln in matched), 2),
-        "unmatched_amount": round(sum(ln["amount"] for ln in lines if not ln["session"]), 2),
-        "sessions_amount": round(sum(ln["session"]["amount"] or 0 for ln in matched), 2),
+        "unmatched_amount": round(sum(ln["amount"] for ln in lines if not ln["sessions"]), 2),
+        "sessions_amount": round(sum(ln["sessions_amount"] for ln in matched), 2),
         "kwh_mismatches": sum(ln["kwh_mismatch"] for ln in lines),
         "amount_mismatches": sum(abs(ln["amount_diff"] or 0) >= 0.02 for ln in lines),
         "time_offset_minutes": offset,
@@ -115,17 +124,17 @@ def _summary(lines: list[dict[str, Any]], amount: float, offset: int | None = No
 
 
 def _eligible(db: Session, user: Principal, charger_id: int | None, first: date, last: date) -> list[ChargeSession]:
-    """Sessions a document line can be linked to: to be reimbursed, recorded, on no other document, on a car the caller manages."""
+    """Sessions a document line can be linked to: made with the charger (any charger when none is given), to be reimbursed,
+    recorded, on no document yet, on a car the caller manages."""
     scope = car_scope(user, "reimbursement:manage")
-    linked = set(db.scalars(select(ReimbursementLine.session_id).where(ReimbursementLine.session_id.is_not(None))))
     query = (
         select(ChargeSession)
         .options(joinedload(ChargeSession.car), joinedload(ChargeSession.charger))
-        .where(ChargeSession.to_reimburse.is_(True), ChargeSession.charge_date >= first - timedelta(days=1), ChargeSession.charge_date <= last + timedelta(days=1))
+        .where(ChargeSession.to_reimburse.is_(True), ChargeSession.reimbursement_line_id.is_(None))
+        .where(ChargeSession.charge_date >= first - timedelta(days=1), ChargeSession.charge_date <= last + timedelta(days=1))
+        .where(ChargeSession.charger_id == charger_id if charger_id is not None else ChargeSession.charger_id.is_not(None))
     )
-    if charger_id is not None:
-        query = query.where(ChargeSession.charger_id == charger_id)
-    rows = [s for s in db.scalars(query) if s.id not in linked and s.reimbursement_status != "in_progress" and (scope is None or s.car_id in scope)]
+    rows = [s for s in db.scalars(query) if s.reimbursement_status != "in_progress" and (scope is None or s.car_id in scope)]
     return sorted(rows, key=session_sort_key)
 
 
@@ -135,11 +144,11 @@ def _unlisted(sessions: list[ChargeSession], used: set[int], first: date, last: 
 
 
 def _span(lines: list[Any]) -> tuple[date, date]:
-    days = [ln.started_at.date() for ln in lines]
-    return min(days), max(days)
+    """First and last day covered by the lines."""
+    return min(ln.started_at.date() for ln in lines), max((ln.ended_at or ln.started_at).date() for ln in lines)
 
 
-def _analyse(db: Session, user: Principal, parsed: ParsedDocument, charger_id: int | None) -> tuple[dict[int, ChargeSession], int, int | None, list[ChargeSession]]:
+def _analyse(db: Session, user: Principal, parsed: ParsedDocument, charger_id: int | None) -> tuple[dict[int, list[ChargeSession]], int, int | None, list[ChargeSession]]:
     """Match the lines; without a chosen charger, the one most matches were made with is kept and the match redone with it."""
     if charger_id is not None and db.get(Charger, charger_id) is None:
         raise HTTPException(422, "Unknown charger")
@@ -166,7 +175,7 @@ def _existing(db: Session, parsed: ParsedDocument) -> ReimbursementDocument | No
 
 def _detail(db: Session, user: Principal, doc: ReimbursementDocument) -> dict[str, Any]:
     pricing = Pricing(db)
-    lines = [_line_out(ln, ln.session, pricing, i) for i, ln in enumerate(doc.lines)]
+    lines = [_line_out(ln, ln.sessions, pricing, i) for i, ln in enumerate(doc.lines)]
     unlisted: list[dict[str, Any]] = []
     if doc.lines:
         first, last = _span(doc.lines)
@@ -200,11 +209,12 @@ def list_documents(user: Principal = Depends(manager), db: Session = Depends(get
 
 @router.post("/preview")
 async def preview(file: UploadFile = File(...), charger_id: int | None = None, user: Principal = Depends(manager), db: Session = Depends(get_db)) -> dict[str, Any]:
-    """Read a document (Eneco CSV, Last Mile Solutions PDF) and match its sessions with ours; nothing is stored."""
+    """Read a document (Eneco CSV, Last Mile Solutions PDF) and match its lines with the sessions of a charger; nothing is stored.
+    Without charger_id, the charger most matches were made with is proposed (document.charger_id)."""
     parsed = await _read(file)
     matches, offset, charger, sessions = _analyse(db, user, parsed, charger_id)
     pricing = Pricing(db)
-    lines = [_line_out(ln, matches.get(i), pricing, i) for i, ln in enumerate(parsed.lines)]
+    lines = [_line_out(ln, matches.get(i, []), pricing, i) for i, ln in enumerate(parsed.lines)]
     first, last = _span(parsed.lines)
     return {
         "document": {
@@ -221,7 +231,7 @@ async def preview(file: UploadFile = File(...), charger_id: int | None = None, u
         },  # fmt: skip
         "already_imported": _existing(db, parsed) is not None,
         "lines": lines,
-        "unlisted_sessions": _unlisted(sessions, {s.id for s in matches.values()}, first, last, pricing),
+        "unlisted_sessions": _unlisted(sessions, {s.id for group in matches.values() for s in group}, first, last, pricing),
         "summary": _summary(lines, parsed.amount, offset),
         "currency": CONFIG.currency,
     }
@@ -229,7 +239,9 @@ async def preview(file: UploadFile = File(...), charger_id: int | None = None, u
 
 @router.post("", status_code=201)
 async def create_document(file: UploadFile = File(...), charger_id: int | None = None, user: Principal = Depends(manager), db: Session = Depends(get_db)) -> dict[str, Any]:
-    """Store the document; the sessions matched with its lines become "invoiced" and its amount a payment to receive."""
+    """Store the document of a charger; the sessions matched with its lines become "invoiced" and its amount a payment to receive."""
+    if charger_id is None:
+        raise HTTPException(422, "Choose the charger this document is about")
     parsed = await _read(file)
     if _existing(db, parsed) is not None:
         raise HTTPException(409, f"The document {parsed.number} was already imported")
@@ -239,14 +251,11 @@ async def create_document(file: UploadFile = File(...), charger_id: int | None =
         amount=parsed.amount, kwh=parsed.kwh, filename=(file.filename or "")[:255] or None, charger_id=charger, created_by_id=user.id,
     )  # fmt: skip
     for i, ln in enumerate(parsed.lines):
-        session = matches.get(i)
-        doc.lines.append(
-            ReimbursementLine(
-                position=i, external_id=ln.external_id, started_at=ln.started_at, ended_at=ln.ended_at, kwh=ln.kwh, amount=ln.amount, session_id=session.id if session else None
-            )
-        )
-        if session is not None:
+        line = ReimbursementLine(position=i, external_id=ln.external_id, started_at=ln.started_at, ended_at=ln.ended_at, kwh=ln.kwh, amount=ln.amount)
+        for session in matches.get(i, []):
+            line.sessions.append(session)
             session.reimbursement_status = "invoiced"
+        doc.lines.append(line)
     db.add(doc)
     db.commit()
     return _detail(db, user, _get(db, doc.id, user))
@@ -257,11 +266,33 @@ def get_document(document_id: int, user: Principal = Depends(manager), db: Sessi
     return _detail(db, user, _get(db, document_id, user))
 
 
-def _set_sessions(doc: ReimbursementDocument, status: str | None) -> None:
-    """status None: back to the default status (the sessions leave the document)."""
+def _free(session: ChargeSession) -> None:
+    """The session leaves its document: back to the default status."""
+    session.reimbursement_line = None
+    if session.to_reimburse:
+        session.reimbursement_status = default_status(True, None, session.charger_id)
+
+
+def _set_sessions(doc: ReimbursementDocument, status: str) -> None:
     for ln in doc.lines:
-        if ln.session is not None and ln.session.to_reimburse:
-            ln.session.reimbursement_status = status or default_status(True, None, ln.session.charger_id)
+        for s in ln.sessions:
+            if s.to_reimburse:
+                s.reimbursement_status = status
+
+
+@router.put("/{document_id}/charger")
+def set_charger(document_id: int, body: ChargerIn, user: Principal = Depends(manager), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Set the charger of a document (for those imported without one); its linked sessions must be this charger's."""
+    doc = _get(db, document_id, user)
+    charger = db.get(Charger, body.charger_id)
+    if charger is None:
+        raise HTTPException(422, "Unknown charger")
+    others = sum(s.charger_id != charger.id for ln in doc.lines for s in ln.sessions)
+    if others:
+        raise HTTPException(422, f"{others} session(s) linked to this document weren't made with '{charger.name}': unlink them first")
+    doc.charger_id = charger.id
+    db.commit()
+    return _detail(db, user, _get(db, document_id, user))
 
 
 @router.put("/{document_id}/payment")
@@ -288,23 +319,29 @@ def cancel_payment(document_id: int, user: Principal = Depends(manager), db: Ses
 
 
 @router.put("/{document_id}/lines/{line_id}")
-def link_line(document_id: int, line_id: int, body: LineLink, user: Principal = Depends(manager), db: Session = Depends(get_db)) -> dict[str, Any]:
-    """Link a line with one of our sessions by hand, or unlink it (session_id null)."""
+def link_line(document_id: int, line_id: int, body: LineSessions, user: Principal = Depends(manager), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Set by hand the session(s) of a line: one, several when the company grouped sessions in one line, or none (unlink)."""
     doc = _get(db, document_id, user)
     line = next((ln for ln in doc.lines if ln.id == line_id), None)
     if line is None:
         raise HTTPException(404, "Line not found")
-    if line.session is not None and line.session_id != body.session_id and line.session.to_reimburse:
-        line.session.reimbursement_status = default_status(True, None, line.session.charger_id)
-    if body.session_id is None:
-        line.session_id = None
-    elif body.session_id != line.session_id:
+    wanted = set(body.session_ids)
+    current = {s.id: s for s in line.sessions}
+    new = wanted - set(current)
+    if new:
         day = line.started_at.date()
-        session = next((s for s in _eligible(db, user, None, day - timedelta(days=366), day + timedelta(days=366)) if s.id == body.session_id), None)
-        if session is None:
-            raise HTTPException(422, "This session can't be linked: it isn't to be reimbursed, is still in progress, is already on a document, or isn't yours to manage")
-        line.session_id = session.id
-        session.reimbursement_status = "paid" if doc.paid_date else "invoiced"
+        free = {s.id: s for s in _eligible(db, user, doc.charger_id, day - timedelta(days=366), day + timedelta(days=366))}
+        if not new <= set(free):
+            raise HTTPException(
+                422,
+                "This session can't be linked: it must be one of the document's charger, to be reimbursed, not in progress, on no document yet, and on a car you manage",
+            )
+        for sid in new:
+            free[sid].reimbursement_line = line
+            free[sid].reimbursement_status = "paid" if doc.paid_date else "invoiced"
+    for sid, session in current.items():
+        if sid not in wanted:
+            _free(session)
     db.commit()
     return _detail(db, user, _get(db, document_id, user))
 
@@ -313,7 +350,9 @@ def link_line(document_id: int, line_id: int, body: LineLink, user: Principal = 
 def delete_document(document_id: int, user: Principal = Depends(manager), db: Session = Depends(get_db)) -> Response:
     """Delete the document; its sessions go back to "recorded" (or "not recorded" without a charger)."""
     doc = _get(db, document_id, user)
-    _set_sessions(doc, None)
+    for ln in doc.lines:
+        for s in list(ln.sessions):
+            _free(s)
     db.delete(doc)
     db.commit()
     return Response(status_code=204)
