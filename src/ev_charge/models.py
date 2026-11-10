@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, date, datetime, time
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, Time
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, Time, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -118,6 +118,54 @@ class ChargeSession(Base):
 
 
 REIMBURSEMENT_STATUSES = ("in_progress", "not_recorded", "recorded", "invoiced", "paid")
+
+
+class ReimbursementDocument(Base):
+    """A reimbursement document (credit note / statement) received from a reimbursing company: its sessions
+    are matched with ours (reconcile.py), which become "invoiced", then "paid" once the payment is received."""
+
+    __tablename__ = "reimbursement_documents"
+    __table_args__ = (UniqueConstraint("source", "number", name="uq_reimbursement_documents_source_number"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source: Mapped[str] = mapped_column(String(30))  # file format: "eneco" (CSV) | "lms" (Last Mile Solutions PDF)
+    number: Mapped[str] = mapped_column(String(100))
+    issuer: Mapped[str | None] = mapped_column(String(200))
+    document_date: Mapped[date | None] = mapped_column(Date)
+    due_date: Mapped[date | None] = mapped_column(Date)
+    period: Mapped[str | None] = mapped_column(String(20))  # "2026-10" when the document covers one month
+    amount: Mapped[float] = mapped_column(Float)  # total to receive
+    kwh: Mapped[float] = mapped_column(Float)
+    filename: Mapped[str | None] = mapped_column(String(255))
+    charger_id: Mapped[int | None] = mapped_column(ForeignKey("chargers.id", ondelete="SET NULL"))
+    # Payment: received when paid_date is set
+    paid_date: Mapped[date | None] = mapped_column(Date)
+    paid_amount: Mapped[float | None] = mapped_column(Float)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    lines: Mapped[list[ReimbursementLine]] = relationship(back_populates="document", cascade="all, delete-orphan", order_by="ReimbursementLine.position")
+    charger: Mapped[Charger | None] = relationship()
+
+
+class ReimbursementLine(Base):
+    """One session of a reimbursement document, linked to our session when it was matched."""
+
+    __tablename__ = "reimbursement_lines"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("reimbursement_documents.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(Integer)
+    external_id: Mapped[str | None] = mapped_column(String(100))
+    started_at: Mapped[datetime] = mapped_column(DateTime)  # as written in the document (no time zone)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime)
+    kwh: Mapped[float] = mapped_column(Float)
+    amount: Mapped[float] = mapped_column(Float)
+    session_id: Mapped[int | None] = mapped_column(ForeignKey("charge_sessions.id", ondelete="SET NULL"), unique=True)  # a session is on one document
+
+    document: Mapped[ReimbursementDocument] = relationship(back_populates="lines")
+    session: Mapped[ChargeSession | None] = relationship()
 
 
 class Charger(Base):

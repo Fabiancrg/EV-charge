@@ -51,7 +51,10 @@ def _page(request: Request, db: Session, template: str, active: str, permission:
     if permission and not principal.has(permission):  # type: ignore[union-attr]
         return RedirectResponse("/", status_code=303)
     me = me_out(principal).model_dump(mode="json")  # type: ignore[arg-type]
-    return templates.TemplateResponse(request, template, {"active": active, "user": user, "me": me, "can": set(me["permissions"])})
+    can_reimburse = principal.cars_with("reimbursement:manage") != set()  # type: ignore[union-attr]
+    if template == "payments.html" and not can_reimburse:
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, template, {"active": active, "user": user, "me": me, "can": set(me["permissions"]), "can_reimburse": can_reimburse})
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -77,6 +80,11 @@ def reports(request: Request, db: Session = Depends(get_db)) -> Response:
 @router.get("/reimbursement", response_class=HTMLResponse)
 def reimbursement(request: Request, db: Session = Depends(get_db)) -> Response:
     return _page(request, db, "reimbursement.html", "reimbursement")
+
+
+@router.get("/payments", response_class=HTMLResponse)
+def payments(request: Request, db: Session = Depends(get_db)) -> Response:
+    return _page(request, db, "payments.html", "payments")
 
 
 @router.get("/tariffs", response_class=HTMLResponse)

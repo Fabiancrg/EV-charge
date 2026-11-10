@@ -19,7 +19,7 @@ from . import __version__
 from .config import CONFIG
 from .database import SessionLocal, init_db
 from .routes import audit as audit_routes
-from .routes import auth, cars, chargers, imports, mail, reports, roles, sessions, sso, tariffs, tokens, ui, users
+from .routes import auth, cars, chargers, documents, imports, mail, reports, roles, sessions, sso, tariffs, tokens, ui, users
 
 
 @asynccontextmanager
@@ -57,7 +57,7 @@ class _StaticFiles(StaticFiles):
 
 
 app.mount("/static", _StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
-for module in (auth, sso, mail, tokens, users, roles, audit_routes, cars, chargers, sessions, tariffs, imports, reports, ui):
+for module in (auth, sso, mail, tokens, users, roles, audit_routes, cars, chargers, sessions, tariffs, imports, reports, documents, ui):
     app.include_router(module.router)
 
 

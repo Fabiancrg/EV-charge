@@ -111,9 +111,29 @@ Each session to be reimbursed has a **reimbursement status**:
 - **Sessions page:** charger and status columns, *Status* and *Charger* filters (*Not paid yet* shows everything but *Paid*), and bulk *Set status…* / *Set charger…* / *Set provider…* for the selected rows. An empty provider clears it.
   - *☑ Select all N matching* selects every session matching the filters, on all pages; changing a filter starts a new selection.
   - Changes to more than 25 sessions ask for confirmation.
-  - Typical flows: filter *Charger: No charger* plus a period or a search → select all matching → *Set charger…*. Or filter a quarter → select all matching → *Invoiced* when the invoice arrives → *Paid* when the money is in.
+  - Typical flows: filter *Charger: No charger* plus a period or a search → select all matching → *Set charger…*. Or filter a quarter → select all matching → *Invoiced* when the invoice arrives → *Paid* when the money is in (the **Payments** page does this from the document itself, see below).
 - **Reimbursement statement:** filters on status and **reimbursing company**, so the statement for 50five can be checked against its invoice. The charger and status are shown per session, totals per status, and both appear in the Excel and CSV exports.
 - **Import:** a *Charger* column (matched on the charger's name or serial number) and a *Status* column are recognised. Statuses can be written as *Paid*, *payé*, *betaald*, *facturé*, *niet geregistreerd*… Without a charger column, one charger can be set for every row, and without a status column, a status for every row to be reimbursed.
+
+## Reimbursement documents and payments to receive
+
+The **Payments** page (for users with *Change the reimbursement flag and status* on at least one car) reconciles the documents sent by the reimbursing companies with your sessions, then follows the payments.
+
+1. **⬆ Import a document.** Two formats are read:
+   - **Eneco eMobility**: the CSV *Credit Reimbursement Document* (one row per session);
+   - **50five / Last Mile Solutions**: the PDF *Document de remboursement* with its annex of sessions.
+2. **Check the preview.** Each line of the document is matched with the session that started at the same time (within an hour), or, for a session without a start time, on the same day with the same energy. Nothing is stored yet. The preview shows:
+   - the lines **without a session** (a session you never recorded) and **your sessions of the period that aren't on the document**;
+   - sessions whose **energy** or **amount** differs from the document (a tariff to check);
+   - the **charger** the document is about, found from the matches; choose another one to match again with that charger's sessions only.
+   - A document written in another time zone (UTC) is recognised: the shift in whole hours that matches best is applied and reported.
+3. **Import.** The matched sessions become **🧾 Invoiced** and the document is a **payment to receive** (amount, due date; *Overdue* once the due date is passed). A document is imported once.
+4. **Fix by hand if needed.** Open the document to link a line without a session to one of your sessions, or to unlink a wrong match (✕).
+5. **💰 Payment received.** Enter the date and the amount received: the document is *Paid*, its sessions become **💰 Paid**, and a difference with the amount of the document is shown. *Not paid after all* puts everything back to *Invoiced*.
+
+- **Which sessions can be matched:** sessions *to be reimbursed*, not *In progress*, on no other document, on a car you manage.
+- **Deleting a document** (or unlinking a session) puts its sessions back to their default status: *Recorded* with a charger, *Not recorded* without one.
+- The tiles show the total **to receive**, of which **overdue**, and **received**.
 
 ## Charger connection: live sessions and history
 
@@ -189,6 +209,7 @@ The **Tariffs** page (administrators) holds the price per kWh of home charging, 
 | **Sessions** `/sessions` | Every session with filters (car, period presets including this/last quarter or custom dates, reimbursement, text search on location/provider/notes); filters are kept in the URL. Sortable columns, pages of 25/50/100 rows or all (remembered per browser), a totals footer for the whole filtered set (kWh, cost, to reimburse). Click a row (or ✏) to edit or delete it, and ⧉ to duplicate it as a new session. Select rows to mark them *to reimburse* / *not to reimburse* in bulk. ⬇ *Export CSV* exports the filtered rows (`;`-separated, opens in Excel). ⬆ *Import* starts the Excel/CSV import wizard. |
 | **Reports** `/reports` | Car and period filters (default: last 12 months). Stat tiles (sessions, kWh, km, kWh/100 km, average per session, cost, average price per kWh, to reimburse). Charts: kWh per month (stacked by car), km per month, to reimburse vs. not, kWh by provider, kWh by location, and, when one car with a lease is selected, **lease mileage** (odometer readings against the allowance line). A monthly summary table repeats the numbers. |
 | **Reimbursement** `/reimbursement` | A printable statement of the sessions flagged *to be reimbursed* in a period (default: last quarter) for a car. Each session is priced with the home tariff or the cost entered, and totals are split into home and other charging, with signature lines. *🖨 Print / PDF* uses the browser's print (save as PDF). *⬇ Excel* and *⬇ CSV* export the same rows. |
+| **Payments** `/payments` | Import the reimbursement documents (Eneco CSV, 50five / Last Mile Solutions PDF), reconcile them with the sessions (*Invoiced*), and follow the payments to receive (*Paid*), see above. |
 | **Chargers** `/chargers` | Chargers whose sessions are reimbursed, and the company paying them back (administrators, see above). |
 | **Tariffs** `/tariffs` | Home charging price periods and the CREG import (administrators, see above). |
 | **Users**, **Roles**, **Single sign-on**, **E-mail (SMTP)**, **API tokens**, **Audit log** (⚙ Settings menu) | Accounts with their global role and role per car; roles and permissions; OpenID Connect; SMTP; API tokens; audit log (see above). |
@@ -332,6 +353,8 @@ Every endpoint needs a signed-in user (session cookie) or an API token (`Authori
 | `GET /api/sessions/suggestions?car_id=` | Values that pre-fill the session form |
 | `GET /api/reports` | Report data. Filters: `car_id`, `date_from`, `date_to` |
 | `GET /api/reports/reimbursement` | Reimbursement statement. Same filters plus `status` (repeatable) and `company` (empty: sessions without a charger), `fmt=json\|csv\|xlsx` |
+| `GET /api/reimbursement-documents`, `POST /api/reimbursement-documents/preview`, `POST /api/reimbursement-documents` | Reimbursement documents with the totals to receive; preview the reconciliation of a file (multipart `file`, optional `?charger_id=`), then import it: the matched sessions become *invoiced* |
+| `GET/DELETE /api/reimbursement-documents/{id}`, `PUT/DELETE /api/reimbursement-documents/{id}/payment`, `PUT /api/reimbursement-documents/{id}/lines/{line_id}` | A document with its lines; payment received `{"paid_date": "2026-11-20", "paid_amount": 51.92, "notes": "…"}` (sessions become *paid*) or cancelled; link a line to a session `{"session_id": 12}` or unlink it (`null`) |
 | `GET/POST /api/tariffs`, `PUT/DELETE /api/tariffs/{id}` | Tariff periods (changes: administrators) |
 | `GET/POST /api/chargers`, `PUT/DELETE /api/chargers/{id}` | Chargers, with their live state (changes: administrators) |
 | `GET /api/chargers/connectors`, `PUT /api/chargers/{id}/connection`, `POST /api/chargers/{id}/poll` | Charger APIs available, connect/disconnect a charger (tests the login), read it now |

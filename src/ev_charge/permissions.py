@@ -32,7 +32,7 @@ CAR_PERMISSIONS: dict[str, tuple[str, str]] = {
     "sessions:create": ("Add sessions", "Sessions"),
     "sessions:edit": ("Edit and delete sessions", "Sessions"),
     "sessions:import": ("Import sessions from Excel / CSV", "Sessions"),
-    "reimbursement:manage": ("Change the reimbursement flag and status", "Sessions"),
+    "reimbursement:manage": ("Change the reimbursement flag and status; reimbursement documents and payments", "Sessions"),
 }
 ALL_PERMISSIONS = {**GLOBAL_PERMISSIONS, **CAR_PERMISSIONS}
 
