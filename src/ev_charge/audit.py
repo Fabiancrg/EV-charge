@@ -53,7 +53,17 @@ def purge(db: Session, keep_days: int) -> int:
 
 # ── Generic record of the changes made through the API ──────────────────────
 # Routes that record their own, more detailed events (or only read/preview) are skipped.
-_SKIP_PREFIXES = ("/api/auth", "/api/users", "/api/roles", "/api/settings", "/api/tokens", "/api/import/sheet", "/api/import/sessions/preview", "/api/tariffs/creg/upload")
+_SKIP_PREFIXES = (
+    "/api/auth",
+    "/api/users",
+    "/api/roles",
+    "/api/settings",
+    "/api/tokens",
+    "/api/import/sheet",
+    "/api/import/sessions/preview",
+    "/api/tariffs/creg/upload",
+    "/api/reimbursement-documents/preview",
+)
 _SKIP_SUFFIXES = ("/poll",)
 _VERBS = {"POST": "create", "PUT": "update", "PATCH": "update", "DELETE": "delete"}
 

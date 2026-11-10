@@ -23,6 +23,7 @@
             <a href="/sessions" class="{{ 'active' if active == 'sessions' }}">Sessions</a>
             <a href="/reports" class="{{ 'active' if active == 'reports' }}">Reports</a>
             <a href="/reimbursement" class="{{ 'active' if active == 'reimbursement' }}">Reimbursement</a>
+            {% if can_reimburse %}<a href="/payments" class="{{ 'active' if active == 'payments' }}">Payments</a>{% endif %}
             <a href="/cars" class="{{ 'active' if active == 'cars' }}">Cars</a>
             {% if 'chargers:manage' in can %}<a href="/chargers" class="{{ 'active' if active == 'chargers' }}">Chargers</a>{% endif %}
             {% if 'tariffs:manage' in can %}<a href="/tariffs" class="{{ 'active' if active == 'tariffs' }}">Tariffs</a>{% endif %}
