@@ -138,7 +138,17 @@ The **Payments** page (for users with *Change the reimbursement flag and status*
 
 ## Charger connection: live sessions and history
 
-A charger can be connected to its cloud account (🔌 on the **Chargers** page, administrators). Supported: **Zaptec**, **Ohme** and **Home Assistant** (smart plug sensors). Other chargers can be added in `src/ev_charge/connectors/`.
+A charger can be connected to its cloud account, or read directly on your network (🔌 on the **Chargers** page, administrators). Supported: **Zaptec**, **Ohme**, **Easee**, **go-e**, **NRGkick** and **Home Assistant** (smart plug sensors).
+
+| Charger | Connection | Live session | History import |
+|---|---|---|---|
+| Zaptec | Cloud (official API) | yes | sessions, 365 days |
+| Ohme | Cloud (unofficial) | yes | hourly |
+| Easee | Cloud (official API); Easee has no local API | yes | sessions |
+| go-e | Local network **or** go-e Cloud (official API v2) | yes | no |
+| NRGkick Gen2 | Local network (official JSON API); no public cloud API | yes | no |
+| Home Assistant | Smart plug sensors | yes | hourly |
+ Other chargers can be added in `src/ev_charge/connectors/`.
 
 - **Zaptec** (Go, Go 2, Pro…):
   - Uses Zaptec's **official API** ([docs.zaptec.com](https://docs.zaptec.com)) with the Zaptec Portal / app e-mail and password.
@@ -150,6 +160,19 @@ A charger can be connected to its cloud account (🔌 on the **Chargers** page, 
   - Ohme has no public API. EV Charge uses the open-source [`ohme`](https://github.com/dan-r/ohmepy) library (MIT), the one behind the Home Assistant integration.
   - It logs in with the **Ohme app e-mail and password**; one Ohme account is one charger.
   - The API is unofficial, so Ohme can change it at any time. A broken connection shows its error on the Chargers page and the dashboard; sessions can still be entered by hand.
+- **Easee** (Home, Charge, Charge Lite…):
+  - Uses Easee's **official cloud API** ([developer.easee.com](https://developer.easee.com)) with the Easee app account (e-mail or phone number, and password). Easee chargers have no local API.
+  - If the account holds several chargers, give the serial number (e.g. `EH123456`).
+  - **Live state:** operation mode, power and energy of the current session, read from the *observations* endpoint that replaced the charger state endpoint Easee retired on 1 September 2026.
+  - **History:** the exact sessions (car connected, car disconnected, kWh). Easee limits these requests to about 10 per hour.
+- **go-e** (go-eCharger Gemini, HOME, V3/V4, PRO…), official [HTTP API v2](https://github.com/goecharger/go-eCharger-API-v2), in one of two ways:
+  - **Local network:** the charger's address (e.g. `192.168.1.50`). In the go-e app, allow *local HTTP API v2* (in the connection settings). EV Charge must be on the same network; no password.
+  - **go-e Cloud:** the 6-digit serial number and the **Cloud API token** shown in the app (Internet → Advanced settings → Cloud API; firmware 052 or later). Works from anywhere.
+  - **Live state:** car state, power, and the energy since the car was connected. **No history** in this API: sessions are recorded live from the day the charger is connected.
+- **NRGkick** (Gen2 only):
+  - Uses its **local JSON API**; NRGkick has no public cloud API. Enable it in the NRGkick app (Settings → JSON API), optionally with a user name and password, and give the charger's address.
+  - EV Charge must be on the same network as the charger: sessions made away from home (the charger on another network) aren't followed, and the charger simply shows as offline meanwhile.
+  - **Live state:** status, power, and the energy of the session. **No history** in this API.
 - **Home Assistant** (a charger on a smart plug, e.g. an Ohme whose cloud is unreliable):
   - Reads the plug's **power** sensor (W or kW) and **energy** sensor (kWh or Wh, cumulative or a daily utility meter that resets: a drop is taken as a reset), e.g. `sensor.carplug2_relay_power` and `sensor.ve_plug_2_energy_daily`.
   - Needs the HA URL and a **long-lived access token** (HA profile → Security). EV Charge must be able to reach Home Assistant.
@@ -171,7 +194,7 @@ A charger can be connected to its cloud account (🔌 on the **Chargers** page, 
 - **Drivers:** they see the chargers whose default car is theirs.
 
 **History import.** 📜 on a connected charger fetches past sessions for a period and a car:
-- **How:** Zaptec lists its sessions, which are taken as they are. Ohme gives energy per **hour**, not a list of sessions. Consecutive hours with energy, or separated by one empty hour, make one session. Times are therefore rounded to the hour, and the end is tightened with the active charging time.
+- **How:** Zaptec and Easee list their sessions, which are taken as they are. go-e and NRGkick have no history (no 📜 button). Ohme gives energy per **hour**, not a list of sessions. Consecutive hours with energy, or separated by one empty hour, make one session. Times are therefore rounded to the hour, and the end is tightened with the active charging time.
 - **Matching:** each rebuilt session is compared with the recorded ones. It's *new*, *matches* a recorded session (same day, kWh within 10 % or 1 kWh), or was *already imported*.
 - **Applying:** the selected new sessions are added as ✓ Recorded. Selected matches that have no charger get this one, keeping their kWh. Importing the same period again adds nothing.
 
