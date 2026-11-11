@@ -294,6 +294,54 @@ def test_small_lines_without_session_are_left_aside(client, car, make_driver, ho
     assert make_driver([car["id"]]).put(f"{BASE}/settings", json={"ignore_below": 5}).status_code == 403  # a setting of the application
 
 
+def test_create_the_missing_session_from_a_line(client, car, make_driver, home):
+    client.delete(f"/api/sessions/{home['a']['id']}")  # we never recorded the session of the first line
+    data = _upload(client, eneco_csv(), charger_id=home["charger"]["id"]).json()
+    doc_id, line = data["document"]["id"], data["lines"][0]
+    assert line["sessions"] == [] and data["default_car_id"] == car["id"]  # the car of the document's other sessions
+    url = f"{BASE}/{doc_id}/lines/{line['id']}/session"
+
+    viewer = make_driver([car["id"]], username="vera", role="Viewer", global_role="Viewer")
+    assert viewer.post(url, json={}).status_code == 403
+    assert client.post(url, json={"car_id": 99999}).status_code == 422
+    r = client.post(url, json={})
+    assert r.status_code == 201, r.text
+    created = r.json()["lines"][0]["sessions"][0]
+    assert (created["charge_date"], created["start_time"], created["end_time"], created["kwh"], created["status"]) == ("2026-10-01", "09:28:00", "10:42:00", 2.713, "invoiced")
+    assert (r.json()["lines"][0]["amount_diff"], r.json()["summary"]["matched"]) == (0, 3)  # the home tariff gives the amount of the line
+    full = client.get(f"/api/sessions/{created['id']}").json()
+    assert (full["notes"], full["charger_id"], full["to_reimburse"], full["car_id"], full["created_by"]) == (
+        "Created from invoice BEX26-000001",
+        home["charger"]["id"],
+        True,
+        car["id"],
+        "Ada Admin",
+    )
+    assert client.post(url, json={}).status_code == 409  # the line has its session now
+    assert client.post(f"{BASE}/{doc_id}/lines/99999/session", json={}).status_code == 404
+
+    # On a paid document the session is paid; the chosen car and the charger's defaults are used
+    client.put(f"{BASE}/{doc_id}/payment", json={})
+    ev6 = client.post("/api/cars", json={"name": "EV6"}).json()
+    client.put(f"/api/chargers/{home['charger']['id']}", json={"name": "Ohme", "default_location": "Home", "default_provider": "Engie", "uses_home_tariff": False})
+    last = client.post(f"{BASE}/{doc_id}/lines/{data['lines'][3]['id']}/session", json={"car_id": ev6["id"]}).json()["lines"][3]["sessions"][0]
+    full = client.get(f"/api/sessions/{last['id']}").json()
+    assert (full["car_id"], full["location"], full["provider"], full["reimbursement_status"], full["entered_cost"]) == (ev6["id"], "Home", "Engie", "paid", 0)
+
+
+def test_created_session_is_at_our_clock_when_the_document_is_in_utc(client, car):
+    ohme = client.post("/api/chargers", json={"name": "Ohme", "default_car_id": car["id"]}).json()
+    rows = [
+        ("ID_1", "01-07-2026", "07:28:40", "01-07-2026", "08:42:32", "202607", "2,713", "-1,03"),
+        ("ID_2", "02-07-2026", "22:48:14", "03-07-2026", "05:10:29", "202607", "11,336", "-4,29"),
+    ]
+    _session(client, car["id"], "2026-07-01", "09:28", 2.71, charger_id=ohme["id"])  # two hours later than the document says
+    data = _upload(client, eneco_csv(rows, total="-5,32"), charger_id=ohme["id"]).json()
+    assert data["default_car_id"] == car["id"]  # the charger's car
+    made = client.post(f"{BASE}/{data['document']['id']}/lines/{data['lines'][1]['id']}/session", json={}).json()["lines"][1]["sessions"][0]
+    assert (made["charge_date"], made["start_time"], made["end_time"]) == ("2026-07-03", "00:48:00", "07:10:00")
+
+
 def test_a_line_grouping_several_sessions(client, car):
     """The company made one line of sessions we recorded separately: found when their energies add up, or added by hand."""
     client.post("/api/tariffs", json={"valid_from": "2026-10-01", "price_per_kwh": 0.3779})

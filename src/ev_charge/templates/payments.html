@@ -65,7 +65,7 @@
 (() => {
     const BASE = '/api/reimbursement-documents';
     const $ = (id) => document.getElementById(id);
-    let docs = [], pending = null /* file being previewed */, current = null /* detail shown */, paying = null;
+    let docs = [], pending = null /* file being previewed */, current = null /* detail shown */, paying = null, createCar = null /* car chosen for the sessions created from lines */;
 
     const dateTime = (iso) => iso ? `${EV.date(iso.slice(0, 10))} ${iso.slice(11, 16)}` : '';
     const period = (p) => p ? new Date(p + '-01T00:00:00').toLocaleDateString(undefined, { year: 'numeric', month: 'long' }) : '';
@@ -141,7 +141,7 @@
                             : l.kwh_mismatch ? `<br><span class="badge badge-warn" title="Your amount minus the document's: the energy differs">${diffTxt(l.amount_diff)}</span>`
                             : `<br><span class="muted small" title="Same price per kWh: the small difference in energy between the two meters">${diffTxt(l.amount_diff)}</span>`}</td>
                         <td>${[...new Set(ss.map(s => s.status))].map(st => EV.statusBadge(st)).join(' ')}${stored ? '' : ` → ${EV.statusBadge('invoiced')}`}</td>`
-                    : `<td colspan="4">${picker(l) || (l.ignored ? '<span class="muted small">Small amount: left aside, no session needed</span>' : '<span class="badge badge-warn">⚠ No matching session</span>')}</td>`}
+                    : `<td colspan="4">${stored && data.document.charger_id ? `<button class="btn btn-ghost btn-sm" data-create="${l.id}" title="Add the session to your sessions, from the date, times and energy of this line, with the note “Created from invoice ${EV.esc(data.document.number)}”">＋ Create the session</button> ` : ''}${picker(l) || (l.ignored ? '<span class="muted small">Small amount: left aside, no session needed</span>' : '<span class="badge badge-warn">⚠ No matching session</span>')}</td>`}
                 </tr>`;
             }).join('')}</tbody></table></div>`;
     }
@@ -163,6 +163,9 @@
         return `<dl class="doc-meta">
                 <dt>Document</dt><dd><strong>${EV.esc(d.number)}</strong> — ${EV.esc(d.issuer || '')}</dd>
                 <dt>Date</dt><dd>${EV.date(d.document_date)}${d.due_date ? ` · due ${EV.date(d.due_date)}` : ''}${d.period ? ` · ${EV.esc(period(d.period))}` : ''}</dd>
+                ${stored && d.charger_id && data.lines.some(l => !l.sessions.length) ? `<dt title="Car of the sessions created from a line with ＋ Create the session">Car of new sessions</dt>
+                    <dd><select id="doc-car" style="max-width:260px"><option value="">Choose a car…</option>${(EV.cars || []).filter(c => EV.canCar('sessions:create', c.id) && EV.canCar('reimbursement:manage', c.id))
+                        .map(c => `<option value="${c.id}" ${c.id === (createCar ?? data.default_car_id) ? 'selected' : ''}>${EV.esc(c.name)}</option>`).join('')}</select></dd><dt></dt><dd></dd>` : ''}
                 <dt>Charger *</dt><dd>${stored && d.charger_id ? `🔌 ${EV.esc(d.charger_name)}`
                     : `<select id="doc-charger" style="max-width:260px"><option value="">Choose a charger…</option>${(EV.chargers || []).map(c => `<option value="${c.id}" ${c.id === d.charger_id ? 'selected' : ''}>${EV.esc(c.name)}</option>`).join('')}</select>`}</dd>
                 ${stored ? `<dt>Payment</dt><dd>${docStatus(d).replace('<br>', ' ')}${d.status === 'paid' ? ` — ${EV.money(d.paid_amount)}` : ''}${d.notes ? `<br><span class="muted small">${EV.esc(d.notes)}</span>` : ''}</dd>` : '<dt></dt><dd></dd>'}
@@ -190,6 +193,7 @@
             <button type="button" class="btn" id="doc-import" ${data.already_imported || !data.document.charger_id ? 'disabled' : ''}>⬆ Import${n ? ` and mark ${n} session(s) invoiced` : ''}</button>`;
     }
     function showDetail(data) {
+        if (current?.document.id !== data.document.id) createCar = null;  // another document: back to its default car
         current = data;
         const d = data.document;
         $('doc-title').textContent = `Document ${d.number}`;
@@ -231,6 +235,7 @@
         await previewFile(null);
     });
     $('doc-modal').addEventListener('change', async (e) => {
+        if (e.target.id === 'doc-car') { createCar = Number(e.target.value) || null; return; }
         $('doc-modal').querySelector('.form-error').style.display = 'none';
         try {
             if (e.target.id === 'doc-charger' && !current) await previewFile(e.target.value);
@@ -248,6 +253,17 @@
                 const data = await send('', pending, $('doc-charger')?.value);
                 EV.toast(`Document imported: ${data.summary.sessions} session(s) invoiced`);
                 showDetail(data);
+                load();
+            } else if (btn.dataset.create) {
+                const carId = Number($('doc-car')?.value);
+                if (!carId) throw new Error('Choose the car of new sessions first (top of the document).');
+                const line = current.lines.find(l => l.id === Number(btn.dataset.create));
+                const car = EV.cars.find(c => c.id === carId);
+                if (!confirm(`Create a session of ${EV.num(line.kwh, 3)} kWh on ${dateTime(line.started_at)} for ${car.name}?\n\nIts note will be “Created from invoice ${current.document.number}”.`)) return;
+                const keep = $('doc-body').querySelector('.doc-lines').scrollTop;
+                showDetail(await EV.api('POST', `${BASE}/${current.document.id}/lines/${line.id}/session`, { car_id: carId }));
+                $('doc-body').querySelector('.doc-lines').scrollTop = keep;
+                EV.toast('Session created');
                 load();
             } else if (btn.dataset.unlink) {
                 await setSessions(btn.dataset.unlink, lineSessions(btn.dataset.unlink).filter(id => id !== Number(btn.dataset.session)));
@@ -307,7 +323,7 @@
         load();
     });
 
-    EV.loadChargers().catch(() => { EV.chargers = []; }).then(load);
+    Promise.all([EV.loadChargers().catch(() => { EV.chargers = []; }), EV.loadCars().catch(() => { EV.cars = []; })]).then(load);
 })();
 </script>
 {% endblock %}

@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from collections import Counter
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from ..auth import Principal, car_scope, current_user, require
 from ..config import CONFIG
 from ..database import get_db
-from ..models import Charger, ChargeSession, ReimbursementDocument, ReimbursementLine
+from ..models import Car, Charger, ChargeSession, ReimbursementDocument, ReimbursementLine
 from ..pricing import Pricing, get_setting, set_setting
 from ..reconcile import MAX_FILE_BYTES, DocumentError, ParsedDocument, kwh_close, main_charger, match_lines, parse_document
 from ..schemas import default_status
@@ -42,6 +43,10 @@ class LineSessions(BaseModel):
 
 class SettingsIn(BaseModel):
     ignore_below: float = Field(ge=0, le=1000)
+
+
+class NewSession(BaseModel):
+    car_id: int | None = None  # default: the car of the charger, else the car of the document's other sessions
 
 
 class ChargerIn(BaseModel):
@@ -201,6 +206,24 @@ def _existing(db: Session, parsed: ParsedDocument) -> ReimbursementDocument | No
     return db.scalar(select(ReimbursementDocument).where(ReimbursementDocument.source == parsed.source, ReimbursementDocument.number == parsed.number))
 
 
+def _default_car(doc: ReimbursementDocument) -> int | None:
+    """The car of a session created from a line: the charger's default car, else the car of most sessions of the document."""
+    if doc.charger is not None and doc.charger.default_car_id:
+        return doc.charger.default_car_id
+    cars = Counter(s.car_id for ln in doc.lines for s in ln.sessions)
+    return cars.most_common(1)[0][0] if cars else None
+
+
+def _time_shift(doc: ReimbursementDocument) -> timedelta:
+    """Whole hours between the document's clock and ours (a document written in UTC), seen on its matched sessions."""
+    shifts: Counter[int] = Counter()
+    for ln in doc.lines:
+        for s in ln.sessions[:1]:
+            if s.start_time is not None:
+                shifts[round((datetime.combine(s.charge_date, s.start_time) - ln.started_at).total_seconds() / 3600)] += 1
+    return timedelta(hours=shifts.most_common(1)[0][0]) if shifts else timedelta(0)
+
+
 def _detail(db: Session, user: Principal, doc: ReimbursementDocument) -> dict[str, Any]:
     pricing = Pricing(db)
     below = ignore_below(db)
@@ -214,6 +237,7 @@ def _detail(db: Session, user: Principal, doc: ReimbursementDocument) -> dict[st
         "lines": lines,
         "unlisted_sessions": unlisted,
         "summary": _summary(lines, doc.amount, below),
+        "default_car_id": _default_car(doc),
         "currency": CONFIG.currency,
     }
 
@@ -388,6 +412,38 @@ def link_line(document_id: int, line_id: int, body: LineSessions, user: Principa
     for sid, session in current.items():
         if sid not in wanted:
             _free(session)
+    db.commit()
+    return _detail(db, user, _get(db, document_id, user))
+
+
+@router.post("/{document_id}/lines/{line_id}/session", status_code=201)
+def create_session_from_line(document_id: int, line_id: int, body: NewSession, user: Principal = Depends(manager), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Create the session a line has none for (one we never recorded), from what the document says: date, times, energy;
+    with the charger of the document and its defaults, linked to the line, and a note telling where it comes from."""
+    doc = _get(db, document_id, user)
+    line = next((ln for ln in doc.lines if ln.id == line_id), None)
+    if line is None:
+        raise HTTPException(404, "Line not found")
+    if line.sessions:
+        raise HTTPException(409, "This line already has a session")
+    if doc.charger is None:
+        raise HTTPException(422, "Choose the charger of the document first")
+    car_id = body.car_id or _default_car(doc)
+    if car_id is None or db.get(Car, car_id) is None:
+        raise HTTPException(422, "Choose the car of the session")
+    if not (user.can("sessions:create", car_id) and user.can("reimbursement:manage", car_id)):
+        raise HTTPException(403, "Not allowed on this car (add sessions and manage their reimbursement)")
+    shift = _time_shift(doc)
+    start = line.started_at + shift
+    end = line.ended_at + shift if line.ended_at else None
+    session = ChargeSession(
+        car_id=car_id, charge_date=start.date(), start_time=start.time().replace(second=0), end_time=end.time().replace(second=0) if end else None, kwh=line.kwh,
+        location=doc.charger.default_location, provider=doc.charger.default_provider, charger_id=doc.charger.id, to_reimburse=True,
+        cost=None if doc.charger.uses_home_tariff else line.amount,  # the home tariff prices it; else the amount of the document
+        reimbursement_status="paid" if doc.paid_date else "invoiced", notes=f"Created from invoice {doc.number}", created_by_id=user.id,
+    )  # fmt: skip
+    session.reimbursement_line = line
+    db.add(session)
     db.commit()
     return _detail(db, user, _get(db, document_id, user))
 
