@@ -94,6 +94,22 @@
         return s < 90 ? 'just now' : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 129600 ? `${Math.round(s / 3600)} h ago` : EV.date(iso.slice(0, 10));
     };
 
+    /* <option>s of cars or chargers: the active ones, then the inactive ones under "Inactive" (old cars and chargers stay
+       reachable for their history without being in the way). opts.only: keep just these inactive ids (e.g. the current value). */
+    EV.activeOptions = (list, label = (x) => EV.esc(x.name), opts = {}) => {
+        const option = (x) => `<option value="${x.id}">${label(x)}</option>`;
+        const inactive = list.filter(x => !x.active && (!opts.only || opts.only.includes(x.id)));
+        return list.filter(x => x.active).map(option).join('') + (inactive.length ? `<optgroup label="Inactive">${inactive.map(option).join('')}</optgroup>` : '');
+    };
+    /* "Show inactive (N)" button of a list page: hidden by default; returns the rows to show */
+    EV.inactiveToggle = (btn, list, state) => {
+        const n = list.filter(x => !x.active).length;
+        const all = state.show || n === list.length;  // nothing but inactive ones: show them
+        btn.style.display = n && n < list.length ? '' : 'none';
+        btn.textContent = state.show ? `Hide inactive (${n})` : `Show inactive (${n})`;
+        return all ? list : list.filter(x => x.active);
+    };
+
     EV.loadCars = async () => {
         const cars = await EV.api('GET', '/api/cars');
         cars.forEach(c => { EV.carColorIndex[c.id] = c.color_index; });

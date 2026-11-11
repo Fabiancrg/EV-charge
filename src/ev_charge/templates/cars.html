@@ -4,7 +4,10 @@
 <div class="content">
     <div class="page-head">
         <h2>Cars</h2>
-        {% if 'cars:manage' in can %}<button class="btn" id="add-car">＋ Add a car</button>{% endif %}
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost" id="toggle-inactive" style="display:none"></button>
+            {% if 'cars:manage' in can %}<button class="btn" id="add-car">＋ Add a car</button>{% endif %}
+        </div>
     </div>
     <div class="table-wrap" id="cars-table"><p class="muted">Loading…</p></div>
 </div>
@@ -47,7 +50,7 @@
             </fieldset>
             <div class="form-grid">
                 <div class="field span-all"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
-                <div class="field span-all"><label class="check"><input type="checkbox" name="active" checked> Active (shown on the dashboard and in the session form)</label></div>
+                <div class="field span-all"><label class="check"><input type="checkbox" name="active" checked> Active (untick when the car is returned or not delivered yet: it leaves the dashboard, the session form and this list; its history stays)</label></div>
             </div>
             <div class="modal-actions">
                 <button type="button" class="btn btn-danger left" id="cf-delete">🗑 Delete</button>
@@ -63,6 +66,7 @@
 (() => {
     const form = document.getElementById('car-form');
     let cars = [];
+    const inactive = { show: false };
     let editing = null;
 
     function open(car) {
@@ -87,8 +91,9 @@
                 : '<div class="empty-state"><h3>No car for you yet</h3><p>Ask an administrator to give you access to your car(s).</p></div>';
             return;
         }
+        const shown = EV.inactiveToggle(document.getElementById('toggle-inactive'), cars, inactive);
         box.innerHTML = `<table><thead><tr><th>Name</th><th>Car</th><th class="hide-sm">Plate</th><th class="num hide-sm">Battery</th><th class="hide-sm">Lease</th><th class="num">Odometer</th><th class="num hide-sm">Sessions</th><th class="hide-sm">Access</th><th>Status</th><th></th></tr></thead><tbody>
-            ${cars.map(c => `<tr>
+            ${shown.map(c => `<tr>
                 <td><strong>${EV.carDot(c.id)}${EV.esc(c.name)}</strong></td>
                 <td>${EV.esc([c.make, c.model, c.year].filter(Boolean).join(' '))}</td>
                 <td class="hide-sm">${EV.esc(c.license_plate || '')}</td>
@@ -97,10 +102,13 @@
                 <td class="num">${EV.km(c.last_odometer)}</td>
                 <td class="num hide-sm">${EV.num(c.session_count)}</td>
                 <td class="hide-sm small">${c.drivers.map(EV.esc).join('<br>') || '<span class="muted">—</span>'}</td>
-                <td>${c.active ? '<span class="badge badge-ok">Active</span>' : '<span class="badge badge-warn">Inactive</span>'}</td>
+                <td>${c.active ? '<span class="badge badge-ok">Active</span>' : '<span class="badge badge-warn">Inactive</span>'}${c.active && c.lease_end && c.lease_end < EV.today()
+                    ? '<br><span class="badge badge-warn" title="The lease is over: once the car is returned, edit it and untick Active to put it away">⚠ Lease ended</span>' : ''}</td>
                 <td>${EV.canCar('car:edit', c.id) ? `<button class="btn btn-ghost btn-sm" data-edit="${c.id}">✏ Edit</button>` : `<button class="btn btn-ghost btn-sm" data-edit="${c.id}">👁 View</button>`}</td>
             </tr>`).join('')}</tbody></table>`;
     }
+
+    document.getElementById('toggle-inactive').addEventListener('click', () => { inactive.show = !inactive.show; render(); });
 
     async function load() {
         try { cars = await EV.loadCars(); render(); } catch (err) { EV.toast(err.message, true); }
