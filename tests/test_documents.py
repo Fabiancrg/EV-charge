@@ -183,8 +183,9 @@ def test_preview_matches_lines_without_storing(client, home):
     assert not data["already_imported"]
     assert [[s["id"] for s in ln["sessions"]] for ln in data["lines"]] == [[home["a"]["id"]], [home["b"]["id"]], [home["c"]["id"]], []]
     assert data["summary"] | {"sessions_amount": 0} == {
-        "lines": 4, "matched": 3, "unmatched": 1, "sessions": 3, "grouped": 0, "document_amount": 7.86, "lines_amount": 7.86, "matched_amount": 7.86, "unmatched_amount": 0,
-        "sessions_amount": 0, "kwh_mismatches": 0, "price_mismatches": 0, "time_offset_minutes": 0,
+        "lines": 4, "matched": 3, "unmatched": 0, "ignored": 1, "ignored_amount": 0, "sessions": 3, "grouped": 0,
+        "document_amount": 7.86, "lines_amount": 7.86, "matched_amount": 7.86, "unmatched_amount": 0,
+        "sessions_amount": 0, "kwh_mismatches": 0, "price_mismatches": 0, "time_offset_minutes": 0, "ignore_below": 0.01,
     }  # fmt: skip
     assert data["summary"]["sessions_amount"] == pytest.approx(7.86, abs=0.02)  # priced at the same tariff
     assert [s["id"] for s in data["unlisted_sessions"]] == [home["other"]["id"]]
@@ -272,6 +273,25 @@ def test_link_and_unlink_a_line_by_hand(client, car, home):
     assert _statuses(client)[home["other"]["id"]] == "paid"
     assert client.delete(f"/api/sessions/{home['other']['id']}").status_code == 204
     assert client.get(f"{BASE}/{doc_id}").json()["summary"]["matched"] == 3
+
+
+def test_small_lines_without_session_are_left_aside(client, car, make_driver, home):
+    """By default only the lines of 0.00 need no session; the limit is a setting."""
+    client.delete(f"/api/sessions/{home['a']['id']}")  # the session of the 1.03 line
+    doc = _upload(client, eneco_csv(), charger_id=home["charger"]["id"]).json()
+    assert [(ln["amount"], ln["ignored"]) for ln in doc["lines"] if not ln["sessions"]] == [(1.03, False), (0, True)]
+    assert (doc["summary"]["unmatched"], doc["summary"]["unmatched_amount"], doc["summary"]["ignored"], doc["document"]["unmatched"]) == (1, 1.03, 1, 1)
+
+    assert client.put(f"{BASE}/settings", json={"ignore_below": 1.5}).json() == {"ignore_below": 1.5}
+    listing = client.get(BASE).json()
+    assert listing["ignore_below"] == 1.5 and listing["documents"][0]["unmatched"] == 0
+    summary = client.get(f"{BASE}/{doc['document']['id']}").json()["summary"]
+    assert (summary["unmatched"], summary["unmatched_amount"], summary["ignored"], summary["ignored_amount"]) == (0, 0, 2, 1.03)
+
+    client.put(f"{BASE}/settings", json={"ignore_below": 0})  # report every line, even those of 0.00
+    assert client.get(BASE).json()["documents"][0]["unmatched"] == 2
+    assert client.put(f"{BASE}/settings", json={"ignore_below": -1}).status_code == 422
+    assert make_driver([car["id"]]).put(f"{BASE}/settings", json={"ignore_below": 5}).status_code == 403  # a setting of the application
 
 
 def test_a_line_grouping_several_sessions(client, car):

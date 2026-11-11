@@ -11,11 +11,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ..auth import Principal, car_scope, current_user
+from ..auth import Principal, car_scope, current_user, require
 from ..config import CONFIG
 from ..database import get_db
 from ..models import Charger, ChargeSession, ReimbursementDocument, ReimbursementLine
-from ..pricing import Pricing
+from ..pricing import Pricing, get_setting, set_setting
 from ..reconcile import MAX_FILE_BYTES, DocumentError, ParsedDocument, kwh_close, main_charger, match_lines, parse_document
 from ..schemas import default_status
 from ..services import session_sort_key
@@ -38,6 +38,10 @@ class PaymentIn(BaseModel):
 
 class LineSessions(BaseModel):
     session_ids: list[int] = Field(max_length=50)  # the sessions of the line (usually one); empty: unlink
+
+
+class SettingsIn(BaseModel):
+    ignore_below: float = Field(ge=0, le=1000)
 
 
 class ChargerIn(BaseModel):
@@ -75,7 +79,7 @@ def _get(db: Session, document_id: int, user: Principal) -> ReimbursementDocumen
     return doc
 
 
-def _document_out(d: ReimbursementDocument, today: date) -> dict[str, Any]:
+def _document_out(d: ReimbursementDocument, today: date, below: float) -> dict[str, Any]:
     paid = d.paid_date is not None
     return {
         "id": d.id, "source": d.source, "number": d.number, "issuer": d.issuer, "document_date": d.document_date, "due_date": d.due_date,
@@ -83,7 +87,8 @@ def _document_out(d: ReimbursementDocument, today: date) -> dict[str, Any]:
         "charger_name": d.charger.name if d.charger else None, "status": "paid" if paid else "to_receive",
         "overdue": not paid and d.due_date is not None and d.due_date < today, "paid_date": d.paid_date, "paid_amount": d.paid_amount,
         "difference": round(d.paid_amount - d.amount, 2) if paid and d.paid_amount is not None else None, "notes": d.notes,
-        "lines": len(d.lines), "matched": sum(bool(ln.sessions) for ln in d.lines), "sessions": sum(len(ln.sessions) for ln in d.lines), "created_at": d.created_at,
+        "lines": len(d.lines), "matched": sum(bool(ln.sessions) for ln in d.lines), "sessions": sum(len(ln.sessions) for ln in d.lines),
+        "unmatched": sum(not ln.sessions and not _ignored(ln, below) for ln in d.lines), "created_at": d.created_at,
     }  # fmt: skip
 
 
@@ -95,13 +100,26 @@ def _session_brief(s: ChargeSession, pricing: Pricing) -> dict[str, Any]:
     }  # fmt: skip
 
 
+IGNORE_BELOW = "reimbursement_ignore_below"  # setting: lines without a session below this amount need none
+
+
+def ignore_below(db: Session) -> float:
+    """Amount under which a line without a session is left aside. Default 0.01: only the lines of 0.00
+    (the car was plugged in for a moment, a few Wh: nothing to reimburse). 0: no line is left aside."""
+    return float(get_setting(db, IGNORE_BELOW, 0.01))
+
+
+def _ignored(line: Any, below: float) -> bool:
+    return round(line.amount, 2) < below
+
+
 def _price_mismatch(line: Any, kwh: float, amount: float) -> bool:
     """The line isn't priced at our tariff: its energy at the price per kWh of our session(s) isn't its amount (to the cent).
     A small difference in energy between the two meters changes the amount by a few cents: that isn't a price difference."""
     return kwh > 0 and abs(line.kwh * amount / kwh - line.amount) >= 0.02
 
 
-def _line_out(line: Any, sessions: list[ChargeSession], pricing: Pricing, index: int) -> dict[str, Any]:
+def _line_out(line: Any, sessions: list[ChargeSession], pricing: Pricing, index: int, below: float) -> dict[str, Any]:
     """line: a parsed DocLine (preview) or a stored ReimbursementLine; sessions: ours matched with it (several when the company grouped them)."""
     briefs = [_session_brief(s, pricing) for s in sorted(sessions, key=session_sort_key)]
     kwh = round(sum(b["kwh"] for b in briefs), 3)
@@ -112,21 +130,24 @@ def _line_out(line: Any, sessions: list[ChargeSession], pricing: Pricing, index:
         "kwh_mismatch": bool(briefs) and not kwh_close(line.kwh, kwh),
         "amount_diff": round(amount - line.amount, 2) if briefs else None,
         "price_mismatch": _price_mismatch(line, kwh, amount) if briefs else False,
+        "ignored": not briefs and _ignored(line, below),  # no session, and too small to need one
     }  # fmt: skip
 
 
-def _summary(lines: list[dict[str, Any]], amount: float, offset: int | None = None) -> dict[str, Any]:
+def _summary(lines: list[dict[str, Any]], amount: float, below: float, offset: int | None = None) -> dict[str, Any]:
     matched = [ln for ln in lines if ln["sessions"]]
     return {
-        "lines": len(lines), "matched": len(matched), "unmatched": len(lines) - len(matched), "sessions": sum(len(ln["sessions"]) for ln in matched),
+        "lines": len(lines), "matched": len(matched), "unmatched": sum(not ln["sessions"] and not ln["ignored"] for ln in lines),
+        "ignored": sum(ln["ignored"] for ln in lines),
+        "ignored_amount": round(sum(ln["amount"] for ln in lines if ln["ignored"]), 2), "sessions": sum(len(ln["sessions"]) for ln in matched),
         "grouped": sum(len(ln["sessions"]) > 1 for ln in matched),
         "document_amount": amount, "lines_amount": round(sum(ln["amount"] for ln in lines), 2),
         "matched_amount": round(sum(ln["amount"] for ln in matched), 2),
-        "unmatched_amount": round(sum(ln["amount"] for ln in lines if not ln["sessions"]), 2),
+        "unmatched_amount": round(sum(ln["amount"] for ln in lines if not ln["sessions"] and not ln["ignored"]), 2),
         "sessions_amount": round(sum(ln["sessions_amount"] for ln in matched), 2),
         "kwh_mismatches": sum(ln["kwh_mismatch"] for ln in lines),
         "price_mismatches": sum(ln["price_mismatch"] for ln in lines),
-        "time_offset_minutes": offset,
+        "time_offset_minutes": offset, "ignore_below": below,
     }  # fmt: skip
 
 
@@ -182,12 +203,19 @@ def _existing(db: Session, parsed: ParsedDocument) -> ReimbursementDocument | No
 
 def _detail(db: Session, user: Principal, doc: ReimbursementDocument) -> dict[str, Any]:
     pricing = Pricing(db)
-    lines = [_line_out(ln, ln.sessions, pricing, i) for i, ln in enumerate(doc.lines)]
+    below = ignore_below(db)
+    lines = [_line_out(ln, ln.sessions, pricing, i, below) for i, ln in enumerate(doc.lines)]
     unlisted: list[dict[str, Any]] = []
     if doc.lines:
         first, last = _span(doc.lines)
         unlisted = _unlisted(_eligible(db, user, doc.charger_id, first, last), set(), first, last, pricing)
-    return {"document": _document_out(doc, date.today()), "lines": lines, "unlisted_sessions": unlisted, "summary": _summary(lines, doc.amount), "currency": CONFIG.currency}
+    return {
+        "document": _document_out(doc, date.today(), below),
+        "lines": lines,
+        "unlisted_sessions": unlisted,
+        "summary": _summary(lines, doc.amount, below),
+        "currency": CONFIG.currency,
+    }
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
@@ -197,7 +225,8 @@ def _detail(db: Session, user: Principal, doc: ReimbursementDocument) -> dict[st
 def list_documents(user: Principal = Depends(manager), db: Session = Depends(get_db)) -> dict[str, Any]:
     """Every document, newest first, and the totals of the payments to receive."""
     today = date.today()
-    docs = [_document_out(d, today) for d in _documents(db, user)]
+    below = ignore_below(db)
+    docs = [_document_out(d, today, below) for d in _documents(db, user)]
 
     def total(rows: list[dict[str, Any]], key: str = "amount") -> dict[str, Any]:
         return {"documents": len(rows), "amount": round(sum(r[key] or 0 for r in rows), 2)}
@@ -210,8 +239,17 @@ def list_documents(user: Principal = Depends(manager), db: Session = Depends(get
             "overdue": total([d for d in waiting if d["overdue"]]),
             "received": total([d for d in docs if d["status"] == "paid"], "paid_amount"),
         },
+        "ignore_below": below,
         "currency": CONFIG.currency,
     }
+
+
+@router.put("/settings")
+def update_settings(body: SettingsIn, _: Principal = Depends(require("settings:manage")), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Amount under which a line of a document without a session is left aside (no warning); 0: none is."""
+    set_setting(db, IGNORE_BELOW, round(body.ignore_below, 2))
+    db.commit()
+    return {"ignore_below": ignore_below(db)}
 
 
 @router.post("/preview")
@@ -221,7 +259,8 @@ async def preview(file: UploadFile = File(...), charger_id: int | None = None, u
     parsed = await _read(file)
     matches, offset, charger, sessions = _analyse(db, user, parsed, charger_id)
     pricing = Pricing(db)
-    lines = [_line_out(ln, matches.get(i, []), pricing, i) for i, ln in enumerate(parsed.lines)]
+    below = ignore_below(db)
+    lines = [_line_out(ln, matches.get(i, []), pricing, i, below) for i, ln in enumerate(parsed.lines)]
     first, last = _span(parsed.lines)
     return {
         "document": {
@@ -239,7 +278,7 @@ async def preview(file: UploadFile = File(...), charger_id: int | None = None, u
         "already_imported": _existing(db, parsed) is not None,
         "lines": lines,
         "unlisted_sessions": _unlisted(sessions, {s.id for group in matches.values() for s in group}, first, last, pricing),
-        "summary": _summary(lines, parsed.amount, offset),
+        "summary": _summary(lines, parsed.amount, below, offset),
         "currency": CONFIG.currency,
     }
 
