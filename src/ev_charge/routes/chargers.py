@@ -91,7 +91,7 @@ def list_chargers(user: Principal = Depends(current_user), db: Session = Depends
 @router.get("/connectors")
 def connector_types(_: Principal = Depends(current_user)) -> list[dict[str, Any]]:
     """Charger APIs EV Charge can connect to, and the credentials each needs."""
-    return [{"id": k, "label": cls.label, "fields": [_field(f) for f in cls.fields]} for k, cls in CONNECTORS.items()]
+    return [{"id": k, "label": cls.label, "fields": [_field(f) for f in cls.fields], "history": getattr(cls, "has_history", True)} for k, cls in CONNECTORS.items()]
 
 
 def _field(f: tuple) -> dict[str, Any]:

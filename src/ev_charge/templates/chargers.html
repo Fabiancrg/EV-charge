@@ -19,10 +19,13 @@
     <div class="modal-box" style="max-width:560px">
         <h3><span id="cn-title">Connection</span><button class="icon-btn" data-close title="Close">✕</button></h3>
         <div class="form-error"></div>
-        <p class="muted small" style="margin-bottom:12px">EV Charge reads the charger's cloud account to follow the <b>live session</b> (a session is created when charging starts,
+        <p class="muted small" style="margin-bottom:12px">EV Charge reads the charger (its cloud account, or the charger itself on your network) to follow the <b>live session</b> (a session is created when charging starts,
             ⏳ <i>In progress</i> while plugged in, ✓ <i>Recorded</i> once unplugged) and to import its <b>charging history</b>.
             The credentials are stored encrypted and checked now. <b>Zaptec</b>: official API, with the Zaptec Portal account; its history lists the exact sessions.
             <b>Ohme</b>: no official API, the connection uses the same unofficial API as the Ohme app and Home Assistant; its history is hourly.
+            <b>Easee</b>: official cloud API, with the Easee app account; its history lists the exact sessions.
+            <b>go-e</b>: official API, either on your <i>local network</i> (allow “local HTTP API v2” in the go-e app; this server must be on the same network) or through the <i>go-e Cloud</i> (serial number and Cloud API token from the app); no history.
+            <b>NRGkick</b> (Gen2): its local JSON API only (enable it in the NRGkick app; same network); no history.
             <b>Home Assistant</b>: when the charger is on a smart plug, its power and energy sensors (long-lived access token from your HA profile); its history is hourly.</p>
         <form id="conn-form" autocomplete="off">
             <div class="form-grid">
@@ -43,7 +46,7 @@
     <div class="modal-box imp-box" style="max-width:900px">
         <h3><span id="hs-title">Charging history</span><button class="icon-btn" data-close title="Close">✕</button></h3>
         <div class="form-error"></div>
-        <p class="muted small" style="margin-bottom:12px">Zaptec lists its sessions (exact times); Ohme only gives an <b>hourly</b> history, from which sessions are rebuilt (consecutive hours with energy = one session, times rounded to the hour).
+        <p class="muted small" style="margin-bottom:12px">Zaptec and Easee list their sessions (exact times); Ohme only gives an <b>hourly</b> history, from which sessions are rebuilt (consecutive hours with energy = one session, times rounded to the hour).
             Each one is compared with the sessions already recorded: <b>new</b> ones can be added (✓ Recorded), <b>matching</b> ones (same day, close kWh) can be linked to this charger.</p>
         <div class="form-grid" style="align-items:end">
             <div class="field"><label>From</label><input type="date" id="hs-from"></div>
@@ -138,7 +141,7 @@
                 <td>${c.active ? '<span class="badge badge-ok">Active</span>' : '<span class="badge badge-warn">Inactive</span>'}</td>
                 <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" data-edit="${c.id}">✏ Edit</button>
                     <button class="btn btn-ghost btn-sm" data-conn="${c.id}" title="Connect to the charger's API">🔌</button>
-                    ${c.connector ? `<button class="btn btn-ghost btn-sm" data-hist="${c.id}" title="Import the charging history">📜</button>` : ''}</td>
+                    ${c.connector && (connectors.find(k => k.id === c.connector) || {}).history !== false ? `<button class="btn btn-ghost btn-sm" data-hist="${c.id}" title="Import the charging history">📜</button>` : ''}</td>
             </tr>`).join('')}</tbody></table>`;
     }
 
