@@ -30,6 +30,8 @@
     <div class="tiles" id="tiles"></div>
     <div class="filters" style="margin-bottom:12px">
         <div class="field"><label>Show</label><select id="show"><option value="">All documents</option><option value="to_receive">Payments to receive</option><option value="paid">Paid</option></select></div>
+        <div class="field"><label title="A line of a document that has no session isn't reported when its amount is below this value (0.01: only the lines of 0.00; 0: report them all)">Ignore lines without session below ({{ currency }})</label>
+            <input type="number" id="ignore-below" min="0" max="1000" step="0.01" inputmode="decimal" style="max-width:140px" {{ '' if 'settings:manage' in can else 'disabled' }}></div>
     </div>
     <div class="table-wrap" id="docs"><p class="muted">Loading…</p></div>
 </div>
@@ -63,7 +65,7 @@
 (() => {
     const BASE = '/api/reimbursement-documents';
     const $ = (id) => document.getElementById(id);
-    let docs = [], pending = null /* file being previewed */, current = null /* detail shown */, paying = null;
+    let docs = [], pending = null /* file being previewed */, current = null /* detail shown */, paying = null, createCar = null /* car chosen for the sessions created from lines */;
 
     const dateTime = (iso) => iso ? `${EV.date(iso.slice(0, 10))} ${iso.slice(11, 16)}` : '';
     const period = (p) => p ? new Date(p + '-01T00:00:00').toLocaleDateString(undefined, { year: 'numeric', month: 'long' }) : '';
@@ -103,7 +105,7 @@
             ${rows.map(d => `<tr data-doc="${d.id}" style="cursor:pointer">
                 <td><strong>${EV.esc(d.number)}</strong><br><span class="muted small">${EV.esc(d.issuer || '')}${d.charger_name ? ` · 🔌 ${EV.esc(d.charger_name)}` : ''}</span></td>
                 <td>${EV.date(d.document_date)}</td><td class="hide-sm">${EV.esc(period(d.period))}</td><td>${d.due_date ? EV.date(d.due_date) : '<span class="muted">—</span>'}</td>
-                <td class="num" title="${EV.num(d.sessions)} session(s) on ${EV.num(d.matched)} of ${EV.num(d.lines)} lines">${EV.num(d.matched)} / ${EV.num(d.lines)}${d.matched < d.lines ? ' <span class="badge badge-warn" title="Lines of the document without a session">⚠</span>' : ''}</td>
+                <td class="num" title="${EV.num(d.sessions)} session(s) on ${EV.num(d.matched)} of ${EV.num(d.lines)} lines">${EV.num(d.matched)} / ${EV.num(d.matched + d.unmatched)}${d.unmatched ? ' <span class="badge badge-warn" title="Lines of the document without a session">⚠</span>' : ''}</td>
                 <td class="num hide-sm">${EV.num(d.kwh, 1)}</td><td class="num"><strong>${EV.money(d.amount)}</strong></td><td>${docStatus(d)}</td>
                 <td>${d.status === 'paid' ? '' : `<button class="btn btn-sm" data-pay="${d.id}">💰 Paid</button>`}</td></tr>`).join('')}</tbody></table>`;
     }
@@ -111,6 +113,7 @@
         try {
             const data = await EV.api('GET', BASE);
             docs = data.documents;
+            $('ignore-below').value = data.ignore_below;
             renderList(data.totals);
         } catch (err) { EV.toast(err.message, true); }
     }
@@ -119,14 +122,14 @@
     function linesTable(data, stored) {
         const free = data.unlisted_sessions;
         const sessionTxt = (s) => `${EV.date(s.charge_date)}${s.start_time ? ' ' + EV.time(s.start_time) : ''} · ${EV.num(s.kwh, 3)} kWh · ${EV.esc(s.car_name)}`;
-        const picker = (l) => stored && free.length && (!l.sessions.length || l.kwh_mismatch) ? `<select data-link="${l.id}"><option value="">${l.sessions.length ? '＋ Add a session of this line…' : '⚠ No session — link one…'}</option>
+        const picker = (l) => stored && free.length && (!l.sessions.length || l.kwh_mismatch) ? `<select data-link="${l.id}"><option value="">${l.sessions.length ? '＋ Add a session of this line…' : l.ignored ? 'Small amount, left aside — link a session anyway…' : '⚠ No session — link one…'}</option>
             ${free.map(f => `<option value="${f.id}">${sessionTxt(f)}</option>`).join('')}</select>` : '';
         return `<div class="table-wrap doc-lines"><table><thead><tr><th>Document line</th><th class="num">kWh</th><th class="num">Amount</th>
             <th>Your session(s)</th><th class="num">kWh</th><th class="num">Amount</th><th>Status</th></tr></thead><tbody>
             ${data.lines.map(l => {
                 const ss = l.sessions, many = ss.length > 1;
                 const cents = ss.length && Math.abs(l.amount_diff) >= 0.01;  // flagged when the price per kWh differs, or the energy
-                return `<tr class="${ss.length ? '' : 'unmatched'}">
+                return `<tr class="${ss.length || l.ignored ? '' : 'unmatched'}">
                     <td>${dateTime(l.started_at)}${l.ended_at ? ` → ${l.ended_at.slice(0, 10) === l.started_at.slice(0, 10) ? l.ended_at.slice(11, 16) : dateTime(l.ended_at)}` : ''}<br><span class="muted small">${EV.esc(l.external_id || '')}</span></td>
                     <td class="num">${EV.num(l.kwh, 3)}</td><td class="num">${EV.money(l.amount)}</td>
                     ${ss.length ? `<td>${many ? `<span class="badge badge-info" title="The company grouped these sessions in one line">⧉ ${ss.length} sessions</span>` : ''}
@@ -138,7 +141,7 @@
                             : l.kwh_mismatch ? `<br><span class="badge badge-warn" title="Your amount minus the document's: the energy differs">${diffTxt(l.amount_diff)}</span>`
                             : `<br><span class="muted small" title="Same price per kWh: the small difference in energy between the two meters">${diffTxt(l.amount_diff)}</span>`}</td>
                         <td>${[...new Set(ss.map(s => s.status))].map(st => EV.statusBadge(st)).join(' ')}${stored ? '' : ` → ${EV.statusBadge('invoiced')}`}</td>`
-                    : `<td colspan="4">${picker(l) || '<span class="badge badge-warn">⚠ No matching session</span>'}</td>`}
+                    : `<td colspan="4">${stored && data.document.charger_id ? `<button class="btn btn-ghost btn-sm" data-create="${l.id}" title="Add the session to your sessions, from the date, times and energy of this line, with the note “Created from invoice ${EV.esc(data.document.number)}”">＋ Create the session</button> ` : ''}${picker(l) || (l.ignored ? '<span class="muted small">Small amount: left aside, no session needed</span>' : '<span class="badge badge-warn">⚠ No matching session</span>')}</td>`}
                 </tr>`;
             }).join('')}</tbody></table></div>`;
     }
@@ -151,6 +154,7 @@
         if (!stored && !d.charger_id) notes.push('⚠ Choose the charger this document is about: its lines are matched with the sessions of that charger.');
         if (stored && !d.charger_id) notes.push('⚠ This document has no charger: choose it above.');
         if (t.grouped) notes.push(`ℹ ${t.grouped} line(s) cover several of your sessions (⧉): the company grouped them in one line.`);
+        if (t.ignored) notes.push(`ℹ ${t.ignored} line(s) below ${EV.money(t.ignore_below)} have no session (${EV.money(t.ignored_amount)} in total): too small to matter, they are left aside.`);
         if (t.kwh_mismatches) notes.push(`⚠ ${t.kwh_mismatches} line(s) don't have the energy of your session(s)${stored ? ': if the company grouped several sessions in one line, add the others with ＋' : ''}.`);
         if (t.price_mismatches) notes.push(`⚠ ${t.price_mismatches} line(s) aren't priced at your price per kWh: check the tariff of their period.`);
         if (Math.abs(gap) >= 0.05) notes.push(`⚠ The lines add up to ${EV.money(t.lines_amount)}, not to the total of the document.`);
@@ -159,13 +163,16 @@
         return `<dl class="doc-meta">
                 <dt>Document</dt><dd><strong>${EV.esc(d.number)}</strong> — ${EV.esc(d.issuer || '')}</dd>
                 <dt>Date</dt><dd>${EV.date(d.document_date)}${d.due_date ? ` · due ${EV.date(d.due_date)}` : ''}${d.period ? ` · ${EV.esc(period(d.period))}` : ''}</dd>
+                ${stored && d.charger_id && data.lines.some(l => !l.sessions.length) ? `<dt title="Car of the sessions created from a line with ＋ Create the session">Car of new sessions</dt>
+                    <dd><select id="doc-car" style="max-width:260px"><option value="">Choose a car…</option>${(EV.cars || []).filter(c => EV.canCar('sessions:create', c.id) && EV.canCar('reimbursement:manage', c.id))
+                        .map(c => `<option value="${c.id}" ${c.id === (createCar ?? data.default_car_id) ? 'selected' : ''}>${EV.esc(c.name)}</option>`).join('')}</select></dd><dt></dt><dd></dd>` : ''}
                 <dt>Charger *</dt><dd>${stored && d.charger_id ? `🔌 ${EV.esc(d.charger_name)}`
                     : `<select id="doc-charger" style="max-width:260px"><option value="">Choose a charger…</option>${(EV.chargers || []).map(c => `<option value="${c.id}" ${c.id === d.charger_id ? 'selected' : ''}>${EV.esc(c.name)}</option>`).join('')}</select>`}</dd>
                 ${stored ? `<dt>Payment</dt><dd>${docStatus(d).replace('<br>', ' ')}${d.status === 'paid' ? ` — ${EV.money(d.paid_amount)}` : ''}${d.notes ? `<br><span class="muted small">${EV.esc(d.notes)}</span>` : ''}</dd>` : '<dt></dt><dd></dd>'}
             </dl>
             <div class="tiles doc-tiles">
                 <div class="tile"><div class="label">🧾 Document</div><div class="value">${EV.money(d.amount)} <small>${EV.num(d.kwh, 1)} kWh</small></div></div>
-                <div class="tile"><div class="label">✓ Matched sessions</div><div class="value">${EV.num(t.sessions)} <small>on ${EV.num(t.matched)} of ${EV.num(t.lines)} lines · ${EV.money(t.matched_amount)}</small></div></div>
+                <div class="tile"><div class="label">✓ Matched sessions</div><div class="value">${EV.num(t.sessions)} <small>on ${EV.num(t.matched)} of ${EV.num(t.matched + t.unmatched)} lines · ${EV.money(t.matched_amount)}</small></div></div>
                 <div class="tile"><div class="label">Your amount for them</div><div class="value">${EV.money(t.sessions_amount)} <small>${Math.abs(t.sessions_amount - t.matched_amount) >= 0.01 ? diffTxt(t.sessions_amount - t.matched_amount) : 'same'}</small></div></div>
                 <div class="tile"><div class="label">⚠ Without session</div><div class="value">${EV.num(t.unmatched)} <small>${EV.money(t.unmatched_amount)}</small></div></div>
             </div>
@@ -186,6 +193,7 @@
             <button type="button" class="btn" id="doc-import" ${data.already_imported || !data.document.charger_id ? 'disabled' : ''}>⬆ Import${n ? ` and mark ${n} session(s) invoiced` : ''}</button>`;
     }
     function showDetail(data) {
+        if (current?.document.id !== data.document.id) createCar = null;  // another document: back to its default car
         current = data;
         const d = data.document;
         $('doc-title').textContent = `Document ${d.number}`;
@@ -227,6 +235,7 @@
         await previewFile(null);
     });
     $('doc-modal').addEventListener('change', async (e) => {
+        if (e.target.id === 'doc-car') { createCar = Number(e.target.value) || null; return; }
         $('doc-modal').querySelector('.form-error').style.display = 'none';
         try {
             if (e.target.id === 'doc-charger' && !current) await previewFile(e.target.value);
@@ -244,6 +253,17 @@
                 const data = await send('', pending, $('doc-charger')?.value);
                 EV.toast(`Document imported: ${data.summary.sessions} session(s) invoiced`);
                 showDetail(data);
+                load();
+            } else if (btn.dataset.create) {
+                const carId = Number($('doc-car')?.value);
+                if (!carId) throw new Error('Choose the car of new sessions first (top of the document).');
+                const line = current.lines.find(l => l.id === Number(btn.dataset.create));
+                const car = EV.cars.find(c => c.id === carId);
+                if (!confirm(`Create a session of ${EV.num(line.kwh, 3)} kWh on ${dateTime(line.started_at)} for ${car.name}?\n\nIts note will be “Created from invoice ${current.document.number}”.`)) return;
+                const keep = $('doc-body').querySelector('.doc-lines').scrollTop;
+                showDetail(await EV.api('POST', `${BASE}/${current.document.id}/lines/${line.id}/session`, { car_id: carId }));
+                $('doc-body').querySelector('.doc-lines').scrollTop = keep;
+                EV.toast('Session created');
                 load();
             } else if (btn.dataset.unlink) {
                 await setSessions(btn.dataset.unlink, lineSessions(btn.dataset.unlink).filter(id => id !== Number(btn.dataset.session)));
@@ -295,8 +315,15 @@
         if (row) openDetail(row.dataset.doc);
     });
     $('show').addEventListener('change', load);
+    $('ignore-below').addEventListener('change', async (e) => {
+        try {
+            await EV.api('PUT', `${BASE}/settings`, { ignore_below: Number(e.target.value) || 0 });
+            EV.toast('Setting saved');
+        } catch (err) { EV.toast(err.message, true); }
+        load();
+    });
 
-    EV.loadChargers().catch(() => { EV.chargers = []; }).then(load);
+    Promise.all([EV.loadChargers().catch(() => { EV.chargers = []; }), EV.loadCars().catch(() => { EV.cars = []; })]).then(load);
 })();
 </script>
 {% endblock %}
