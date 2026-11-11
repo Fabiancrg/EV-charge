@@ -4,7 +4,10 @@
 <div class="content">
     <div class="page-head">
         <h2>Chargers</h2>
-        <button class="btn" id="add-charger">＋ Add a charger</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost" id="toggle-inactive" style="display:none"></button>
+            <button class="btn" id="add-charger">＋ Add a charger</button>
+        </div>
     </div>
     <p class="muted small" style="margin-bottom:12px">Chargers whose sessions are reimbursed: home wall box, mobile charger… Picking one in a session makes it <b>to be reimbursed</b>
         and, when the charger uses the home tariff, prices it at the <a href="/tariffs">CREG tariff</a> of its date. The <b>reimbursing company</b> (e.g. 50five, Enco e-Mobility)
@@ -74,7 +77,7 @@
                 <div class="field span-2"><label>Default provider</label><input type="text" name="default_provider" maxlength="200" list="dl-providers-ch" placeholder="Your electricity supplier, e.g. Engie">
                     <datalist id="dl-providers-ch"></datalist><div class="hint">Who supplies the electricity: set on the sessions made with this charger</div></div>
                 <div class="field span-all"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
-                <div class="field span-all"><label class="check"><input type="checkbox" name="active" checked> Active (offered in the session form)</label></div>
+                <div class="field span-all"><label class="check"><input type="checkbox" name="active" checked> Active (untick when the charger is no longer used: it leaves the session form, the dashboard and this list, and is no longer read; its history stays)</label></div>
             </div>
             <div class="modal-actions">
                 <button type="button" class="btn btn-danger left" id="chf-delete">🗑 Delete</button>
@@ -90,6 +93,7 @@
 (() => {
     const form = document.getElementById('charger-form');
     let chargers = [], editing = null, connectors = [], cars = [];
+    const inactive = { show: false };
 
     function open(c) {
         editing = c;
@@ -100,7 +104,7 @@
         EV.api('GET', '/api/sessions/suggestions').then(sg => {
             document.getElementById('dl-providers-ch').innerHTML = sg.providers.map(v => `<option value="${EV.esc(v)}">`).join('');
         }).catch(() => {});
-        form.default_car_id.innerHTML = '<option value="">— none —</option>' + cars.map(x => `<option value="${x.id}">${EV.esc(x.name)}</option>`).join('');
+        form.default_car_id.innerHTML = '<option value="">— none —</option>' + EV.activeOptions(cars, undefined, { only: c ? [c.default_car_id] : [] });
         if (c) EV.fillForm(form, c); else { form.active.checked = true; form.uses_home_tariff.checked = true; }
         EV.openModal('charger-modal');
     }
@@ -119,9 +123,10 @@
     function render() {
         const box = document.getElementById('chargers-table');
         if (!chargers.length) { box.innerHTML = '<div class="empty-state"><h3>No charger yet</h3><p>Add your wall box or mobile charger with ＋ Add a charger.</p></div>'; return; }
+        const shown = EV.inactiveToggle(document.getElementById('toggle-inactive'), chargers, inactive);
         box.innerHTML = `<table><thead><tr><th>Name</th><th>Brand / model</th><th class="hide-sm">Serial number</th><th>Reimbursed by</th><th>Pricing</th>
             <th class="num">Sessions</th><th class="num hide-sm">kWh</th><th>Connection</th><th>Status</th><th></th></tr></thead><tbody>
-            ${chargers.map(c => `<tr>
+            ${shown.map(c => `<tr>
                 <td><strong>🔌 ${EV.esc(c.name)}</strong>${c.notes ? `<br><span class="muted small">${EV.esc(c.notes)}</span>` : ''}</td>
                 <td>${EV.esc([c.brand, c.model].filter(Boolean).join(' '))}</td>
                 <td class="hide-sm">${EV.esc(c.serial_number || '')}</td>
@@ -136,6 +141,8 @@
                     ${c.connector ? `<button class="btn btn-ghost btn-sm" data-hist="${c.id}" title="Import the charging history">📜</button>` : ''}</td>
             </tr>`).join('')}</tbody></table>`;
     }
+
+    document.getElementById('toggle-inactive').addEventListener('click', () => { inactive.show = !inactive.show; render(); });
 
     async function load() {
         try {

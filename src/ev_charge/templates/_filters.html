@@ -61,7 +61,10 @@
     const $ = (id) => document.getElementById(id);
     EV.readFilters = () => {
         const p = new URLSearchParams();
-        if ($('f-car').value) p.append('car_id', $('f-car').value);
+        // One car, or a group: "@active" (the current cars) / "@inactive" (the former and future ones) send their cars
+        const car = $('f-car').value;
+        if (car.startsWith('@')) (EV.cars || []).filter(c => c.active === (car === '@active')).forEach(c => p.append('car_id', c.id));
+        else if (car) p.append('car_id', car);
         if ($('f-from').value) p.set('date_from', $('f-from').value);
         if ($('f-to').value) p.set('date_to', $('f-to').value);
         if ($('f-reimb')?.value) p.set('to_reimburse', $('f-reimb').value);
@@ -77,9 +80,13 @@
     // Filters live in the URL so a filtered view can be bookmarked / reloaded
     EV.initFilters = async (onChange, defaultPreset = 'all') => {
         const cars = EV.cars || await EV.loadCars();
-        $('f-car').innerHTML = '<option value="">All cars</option>' + cars.map(c => `<option value="${c.id}">${EV.esc(c.name)}</option>`).join('');
+        const mixed = cars.some(c => c.active) && cars.some(c => !c.active);
+        $('f-car').innerHTML = `<option value="">All cars${mixed ? ' (active and inactive)' : ''}</option>`
+            + (mixed ? '<option value="@active">Active cars</option><option value="@inactive">Inactive cars</option>' : '') + EV.activeOptions(cars);
         const u = new URLSearchParams(location.search);
-        $('f-car').value = u.get('car_id') || '';
+        const wanted = u.getAll('car_id').sort().join(',');
+        const group = (on) => cars.filter(c => c.active === on).map(c => String(c.id)).sort().join(',');
+        $('f-car').value = !wanted.includes(',') ? wanted : wanted === group(true) ? '@active' : wanted === group(false) ? '@inactive' : '';
         if (u.has('date_from') || u.has('date_to')) {
             $('f-from').value = u.get('date_from') || ''; $('f-to').value = u.get('date_to') || '';
             const match = [...$('f-preset').options].find(o => { const r = presetRange(o.value); return r && r[0] === $('f-from').value && r[1] === $('f-to').value; });
@@ -96,7 +103,7 @@
         if ($('f-charger') || $('f-company')) {
             const chargers = EV.chargers || await EV.loadChargers();
             if ($('f-charger')) {
-                $('f-charger').innerHTML = '<option value="">All chargers</option><option value="0">No charger</option>' + chargers.map(c => `<option value="${c.id}">🔌 ${EV.esc(c.name)}</option>`).join('');
+                $('f-charger').innerHTML = '<option value="">All chargers</option><option value="0">No charger</option>' + EV.activeOptions(chargers, c => `🔌 ${EV.esc(c.name)}`);
                 $('f-charger').value = u.get('charger_id') || '';
             }
             if ($('f-company')) {
