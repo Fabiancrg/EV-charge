@@ -189,6 +189,7 @@ A charger can be connected to its cloud account, or read directly on your networ
 **Live session.** While *Follow the charger* is ticked, EV Charge reads it every `charger_poll_seconds` (60 by default):
 - **Charging starts:** as soon as the car is plugged in and energy is delivered, a session is created for the default car with status ⏳ **In progress**. It starts when charging started and is priced at the CREG tariff. Its kWh and end time follow the charger.
 - **Car unplugged:** the session becomes ✓ **Recorded**. If the energy counter restarts without unplugging, the session is closed and a new one starts.
+- **Final figures:** chargers report a session's energy in steps, so the last reading before unplugging can be a few minutes old. With **Zaptec** and **Easee**, whose API lists the sessions, the closed session then takes the energy and the end time the charger recorded for it (looked up a few times over the next half hour, as the charger's cloud may list it a little later). A session edited by hand meanwhile is left alone. Other chargers keep the last reading.
 - **Edits:** the session can be edited at any time to add the odometer or notes.
 - **Dashboard:** a **Chargers** section shows each connected charger's state (charging, plugged in, finished…), power, energy of the current session, car battery % and last update. It refreshes every 30 s, and ⟳ reads the charger at once.
 - **Drivers:** they see the chargers whose default car is theirs.

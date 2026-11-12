@@ -49,6 +49,7 @@ def _local(stamp: Any) -> datetime | None:
 
 class EaseeConnector:
     label = "Easee (official cloud API)"
+    lists_sessions = True  # its history is the list of sessions: a live session takes its final figures from it
     fields = (
         ("username", "Easee account (e-mail or phone number with country code)", False, True),
         ("password", "Easee account password", True, True),
