@@ -6,6 +6,9 @@ Each poll gives a reading (status, power, energy delivered in the current sessio
   default car with status "in progress"; its kWh and end time follow the readings
 - unplugging the car (or the energy counter restarting: a new session) closes it: status "recorded"
   (the charger has recorded it with the reimbursing company)
+- the last reading before unplugging is up to a few minutes old (chargers report the session's energy in
+  steps), so once closed, the session takes its final energy and end time from the charger's own list of
+  sessions, when its API has one (Zaptec, Easee)
 
 Sessions created here carry external_ref "live:<charger id>:<start>", so they are recognised later.
 """
@@ -17,7 +20,7 @@ import hashlib
 import json
 import logging
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -50,8 +53,54 @@ def open_session(db: Session, c: Charger) -> ChargeSession | None:
     )
 
 
-def _close(s: ChargeSession) -> None:
+FINALIZE_AT = (1, 3, 6, 12, 30)  # polls after the session closed at which the charger's own record is looked up
+FINALIZE_BEFORE = timedelta(hours=2)  # the charger's session may have started a little before ours
+
+
+def _close(c: Charger, state: dict[str, Any], s: ChargeSession) -> None:
     s.reimbursement_status = "recorded"
+    state["finalize"] = {"id": s.id, "kwh": s.kwh, "polls": 0}  # see finalize_closed()
+    c.live_state = json.dumps(state)
+
+
+def _span(s: ChargeSession) -> tuple[datetime, datetime]:
+    start = datetime.combine(s.charge_date, s.start_time or datetime.min.time())
+    end = datetime.combine(s.charge_date, s.end_time) if s.end_time else start
+    return start, end + timedelta(days=1) if end < start else end
+
+
+async def finalize_closed(db: Session, c: Charger, conn: Connector) -> bool:
+    """Give the session that was just closed the energy and end time the charger recorded for it.
+
+    Tried a few times after closing (the charger's API may list the session a little later), then given up.
+    Nothing changes if the session was edited or removed meanwhile. Returns True when the session was corrected."""
+    state = live_state(c)
+    todo = state.get("finalize")
+    if not isinstance(todo, dict):
+        return False
+    todo["polls"] = int(todo.get("polls") or 0) + 1
+    s = db.get(ChargeSession, todo.get("id"))
+    done = s is None or abs(s.kwh - float(todo.get("kwh") or 0)) > 0.0005 or not getattr(conn, "lists_sessions", False)
+    corrected = False
+    if not done and todo["polls"] in FINALIZE_AT:
+        start, end = _span(s)
+        try:
+            recorded = [h for h in await conn.history(start - FINALIZE_BEFORE, datetime.now()) if h.is_session]
+        except ConnectorError as exc:
+            logger.info("Charger %s: cannot read the final figures of its last session yet (%s)", c.name, exc)
+            recorded = []
+        # The charger's session that covers ours (it can't have less energy than we saw)
+        covering = [h for h in recorded if h.start <= end and h.end >= start and h.energy_wh / 1000 >= s.kwh - RESET_TOLERANCE_KWH]
+        if covering:
+            best = max(covering, key=lambda h: min(h.end, end) - max(h.start, start))
+            s.kwh = round(best.energy_wh / 1000, 3)
+            s.end_time = best.end.time().replace(second=0, microsecond=0)
+            done = corrected = True
+            logger.info("Charger %s: last session corrected to %.3f kWh, ended %s", c.name, s.kwh, s.end_time.strftime("%H:%M"))
+    if done or todo["polls"] >= FINALIZE_AT[-1]:
+        state.pop("finalize", None)
+    c.live_state = json.dumps(state)
+    return corrected
 
 
 def apply_reading(db: Session, c: Charger, r: LiveReading, now: datetime) -> str:
@@ -65,6 +114,8 @@ def apply_reading(db: Session, c: Charger, r: LiveReading, now: datetime) -> str
         state["charging_since"] = previous.get("charging_since") if previous.get("status") in PLUGGED and previous.get("charging_since") else now.isoformat(timespec="seconds")
     elif r.status in PLUGGED:
         state["charging_since"] = previous.get("charging_since")
+    if previous.get("finalize"):
+        state["finalize"] = previous["finalize"]
     c.live_state = json.dumps(state)
     c.last_poll_at = datetime.now(UTC)
     c.last_poll_error = None
@@ -76,12 +127,12 @@ def apply_reading(db: Session, c: Charger, r: LiveReading, now: datetime) -> str
     action = "idle"
     if current is not None:
         if r.status in CLOSING:
-            _close(current)
+            _close(c, state, current)
             return "closed"
         if kwh <= 0:  # no energy figure in this reading (Ohme sends 0 while it recalculates): keep the session as it is
             return "updated"
         if kwh < current.kwh - RESET_TOLERANCE_KWH:  # the counter restarted: a new session (unplug/replug not seen)
-            _close(current)
+            _close(c, state, current)
             current = None
             action = "closed"
         else:
@@ -166,6 +217,9 @@ async def poll_charger(db: Session, c: Charger) -> str:
             await forget_connector(c.id)  # log in again next time
             return "error"
         action = apply_reading(db, c, reading, datetime.now())
+        db.commit()
+        if await finalize_closed(db, c, connector_for(c)):
+            action = "corrected" if action in ("idle", "updated") else action
         db.commit()
         if action not in ("idle", "updated", "offline"):
             logger.info("Charger %s: %s (%.3f kWh, %s)", c.name, action, reading.energy_wh / 1000, reading.status)

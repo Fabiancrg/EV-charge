@@ -51,6 +51,7 @@ def _local(stamp: str | None) -> datetime | None:
 
 class ZaptecConnector:
     label = "Zaptec (official API)"
+    lists_sessions = True  # its history is the list of sessions: a live session takes its final figures from it
     fields = (
         ("email", "Zaptec account e-mail", False, True),
         ("password", "Zaptec account password", True, True),

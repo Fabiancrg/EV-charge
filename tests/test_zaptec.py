@@ -188,3 +188,61 @@ def test_zaptec_end_to_end(client, car, zaptec):
     assert client.post(f"/api/chargers/{c['id']}/history/apply", json=body).json() == {"created": 2, "linked": 0}
     imported = [x for x in client.get("/api/sessions").json() if x["kwh"] == 24.512][0]
     assert imported["reimbursement_status"] == "recorded" and "rounded" not in imported["notes"]
+
+
+def test_closed_live_session_takes_the_final_figures_of_the_charger(client, car, zaptec):
+    """The last reading before unplugging is a few minutes old: once closed, the session gets the energy and the end
+    the charger recorded (here 1.716 kWh seen live, 1.936 kWh in the end)."""
+    from datetime import UTC, timedelta
+
+    from ev_charge.database import SessionLocal
+    from ev_charge.models import Charger
+
+    c = client.post("/api/chargers", json={"name": "Zaptec Go", "default_car_id": car["id"]}).json()
+    client.put(f"/api/chargers/{c['id']}/connection", json={"connector": "zaptec", "credentials": {"email": "me@example.com", "password": "pw"}})
+    zaptec.state = {710: "3", 513: "4400", 553: "1.716"}
+    zaptec.sessions = []
+    client.post(f"/api/chargers/{c['id']}/poll")
+    seen = client.get("/api/sessions").json()[0]
+    assert (seen["kwh"], seen["reimbursement_status"]) == (1.716, "in_progress")
+
+    def pending():
+        with SessionLocal() as db:
+            return live.live_state(db.get(Charger, c["id"])).get("finalize")
+
+    # Unplugged; the charger doesn't list the session yet: closed as it was seen, to be looked up again
+    zaptec.state = {710: "1", 513: "0", 553: "1.936"}
+    client.post(f"/api/chargers/{c['id']}/poll")
+    closed = client.get("/api/sessions").json()[0]
+    assert (closed["kwh"], closed["reimbursement_status"], closed["end_time"]) == (1.716, "recorded", seen["end_time"])
+    assert pending() == {"id": seen["id"], "kwh": 1.716, "polls": 1} and len(zaptec.history_calls) == 2  # asked once (two pages)
+
+    # Now it does (with another, older session): looked up again at the third poll after closing, not at each one
+    now = datetime.now(UTC)
+    stamp = "%Y-%m-%dT%H:%M:%S"
+    ended = now + timedelta(minutes=3)
+    zaptec.sessions = [
+        {"Id": "old", "StartDateTime": (now - timedelta(hours=1, minutes=30)).strftime(stamp), "EndDateTime": (now - timedelta(hours=1)).strftime(stamp), "Energy": 8.0},
+        {"Id": "this", "StartDateTime": (now - timedelta(minutes=1)).strftime(stamp), "EndDateTime": ended.strftime(stamp), "Energy": 1.936},
+    ]
+    client.post(f"/api/chargers/{c['id']}/poll")
+    assert client.get("/api/sessions").json()[0]["kwh"] == 1.716 and len(zaptec.history_calls) == 2
+    client.post(f"/api/chargers/{c['id']}/poll")
+    final = client.get("/api/sessions").json()[0]
+    assert (final["kwh"], final["reimbursement_status"], final["start_time"]) == (1.936, "recorded", seen["start_time"])
+    assert final["end_time"] == ended.astimezone().strftime("%H:%M:00") and pending() is None
+    assert len(client.get("/api/sessions").json()) == 1
+
+    # A session edited by hand after closing is left alone
+    zaptec.state = {710: "3", 513: "4400", 553: "2.5"}
+    client.post(f"/api/chargers/{c['id']}/poll")
+    zaptec.state = {710: "1", 513: "0", 553: "0"}
+    zaptec.sessions = []
+    client.post(f"/api/chargers/{c['id']}/poll")
+    second = client.get("/api/sessions").json()[0]
+    body = {k: second[k] for k in ("car_id", "charge_date", "start_time", "end_time", "charger_id", "to_reimburse", "reimbursement_status")} | {"kwh": 3.0}
+    client.put(f"/api/sessions/{second['id']}", json=body)
+    zaptec.sessions = [{"Id": "x", "StartDateTime": (now - timedelta(minutes=5)).strftime(stamp), "EndDateTime": (now + timedelta(minutes=9)).strftime(stamp), "Energy": 2.9}]
+    for _ in range(3):
+        client.post(f"/api/chargers/{c['id']}/poll")
+    assert client.get(f"/api/sessions/{second['id']}").json()["kwh"] == 3.0 and pending() is None
