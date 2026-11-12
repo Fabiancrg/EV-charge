@@ -72,7 +72,7 @@ On first start, every page leads to **/setup**, where you create the first admin
 *Settings → Single sign-on* (`settings:manage`) connects EV Charge to an OpenID Connect provider: Authelia, Keycloak, Entra ID, Google… The sign-in page then shows **Sign in with Authelia**.
 
 1. **In Authelia:** add EV Charge as a client. The page shows the `identity_providers.oidc.clients` entry to paste into `configuration.yml`, with the redirect URI `https://<ev-charge>/auth/sso/callback`. Store the secret's digest (`authelia crypto hash generate pbkdf2`).
-2. **In EV Charge:** enter the issuer URL (e.g. `https://auth.example.com`), the client ID and the secret (stored encrypted), and click *Test the provider*. Set the *Redirect URI* when EV Charge is behind a reverse proxy with another public URL.
+2. **In EV Charge:** enter the issuer URL (e.g. `https://auth.example.com`), the client ID and the secret (stored encrypted), and click *Test the provider*. The *Redirect URI* is always the public address of EV Charge followed by `/auth/sso/callback` (any other path answers *Not Found* after the sign-in, and is refused when saving). Leave it empty when EV Charge is reached directly; behind a reverse proxy the page tells you when the server doesn't know its public address and offers to fill it in.
 3. **Accounts:**
    - A user is found by their SSO account. Otherwise they're linked to an existing user with the same username (`preferred_username`) or e-mail. Otherwise they're created, if *auto-create* is on, with the chosen default global role.
    - **Group → role** mappings, from the `groups` claim, set the global role at each sign-in; the first match wins. The role on each car is given on the Users page.

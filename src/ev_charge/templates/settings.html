@@ -38,7 +38,7 @@
 </div>
 <div class="content">
     <div class="page-head"><h2>Authelia configuration</h2></div>
-    <p class="muted small" style="margin-bottom:8px">Add EV Charge as an OpenID Connect client in Authelia's <code>configuration.yml</code> (generate the secret's digest with <code>authelia crypto hash generate pbkdf2</code>), then restart Authelia:</p>
+    <p class="muted small" style="margin-bottom:8px">Add EV Charge as an OpenID Connect client in Authelia's <code>configuration.yml</code> (generate the secret's digest with <code>authelia crypto hash generate pbkdf2</code>), then restart Authelia. The address under <code>redirect_uris</code> must be exactly the redirect URI above:</p>
     <pre id="authelia-yaml" style="background:var(--bg-surface-alt);padding:12px;border-radius:8px;overflow:auto;font-size:var(--font-sm)"></pre>
 </div>
 {% endblock %}
@@ -56,8 +56,26 @@
         div.querySelector('button').addEventListener('click', () => div.remove());
         document.getElementById('sso-groups').appendChild(div);
     }
+    /* The address the provider must send users back to. The browser knows the public address of this site;
+       the server only knows how it is reached (behind a reverse proxy: often http:// or an internal name). */
+    const publicCallback = `${location.origin}/auth/sso/callback`;
+    function callbackHint() {
+        const hint = document.getElementById('sso-callback-hint');
+        const value = form.redirect_uri.value.trim();
+        const use = ` <a href="#" id="sso-use-callback">Use ${EV.esc(publicCallback)}</a>`;
+        if (!value) {
+            hint.innerHTML = cfg.default_callback_url === publicCallback ? `Empty: <code>${EV.esc(publicCallback)}</code> is used (the address of this site followed by /auth/sso/callback).`
+                : `⚠ Empty: this server would use <code>${EV.esc(cfg.default_callback_url)}</code>, which isn't the address you reach it at (reverse proxy).${use}`;
+        } else if (!/^https?:\/\/[^/]+.*\/auth\/sso\/callback$/.test(value)) {
+            hint.innerHTML = `⚠ Must be the public address of EV Charge followed by <code>/auth/sso/callback</code>: any other path answers “Not Found” after the sign-in.${use}`;
+        } else {
+            hint.innerHTML = value === publicCallback ? 'The address of this site: the same must be in the provider’s <code>redirect_uris</code> (see below).'
+                : `Not the address you are using now (<code>${EV.esc(publicCallback)}</code>): fine if users reach EV Charge at the address entered.${use}`;
+        }
+    }
     function yaml() {
-        const redirect = form.redirect_uri.value || cfg.callback_url;
+        const redirect = form.redirect_uri.value.trim() || cfg.default_callback_url;
+        callbackHint();
         document.getElementById('authelia-yaml').textContent = `identity_providers:
   oidc:
     clients:
@@ -77,6 +95,8 @@
     }
     function body() {
         const b = EV.formData(form);
+        // An emptied text field is an empty value, not a missing one (e.g. the redirect URI: back to the default)
+        for (const k of ['name', 'issuer', 'client_id', 'scopes', 'redirect_uri', 'username_claim', 'groups_claim']) b[k] = (b[k] ?? '').trim();
         b.default_role_id = b.default_role_id ? Number(b.default_role_id) : null;
         b.group_roles = [...document.querySelectorAll('#sso-groups > div')].map(d => ({ group: d.querySelector('[data-group]').value.trim(), role_id: Number(d.querySelector('[data-group-role]').value) }))
             .filter(g => g.group && g.role_id);
@@ -91,12 +111,17 @@
             document.getElementById('sso-groups').innerHTML = '';
             (cfg.group_roles || []).forEach(groupRow);
             document.getElementById('sso-secret-hint').textContent = cfg.has_secret ? 'Stored (encrypted): leave empty to keep it' : 'Not set yet';
-            document.getElementById('sso-callback-hint').textContent = `Empty: ${cfg.callback_url} — set it when EV Charge is behind a reverse proxy with another public URL`;
             document.getElementById('sso-override').textContent = cfg.allow_local_login_override ? ' (allow_local_login is currently on in config.json)' : '';
             yaml();
         } catch (err) { EV.toast(err.message, true); }
     }
     form.addEventListener('input', yaml);
+    document.getElementById('sso-callback-hint').addEventListener('click', (e) => {
+        if (e.target.id !== 'sso-use-callback') return;
+        e.preventDefault();
+        form.redirect_uri.value = publicCallback;
+        yaml();
+    });
     document.getElementById('sso-add-group').addEventListener('click', () => groupRow());
     document.getElementById('sso-test').addEventListener('click', async () => {
         const out = document.getElementById('sso-test-out');
