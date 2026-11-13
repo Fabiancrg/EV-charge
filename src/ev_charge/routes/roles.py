@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from .. import audit
 from ..auth import Principal, current_user, require
 from ..database import get_db
+from ..i18n import msg
 from ..models import ApiToken, CarGrant, Role, User
 from ..permissions import CAR_PERMISSIONS, GLOBAL_PERMISSIONS, valid_permission
 from ..schemas import RoleIn, RoleOut
@@ -41,13 +42,13 @@ def list_roles(_: Principal = Depends(current_user), db: Session = Depends(get_d
 
 def _apply(db: Session, r: Role, body: RoleIn) -> None:
     if not body.name:
-        raise HTTPException(422, "A name is required")
+        raise HTTPException(422, msg("A name is required"))
     clash = db.scalar(select(Role).where(func.lower(Role.name) == body.name.lower(), Role.id != (r.id or -1)))
     if clash:
-        raise HTTPException(409, f"A role named '{body.name}' already exists")
+        raise HTTPException(409, msg("A role named '{name}' already exists", name=body.name))
     bad = [p for p in body.permissions if not valid_permission(p)]
     if bad:
-        raise HTTPException(422, f"Unknown permission(s): {', '.join(bad)}")
+        raise HTTPException(422, msg("Unknown permission(s): {bad}", bad=", ".join(bad)))
     r.name = body.name
     r.description = body.description
     r.permissions = json.dumps(sorted(set(body.permissions)))
@@ -69,7 +70,7 @@ def create_role(body: RoleIn, request: Request, _: Principal = Depends(require("
 def update_role(role_id: int, body: RoleIn, request: Request, _: Principal = Depends(require("roles:manage")), db: Session = Depends(get_db)) -> RoleOut:
     r = db.get(Role, role_id)
     if r is None:
-        raise HTTPException(404, "Role not found")
+        raise HTTPException(404, msg("Role not found"))
     before = {"name": r.name, "permissions": sorted(r.permission_set), "all_cars": r.all_cars}
     _apply(db, r, body)
     check_admins_left(db)
@@ -82,13 +83,22 @@ def update_role(role_id: int, body: RoleIn, request: Request, _: Principal = Dep
 def delete_role(role_id: int, request: Request, _: Principal = Depends(require("roles:manage")), db: Session = Depends(get_db)) -> Response:
     r = db.get(Role, role_id)
     if r is None:
-        raise HTTPException(404, "Role not found")
+        raise HTTPException(404, msg("Role not found"))
     if r.builtin:
-        raise HTTPException(409, "Built-in roles can't be deleted (their permissions can be changed)")
+        raise HTTPException(409, msg("Built-in roles can't be deleted (their permissions can be changed)"))
     out = role_out(db, r)
     tokens = db.scalar(select(func.count()).select_from(ApiToken).where(ApiToken.role_id == r.id, ApiToken.revoked.is_(False))) or 0
     if out.users or out.car_grants or tokens:
-        raise HTTPException(409, f"'{r.name}' is used by {out.users} user(s), {out.car_grants} car access(es) and {tokens} API token(s): change them first")
+        raise HTTPException(
+            409,
+            msg(
+                "'{name}' is used by {users} user(s), {car_grants} car access(es) and {tokens} API token(s): change them first",
+                name=r.name,
+                users=out.users,
+                car_grants=out.car_grants,
+                tokens=tokens,
+            ),
+        )
     db.delete(r)
     audit.record(db, request, "role.deleted", target=f"role:{role_id}", details={"name": r.name})
     db.commit()

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import Principal, check_car_access, check_group_manager, current_user, target_group
 from ..database import get_db
+from ..i18n import msg
 from ..models import Car, Charger, ChargeSession
 from ..schemas import CarIn, CarOut
 from ..services import car_out
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/api/cars", tags=["cars"])
 def _get(db: Session, car_id: int) -> Car:
     car = db.get(Car, car_id)
     if car is None:
-        raise HTTPException(404, "Car not found")
+        raise HTTPException(404, msg("Car not found"))
     return car
 
 
@@ -27,7 +28,7 @@ def _save(db: Session, car: Car) -> None:
     same_group = Car.group_id == car.group_id if car.group_id is not None else Car.group_id.is_(None)
     if db.scalar(select(Car.id).where(same_group, func.lower(Car.name) == car.name.lower(), Car.id != (car.id or -1))):
         db.rollback()
-        raise HTTPException(409, f"A car named '{car.name}' already exists")
+        raise HTTPException(409, msg("A car named '{name}' already exists", name=car.name))
     db.commit()
 
 
@@ -65,7 +66,7 @@ def update_car(car_id: int, body: CarIn, user: Principal = Depends(current_user)
     check_car_access(user, car_id, "car:edit")
     if body.group_id is not None and body.group_id != car.group_id:  # moving a car to another group: administrators
         if not user.has("cars:manage"):
-            raise HTTPException(403, "Only an administrator can move a car to another group")
+            raise HTTPException(403, msg("Only an administrator can move a car to another group"))
         car.group_id = target_group(db, user, body.group_id, "cars:manage")
     for key, value in body.model_dump(exclude={"group_id"}).items():
         setattr(car, key, value)
@@ -78,11 +79,11 @@ def update_car(car_id: int, body: CarIn, user: Principal = Depends(current_user)
 def delete_car(car_id: int, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> Response:
     car = _get(db, car_id)
     if not user.can("car:view", car_id):
-        raise HTTPException(404, "Car not found")
+        raise HTTPException(404, msg("Car not found"))
     check_group_manager(user, car.group_id, "cars:manage")
     count = db.scalar(select(func.count()).select_from(ChargeSession).where(ChargeSession.car_id == car_id)) or 0
     if count:
-        raise HTTPException(409, f"'{car.name}' has {count} charging session(s): delete them first, or mark the car inactive")
+        raise HTTPException(409, msg("'{name}' has {count} charging session(s): delete them first, or mark the car inactive", name=car.name, count=count))
     for charger in db.scalars(select(Charger).where(Charger.default_car_id == car_id)):
         charger.default_car_id = None
     db.delete(car)

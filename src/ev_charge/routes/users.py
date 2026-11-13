@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from .. import audit
 from ..auth import Principal, check_password_strength, current_user, end_all_sessions, hash_password
 from ..database import get_db
+from ..i18n import msg
 from ..models import Car, CarGrant, Group, Role, User
 from ..permissions import GLOBAL_PERMISSIONS, expand, matches
 from ..schemas import CarGrantIO, UserIn, UserOut
@@ -32,7 +33,7 @@ def user_out(u: User) -> UserOut:
 def manager(me: Principal = Depends(current_user)) -> Principal:
     """Who may manage users: administrators, and group managers (their own group)."""
     if not (me.has("users:manage") or me.is_group_manager):
-        raise HTTPException(403, "Permission needed: users:manage, or be a manager of your group")
+        raise HTTPException(403, msg("Permission needed: users:manage, or be a manager of your group"))
     return me
 
 
@@ -45,9 +46,9 @@ def _managed(db: Session, user_id: int, me: Principal) -> User:
     """The user, for who may manage them."""
     u = db.get(User, user_id)
     if u is None or (not me.has("users:manage") and u.group_id != me.group_id):
-        raise HTTPException(404, "User not found")
+        raise HTTPException(404, msg("User not found"))
     if not me.has("users:manage") and privileged(u.role):
-        raise HTTPException(403, "This account is managed by an administrator")
+        raise HTTPException(403, msg("This account is managed by an administrator"))
     return u
 
 
@@ -58,7 +59,9 @@ def check_group_size(db: Session, u: User) -> None:
     group = db.get(Group, u.group_id)
     others = db.scalar(select(func.count()).select_from(User).where(User.group_id == u.group_id, User.active.is_(True), User.id != (u.id or -1))) or 0
     if group is not None and others >= group.max_members:
-        raise HTTPException(409, f"The group '{group.name}' is limited to {group.max_members} member(s): ask an administrator to raise the limit")
+        raise HTTPException(
+            409, msg("The group '{name}' is limited to {max_members} member(s): ask an administrator to raise the limit", name=group.name, max_members=group.max_members)
+        )
 
 
 def user_admins_left(db: Session) -> int:
@@ -71,25 +74,25 @@ def check_admins_left(db: Session) -> None:
     db.flush()  # the session doesn't autoflush: make the change visible to the count below
     if user_admins_left(db) == 0:
         db.rollback()
-        raise HTTPException(409, "Keep at least one active user whose role can manage users")
+        raise HTTPException(409, msg("Keep at least one active user whose role can manage users"))
 
 
 def _apply(db: Session, u: User, body: UserIn, me: Principal) -> dict:
     admin = me.has("users:manage")
     clash = db.scalar(select(User).where(User.username == body.username, User.id != (u.id or -1)))
     if clash:
-        raise HTTPException(409, f"The username '{body.username}' is taken")
+        raise HTTPException(409, msg("The username '{username}' is taken", username=body.username))
     role = db.get(Role, body.role_id) if body.role_id is not None else None
     if body.role_id is not None and role is None:
-        raise HTTPException(422, "Unknown role")
+        raise HTTPException(422, msg("Unknown role"))
     if not admin and privileged(role) and body.role_id != u.role_id:
-        raise HTTPException(403, f"Only an administrator can give the role '{role.name}'")  # type: ignore[union-attr]
+        raise HTTPException(403, msg("Only an administrator can give the role '{name}'", name=role.name))  # type: ignore[union-attr]
     # The group: administrators choose (a new user joins theirs by default); a group manager's members stay in the group
     was_member = u.id is not None and u.group_id is not None and u.active
     if admin:
         group_id = body.group_id if body.group_id is not None else (me.group_id if u.id is None else u.group_id)
         if group_id is not None and db.get(Group, group_id) is None:
-            raise HTTPException(422, "Unknown group")
+            raise HTTPException(422, msg("Unknown group"))
         group_manager = body.group_manager and group_id is not None
     else:
         group_id, group_manager = me.group_id, bool(u.group_manager) if u.id is not None else False
@@ -97,7 +100,7 @@ def _apply(db: Session, u: User, body: UserIn, me: Principal) -> dict:
     for g in body.grants:
         car = db.get(Car, g.car_id)
         if car is None or db.get(Role, g.role_id) is None or (not admin and car.group_id != me.group_id):
-            raise HTTPException(422, "Unknown car or role")
+            raise HTTPException(422, msg("Unknown car or role"))
         wanted[g.car_id] = g.role_id
     if not admin:  # the cars of other groups a member may have (given by an administrator) are kept
         wanted |= {g.car_id: g.role_id for g in u.grants if g.role_id is not None and g.car.group_id != me.group_id}
@@ -172,7 +175,7 @@ def sign_out_everywhere(user_id: int, request: Request, me: Principal = Depends(
 def delete_user(user_id: int, request: Request, me: Principal = Depends(manager), db: Session = Depends(get_db)) -> Response:
     u = _managed(db, user_id, me)
     if u.id == me.id:
-        raise HTTPException(409, "You can't delete your own account")
+        raise HTTPException(409, msg("You can't delete your own account"))
     username = u.username
     db.delete(u)  # their sessions stay; "entered by" becomes empty
     check_admins_left(db)

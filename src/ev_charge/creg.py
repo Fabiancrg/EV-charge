@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from html.parser import HTMLParser
 
+from .i18n import msg
+
 DEFAULT_URL = "https://www.creg.be/fr/consommateurs/prix-et-tarifs/tarif-de-remboursement-pour-la-recharge-a-domicile-des-voitures-de-0"
 REGIONS = {"wallonia": "Wallonia", "brussels": "Brussels", "flanders": "Flanders"}
 _REGION_WORDS = {
@@ -128,7 +130,7 @@ def parse_creg(html: str) -> list[QuarterRate]:
             if rates and key not in found:
                 found[key] = QuarterRate(year=key[0], quarter=key[1], rates=rates)
     if not found:
-        raise CregError("No quarterly tariff table found on the CREG page: its layout may have changed. Enter the tariff by hand.")
+        raise CregError(msg("No quarterly tariff table found on the CREG page: its layout may have changed. Enter the tariff by hand."))
     return sorted(found.values(), key=lambda q: (q.year, q.quarter), reverse=True)
 
 
@@ -141,7 +143,7 @@ def fetch_page(url: str = DEFAULT_URL, timeout: float = 20) -> str:
             charset = response.headers.get_content_charset() or "utf-8"
     except OSError as exc:
         reason = getattr(exc, "reason", None) or exc
-        raise CregError(f"Cannot reach the CREG website ({reason}). Check this server's internet access, or upload the page saved from your browser.") from exc
+        raise CregError(msg("Cannot reach the CREG website ({reason}). Check this server's internet access, or upload the page saved from your browser.", reason=reason)) from exc
     if len(raw) > MAX_PAGE_BYTES:
-        raise CregError("The CREG page is unexpectedly large")
+        raise CregError(msg("The CREG page is unexpectedly large"))
     return raw.decode(charset, errors="replace")

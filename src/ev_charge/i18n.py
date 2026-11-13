@@ -73,6 +73,35 @@ def language_of(request: Request, user: Any = None) -> str:
     return valid(getattr(user, "language", None)) or valid(request.cookies.get(COOKIE)) or from_browser(request.headers.get("accept-language")) or DEFAULT
 
 
+class Message(str):
+    """A text of the server (an error message…) that is translated when it is sent: English as a plain string, with what is needed to translate it."""
+
+    key: str
+    values: dict[str, Any]
+
+    def __new__(cls, text: str, **values: Any) -> Message:
+        self = super().__new__(cls, translate(None, text, **values))
+        self.key, self.values = text, values
+        return self
+
+    def __str__(self) -> str:  # str(exception) keeps the message translatable
+        return self
+
+
+msg = Message
+
+
+def localize(language: str | None, value: Any) -> Any:
+    """The messages of a value (a message, or the lists and dicts of a response that hold some) in a language."""
+    if isinstance(value, Message):
+        return translate(language, value.key, **{k: localize(language, v) for k, v in value.values.items()})
+    if isinstance(value, list):
+        return [localize(language, v) for v in value]
+    if isinstance(value, dict):
+        return {k: localize(language, v) for k, v in value.items()}
+    return value
+
+
 def catalogue_script(language: str) -> str:
     """The catalogue for the pages' scripts (EV.t): loaded before them, cached by the browser."""
     return f"window.EV=Object.assign(window.EV||{{}},{{lang:{json.dumps(language)},T:{json.dumps(CATALOGUES.get(language, {}), ensure_ascii=False)}}});"

@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 from .. import audit, i18n, mail
 from ..auth import Principal, _recent, check_password_strength, client_ip, hash_password, principal_for, require, start_session
 from ..database import get_db
+from ..i18n import msg
 from ..i18n import translate as tr
 from ..models import Car, CarGrant, Group, Invitation, Role, SignupRequest, User
 from ..pricing import get_setting, set_setting
@@ -87,7 +88,7 @@ async def _send(db: Session, to: str, language: str | None, subject: str, lines:
     try:
         await mail.send_mail(db, [to], subject, text, f'<div style="font-family:sans-serif;font-size:14px">{html}<p style="color:#666">— EV Charge</p></div>')
     except mail.MailError as exc:
-        raise HTTPException(502, tr(language, "The e-mail couldn't be sent ({error})", error=exc)) from None
+        raise HTTPException(502, tr(language, "The e-mail couldn't be sent ({error})", error=i18n.localize(language, str(exc)))) from None
 
 
 def _hello(language: str | None, name: str | None) -> str:
@@ -112,7 +113,14 @@ def _check_room(db: Session, group: Group, extra: int = 1) -> None:
     members = db.scalar(select(func.count()).select_from(User).where(User.group_id == group.id, User.active.is_(True))) or 0
     invited = sum(1 for i in _pending_invitations(db, group.id) if i.user_id is None)
     if members + invited + extra > group.max_members:
-        raise HTTPException(409, f"The group '{group.name}' is limited to {group.max_members} member(s), invitations included: ask an administrator to raise the limit")
+        raise HTTPException(
+            409,
+            msg(
+                "The group '{name}' is limited to {max_members} member(s), invitations included: ask an administrator to raise the limit",
+                name=group.name,
+                max_members=group.max_members,
+            ),
+        )
 
 
 # ── Sign-up requests: public part ────────────────────────────────────────────
@@ -227,7 +235,7 @@ def get_signup_settings(_: Principal = Depends(require("users:manage")), db: Ses
 @router.put("/api/signup/settings")
 def put_signup_settings(body: SignupSettings, request: Request, _: Principal = Depends(require("users:manage")), db: Session = Depends(get_db)) -> dict[str, Any]:
     if body.enabled and not mail.mail_enabled(db):
-        raise HTTPException(422, "Sign-up requests need e-mail: set and enable the SMTP server first (Settings → E-mail)")
+        raise HTTPException(422, msg("Sign-up requests need e-mail: set and enable the SMTP server first (Settings → E-mail)"))
     set_setting(db, "signup", body.model_dump())
     audit.record(db, request, "signup.settings", details=body.model_dump())
     db.commit()
@@ -250,9 +258,9 @@ def list_requests(_: Principal = Depends(require("users:manage")), db: Session =
 def _reviewable(db: Session, request_id: int) -> SignupRequest:
     r = db.get(SignupRequest, request_id)
     if r is None:
-        raise HTTPException(404, "Request not found")
+        raise HTTPException(404, msg("Request not found"))
     if r.status != "pending":
-        raise HTTPException(409, "This request isn't waiting for a decision" if r.status != "unverified" else "This address isn't confirmed yet")
+        raise HTTPException(409, msg("This request isn't waiting for a decision") if r.status != "unverified" else msg("This address isn't confirmed yet"))
     return r
 
 
@@ -261,11 +269,11 @@ async def approve_request(request_id: int, body: Approval, request: Request, me:
     """Create the group and its manager, and send them the link to set their password."""
     r = _reviewable(db, request_id)
     if db.scalar(select(Group.id).where(func.lower(Group.name) == body.group_name.lower())):
-        raise HTTPException(409, f"A group named '{body.group_name}' already exists")
+        raise HTTPException(409, msg("A group named '{name}' already exists", name=body.group_name))
     if db.scalar(select(User.id).where(User.username == body.username)):
-        raise HTTPException(409, f"The username '{body.username}' is taken")
+        raise HTTPException(409, msg("The username '{username}' is taken", username=body.username))
     if db.scalar(select(User.id).where(func.lower(User.email) == r.email)):
-        raise HTTPException(409, f"A user with the address {r.email} already exists")
+        raise HTTPException(409, msg("A user with the address {email} already exists", email=r.email))
     group = Group(name=body.group_name, max_members=body.max_members, notes=f"Requested by {r.full_name} ({r.email})")
     db.add(group)
     db.flush()
@@ -308,7 +316,7 @@ async def reject_request(request_id: int, request: Request, me: Principal = Depe
 def delete_request(request_id: int, _: Principal = Depends(require("users:manage")), db: Session = Depends(get_db)) -> Response:
     r = db.get(SignupRequest, request_id)
     if r is None:
-        raise HTTPException(404, "Request not found")
+        raise HTTPException(404, msg("Request not found"))
     db.delete(r)
     db.commit()
     return Response(status_code=204)
@@ -344,7 +352,7 @@ def _invitation_out(i: Invitation) -> dict[str, Any]:
 def _managed_invitation(db: Session, invitation_id: int, me: Principal) -> Invitation:
     i = db.get(Invitation, invitation_id)
     if i is None or i.accepted_at is not None or not (me.has("users:manage") or i.group_id == me.group_id):
-        raise HTTPException(404, "Invitation not found")
+        raise HTTPException(404, msg("Invitation not found"))
     return i
 
 
@@ -373,17 +381,17 @@ def list_invitations(me: Principal = Depends(manager), db: Session = Depends(get
 async def invite(body: InvitationIn, request: Request, me: Principal = Depends(manager), db: Session = Depends(get_db)) -> dict[str, Any]:
     """Invite someone to the group by e-mail, within its member limit."""
     if not mail.mail_enabled(db):
-        raise HTTPException(422, "Invitations need e-mail: an administrator must set the SMTP server first (Settings → E-mail)")
+        raise HTTPException(422, msg("Invitations need e-mail: an administrator must set the SMTP server first (Settings → E-mail)"))
     group_id = body.group_id if body.group_id is not None and me.has("users:manage") else me.group_id
     group = db.get(Group, group_id) if group_id is not None else None
     if group is None:
-        raise HTTPException(422, "Unknown group")
+        raise HTTPException(422, msg("Unknown group"))
     if db.scalar(select(User.id).where(func.lower(User.email) == body.email)):
-        raise HTTPException(409, f"A user with the address {body.email} already exists")
+        raise HTTPException(409, msg("A user with the address {email} already exists", email=body.email))
     for g in body.grants:
         car = db.get(Car, g.car_id)
         if car is None or car.group_id != group.id or db.get(Role, g.role_id) is None:
-            raise HTTPException(422, "Unknown car or role")
+            raise HTTPException(422, msg("Unknown car or role"))
     previous = next((i for i in _pending_invitations(db, group.id) if i.email == body.email and i.user_id is None), None)
     if previous is None:
         _check_room(db, group)

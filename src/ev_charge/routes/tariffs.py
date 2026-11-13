@@ -18,6 +18,7 @@ from .. import creg
 from ..auth import Principal, car_scope, current_user
 from ..config import CONFIG
 from ..database import get_db
+from ..i18n import msg
 from ..models import ChargeSession, Group, Tariff
 from ..pricing import Pricing, get_setting, set_setting
 from ..schemas import CregApply, CregRegion, TariffIn, TariffMode, TariffOut
@@ -37,7 +38,7 @@ def _group(db: Session, user: Principal, group_id: int | None) -> Group | None:
         group_id = user.group_id
     group = db.get(Group, group_id)
     if group is None or not (user.has("tariffs:manage") or user.group_id == group.id):
-        raise HTTPException(404, "Group not found")
+        raise HTTPException(404, msg("Group not found"))
     return group
 
 
@@ -50,9 +51,9 @@ def _editable_set(db: Session, user: Principal, group_id: int | None) -> int | N
     group = _group(db, user, group_id)
     tariff_set = group.id if group else None
     if not _may_edit(user, tariff_set):
-        raise HTTPException(403, "Only an administrator changes the default tariffs" if group is None else "Only a manager of the group changes its tariffs")
+        raise HTTPException(403, msg("Only an administrator changes the default tariffs") if group is None else msg("Only a manager of the group changes its tariffs"))
     if group is not None and not group.own_tariffs:
-        raise HTTPException(409, f"'{group.name}' uses the default tariffs: switch it to its own tariffs first")
+        raise HTTPException(409, msg("'{name}' uses the default tariffs: switch it to its own tariffs first", name=group.name))
     return tariff_set
 
 
@@ -74,8 +75,10 @@ def _overlap(db: Session, body: TariffIn, tariff_set: int | None, exclude_id: in
 def _check(db: Session, body: TariffIn, tariff_set: int | None, exclude_id: int | None = None) -> None:
     other = _overlap(db, body, tariff_set, exclude_id)
     if other:
-        until = other.valid_to.isoformat() if other.valid_to else "open-ended"
-        raise HTTPException(409, f"Overlaps the tariff {other.label or ''} ({other.valid_from.isoformat()} → {until}): adjust its dates first".replace("  ", " "))
+        until = other.valid_to.isoformat() if other.valid_to else msg("open-ended")
+        raise HTTPException(
+            409, msg("Overlaps the tariff {label} ({start} → {until}): adjust its dates first", label=other.label or "", start=other.valid_from.isoformat(), until=until)
+        )
 
 
 def _mode_out(db: Session, user: Principal, group: Group | None) -> dict[str, Any]:
@@ -103,9 +106,9 @@ def set_mode(body: TariffMode, group_id: int | None = None, user: Principal = De
     default ones; switching to its own with none yet can start from a copy of the default tariffs."""
     group = _group(db, user, group_id)
     if group is None:
-        raise HTTPException(422, "Choose a group: the default tariffs have no mode")
+        raise HTTPException(422, msg("Choose a group: the default tariffs have no mode"))
     if not user.manages_group(group.id, "tariffs:manage"):
-        raise HTTPException(403, "Only a manager of the group chooses its tariffs")
+        raise HTTPException(403, msg("Only a manager of the group chooses its tariffs"))
     if body.own_tariffs and not group.own_tariffs and body.copy_default and not _in_set(db, group.id):
         for t in _in_set(db, None):
             db.add(Tariff(group_id=group.id, valid_from=t.valid_from, valid_to=t.valid_to, price_per_kwh=t.price_per_kwh, label=t.label, notes=t.notes))
@@ -151,9 +154,9 @@ def _own(db: Session, user: Principal, tariff_id: int) -> Tariff:
     """A tariff the caller may change: a default one for administrators, one of their group for its managers."""
     t = db.get(Tariff, tariff_id)
     if t is None or (t.group_id is not None and not (user.has("tariffs:manage") or user.group_id == t.group_id)):
-        raise HTTPException(404, "Tariff not found")
+        raise HTTPException(404, msg("Tariff not found"))
     if not _may_edit(user, t.group_id):
-        raise HTTPException(403, "Only an administrator changes the default tariffs" if t.group_id is None else "Only a manager of the group changes its tariffs")
+        raise HTTPException(403, msg("Only an administrator changes the default tariffs") if t.group_id is None else msg("Only a manager of the group changes its tariffs"))
     return t
 
 
@@ -241,7 +244,7 @@ async def creg_preview_upload(
     tariff_set = _editable_set(db, user, group_id)
     raw = await file.read(creg.MAX_PAGE_BYTES + 1)
     if len(raw) > creg.MAX_PAGE_BYTES:
-        raise HTTPException(422, "The file is too large for the CREG page")
+        raise HTTPException(422, msg("The file is too large for the CREG page"))
     try:
         quarters = creg.parse_creg(raw.decode("utf-8", errors="replace"))
     except creg.CregError as e:
@@ -257,7 +260,7 @@ def creg_apply(body: CregApply, group_id: int | None = None, user: Principal = D
     note = f"Imported from the CREG ({body.source or CONFIG.creg_url}) on {datetime.now(UTC).date().isoformat()}"
     for item in sorted(body.items, key=lambda i: i.valid_from):
         if item.valid_to < item.valid_from:
-            raise HTTPException(422, f"{item.key}: the period ends before it starts")
+            raise HTTPException(422, msg("{key}: the period ends before it starts", key=item.key))
         exact = next((t for t in _in_set(db, tariff_set) if t.valid_from == item.valid_from and t.valid_to == item.valid_to), None)
         if exact is not None:
             exact.price_per_kwh = item.price_per_kwh

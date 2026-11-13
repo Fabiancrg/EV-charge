@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from .. import audit
 from ..auth import Principal, current_user, require
 from ..database import get_db
+from ..i18n import msg
 from ..models import Car, Charger, Group, User
 from ..schemas import GroupIn, GroupOut
 
@@ -31,15 +32,15 @@ def group_out(db: Session, g: Group) -> GroupOut:
 def _get(db: Session, group_id: int) -> Group:
     g = db.get(Group, group_id)
     if g is None:
-        raise HTTPException(404, "Group not found")
+        raise HTTPException(404, msg("Group not found"))
     return g
 
 
 def _apply(db: Session, g: Group, body: GroupIn) -> None:
     if not body.name:
-        raise HTTPException(422, "A name is required")
+        raise HTTPException(422, msg("A name is required"))
     if db.scalar(select(Group.id).where(func.lower(Group.name) == body.name.lower(), Group.id != (g.id or -1))):
-        raise HTTPException(409, f"A group named '{body.name}' already exists")
+        raise HTTPException(409, msg("A group named '{name}' already exists", name=body.name))
     g.name, g.max_members, g.notes = body.name, body.max_members, body.notes
 
 
@@ -80,7 +81,16 @@ def delete_group(group_id: int, request: Request, _: Principal = Depends(require
     out = group_out(db, g)
     members = db.scalar(select(func.count()).select_from(User).where(User.group_id == g.id)) or 0
     if members or out.cars or out.chargers:
-        raise HTTPException(409, f"'{g.name}' still has {members} user(s), {out.cars} car(s) and {out.chargers} charger(s): move or delete them first")
+        raise HTTPException(
+            409,
+            msg(
+                "'{name}' still has {members} user(s), {cars} car(s) and {chargers} charger(s): move or delete them first",
+                name=g.name,
+                members=members,
+                cars=out.cars,
+                chargers=out.chargers,
+            ),
+        )
     db.delete(g)
     audit.record(db, request, "group.deleted", target=f"group:{group_id}", details={"name": out.name})
     db.commit()

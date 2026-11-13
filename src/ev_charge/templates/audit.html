@@ -1,16 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Audit log · EV Charge{% endblock %}
+{% block title %}{{ t("Audit log") }} · EV Charge{% endblock %}
 {% block content %}
 <div class="content">
-    <div class="page-head"><h2>Audit log</h2><span class="muted small">Sign-ins, account and permission changes, and every change made through the app or the API</span></div>
+    <div class="page-head"><h2>{{ t("Audit log") }}</h2><span class="muted small">{{ t("Sign-ins, account and permission changes, and every change made through the app or the API") }}</span></div>
     <div class="filters">
-        <div class="field"><label>Action</label><select id="a-action"><option value="">All</option></select></div>
-        <div class="field"><label>User</label><input type="text" id="a-user" placeholder="username"></div>
-        <div class="field"><label>From</label><input type="date" id="a-from"></div>
-        <div class="field"><label>To</label><input type="date" id="a-to"></div>
-        <div class="field grow"><label>Search</label><input type="search" id="a-q" placeholder="target, details, IP…"></div>
+        <div class="field"><label>{{ t("Action") }}</label><select id="a-action"><option value="">{{ t("All") }}</option></select></div>
+        <div class="field"><label>{{ t("User") }}</label><input type="text" id="a-user" placeholder="{{ t("username") }}"></div>
+        <div class="field"><label>{{ t("From") }}</label><input type="date" id="a-from"></div>
+        <div class="field"><label>{{ t("To") }}</label><input type="date" id="a-to"></div>
+        <div class="field grow"><label>{{ t("Search") }}</label><input type="search" id="a-q" placeholder="{{ t("target, details, IP…") }}"></div>
     </div>
-    <div class="table-wrap" id="a-table"><p class="muted">Loading…</p></div>
+    <div class="table-wrap" id="a-table"><p class="muted">{{ t("Loading…") }}</p></div>
     <div class="pager" id="a-pager"></div>
 </div>
 {% endblock %}
@@ -33,14 +33,14 @@
         try { d = await EV.api('GET', `/api/audit?${p}`); } catch (err) { EV.toast(err.message, true); return; }
         const sel = $('a-action'), cur = sel.value;
         const groups = [...new Set(d.actions.map(a => a.split('.')[0] + '.'))];
-        sel.innerHTML = '<option value="">All</option>' + groups.map(g => `<option value="${g}">${g}*</option>`).join('') + d.actions.map(a => `<option value="${a}">${a}</option>`).join('');
+        sel.innerHTML = `<option value="">${EV.t('All')}</option>` + groups.map(g => `<option value="${g}">${g}*</option>`).join('') + d.actions.map(a => `<option value="${a}">${a}</option>`).join('');
         sel.value = cur;
-        $('a-table').innerHTML = d.items.length ? `<table><thead><tr><th>When</th><th>User</th><th>Action</th><th>Target</th><th>Details</th><th class="hide-sm">IP</th></tr></thead><tbody>
+        $('a-table').innerHTML = d.items.length ? `<table><thead><tr><th>${EV.t('When')}</th><th>${EV.t('User')}</th><th>${EV.t('Action')}</th><th>${EV.t('Target')}</th><th>${EV.t('Details')}</th><th class="hide-sm">IP</th></tr></thead><tbody>
             ${d.items.map(e => `<tr><td style="white-space:nowrap">${when(e.at)}</td><td>${EV.esc(e.username || '—')}</td>
                 <td><span class="badge ${badge(e.action)}">${EV.esc(e.action)}</span></td><td>${EV.esc(e.target || '')}</td>
                 <td class="small" style="max-width:420px;overflow-wrap:anywhere">${e.details ? EV.esc(JSON.stringify(e.details)).slice(0, 400) : ''}</td>
-                <td class="hide-sm">${EV.esc(e.ip || '')}</td></tr>`).join('')}</tbody></table>` : '<div class="empty-state"><h3>No event</h3></div>';
-        $('a-pager').innerHTML = `<span>${EV.num(Math.min(d.total, offset + 1))}–${EV.num(Math.min(d.total, offset + PAGE))} of ${EV.num(d.total)}</span>
+                <td class="hide-sm">${EV.esc(e.ip || '')}</td></tr>`).join('')}</tbody></table>` : `<div class="empty-state"><h3>${EV.t('No event')}</h3></div>`;
+        $('a-pager').innerHTML = `<span>${EV.t('{from}–{to} of {total}', { from: EV.num(Math.min(d.total, offset + 1)), to: EV.num(Math.min(d.total, offset + PAGE)), total: EV.num(d.total) })}</span>
             <button class="btn btn-ghost" data-p="-1" ${offset ? '' : 'disabled'}>‹</button><button class="btn btn-ghost" data-p="1" ${offset + PAGE < d.total ? '' : 'disabled'}>›</button>`;
     }
     $('a-pager').addEventListener('click', (e) => { const b = e.target.closest('[data-p]'); if (b) { offset = Math.max(0, offset + Number(b.dataset.p) * PAGE); load(); } });

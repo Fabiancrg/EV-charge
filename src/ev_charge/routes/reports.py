@@ -7,23 +7,25 @@ import io
 from datetime import date
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from ..auth import Principal, current_user, restrict_car_ids
 from ..config import CONFIG
 from ..database import get_db
+from ..i18n import language_of, localize, msg
+from ..i18n import translate as tr
 from ..reports import build_reimbursement, build_report
 from ..schemas import ReimbursementStatus
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 _COLUMNS = [
-    ("charge_date", "Date"), ("car_name", "Car"), ("license_plate", "Plate"), ("odometer", "Odometer (km)"), ("location", "Location"),
-    ("charger_name", "Charger"), ("reimbursement_company", "Reimbursed by"), ("start_time", "Start"), ("end_time", "End"),
-    ("kwh", "kWh"), ("price_per_kwh", "Price/kWh"), ("home", "Home tariff"), ("amount", "Amount"), ("status", "Status"), ("notes", "Notes"),
+    ("charge_date", msg("Date")), ("car_name", msg("Car")), ("license_plate", msg("Plate")), ("odometer", msg("Odometer (km)")), ("location", msg("Location")),
+    ("charger_name", msg("Charger")), ("reimbursement_company", msg("Reimbursed by")), ("start_time", msg("Start")), ("end_time", msg("End")),
+    ("kwh", "kWh"), ("price_per_kwh", msg("Price/kWh")), ("home", msg("Home tariff")), ("amount", msg("Amount")), ("status", msg("Status")), ("notes", msg("Notes")),
 ]  # fmt: skip
-_STATUS_LABELS = {"in_progress": "In progress", "not_recorded": "Not recorded", "recorded": "Recorded", "invoiced": "Invoiced", "paid": "Paid"}
+_STATUS_LABELS = {"in_progress": msg("In progress"), "not_recorded": msg("Not recorded"), "recorded": msg("Recorded"), "invoiced": msg("Invoiced"), "paid": msg("Paid")}
 
 
 @router.get("")
@@ -39,6 +41,7 @@ def report(
 
 @router.get("/reimbursement", response_model=None)
 def reimbursement(
+    request: Request,
     car_id: list[int] | None = Query(default=None),
     date_from: date | None = None,
     date_to: date | None = None,
@@ -53,22 +56,25 @@ def reimbursement(
     data["currency"] = CONFIG.currency
     if fmt == "json":
         return data
+    lang = language_of(request, user.user)
+    columns = [(k, localize(lang, label)) for k, label in _COLUMNS]
+    statuses = localize(lang, _STATUS_LABELS)
     period = f"{data['date_from'] or 'start'}_{data['date_to'] or date.today().isoformat()}"
 
     def cell(r: dict[str, Any], k: str) -> Any:
         if k == "home":
-            return "yes" if r[k] else ""
-        return _STATUS_LABELS.get(r[k], r[k]) if k == "status" else r[k]
+            return tr(lang, "yes") if r[k] else ""
+        return statuses.get(r[k], r[k]) if k == "status" else r[k]
 
-    values = [[cell(r, k) for k, _ in _COLUMNS] for r in data["rows"]]
-    keys = [k for k, _ in _COLUMNS]
+    values = [[cell(r, k) for k, _ in columns] for r in data["rows"]]
+    keys = [k for k, _ in columns]
     total: list[Any] = [""] * len(keys)
-    total[0], total[keys.index("kwh")], total[keys.index("amount")] = "Total", data["totals"]["kwh"], data["totals"]["amount"]
+    total[0], total[keys.index("kwh")], total[keys.index("amount")] = tr(lang, "Total"), data["totals"]["kwh"], data["totals"]["amount"]
     col = {k: i + 1 for i, k in enumerate(keys)}  # 1-based Excel columns
     if fmt == "csv":
         buf = io.StringIO()
         writer = csv.writer(buf, delimiter=";")
-        writer.writerow([label for _, label in _COLUMNS])
+        writer.writerow([label for _, label in columns])
         writer.writerows(values)
         writer.writerow(total)
         return Response("﻿" + buf.getvalue(), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="reimbursement-{period}.csv"'})
@@ -78,18 +84,18 @@ def reimbursement(
 
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Reimbursement"
-    ws.append(["Charging costs to reimburse"])
+    ws.title = tr(lang, "Reimbursement")
+    ws.append([tr(lang, "Charging costs to reimburse")])
     ws["A1"].font = Font(bold=True, size=14)
-    ws.append(["Period", f"{data['date_from'] or '…'} → {data['date_to'] or '…'}"])
-    ws.append(["Car(s)", ", ".join(f"{c['name']}{' (' + c['license_plate'] + ')' if c['license_plate'] else ''}" for c in data["cars"])])
+    ws.append([tr(lang, "Period"), f"{data['date_from'] or '…'} → {data['date_to'] or '…'}"])
+    ws.append([tr(lang, "Car(s)"), ", ".join(f"{c['name']}{' (' + c['license_plate'] + ')' if c['license_plate'] else ''}" for c in data["cars"])])
     if company is not None:
-        ws.append(["Reimbursed by", company or "(no charger)"])
+        ws.append([tr(lang, "Reimbursed by"), company or tr(lang, "(no charger)")])
     if status:
-        ws.append(["Status", ", ".join(_STATUS_LABELS[s] for s in status)])
-    ws.append(["Prepared by", data["prepared_by"], "on", date.today().isoformat()])
+        ws.append([tr(lang, "Status"), ", ".join(statuses[s] for s in status)])
+    ws.append([tr(lang, "Prepared by"), data["prepared_by"], tr(lang, "on"), date.today().isoformat()])
     ws.append([])
-    ws.append([label for _, label in _COLUMNS])
+    ws.append([label for _, label in columns])
     for cell in ws[ws.max_row]:
         cell.font = Font(bold=True)
     first = ws.max_row + 1

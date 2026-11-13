@@ -21,6 +21,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
+from .i18n import msg
 from .models import ChargeSession
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
@@ -87,9 +88,9 @@ def parse_eneco_csv(content: bytes) -> ParsedDocument:
         text = content.decode("cp1252", errors="replace")
     rows = list(csv.DictReader(io.StringIO(text), delimiter=";"))
     if not rows or any(c not in rows[0] for c in _ENECO_COLUMNS):
-        raise DocumentError("This CSV file isn't an Eneco eMobility reimbursement document (columns such as 'Invoice Number' and 'Session Start Date' are missing).")
+        raise DocumentError(msg("This CSV file isn't an Eneco eMobility reimbursement document (columns such as 'Invoice Number' and 'Session Start Date' are missing)."))
     if len({r["Invoice Number"] for r in rows}) > 1:
-        raise DocumentError("This CSV file holds several documents: import one document at a time.")
+        raise DocumentError(msg("This CSV file holds several documents: import one document at a time."))
     first = rows[0]
     lines = []
     for n, r in enumerate(rows, start=2):
@@ -101,7 +102,7 @@ def parse_eneco_csv(content: bytes) -> ParsedDocument:
             # A reimbursement is a credit: amounts are negative in the file
             lines.append(DocLine((r.get("Item ID") or "").strip() or None, start, end, _num(r["Volume"]), -_num(r["Item Amount Incl"]) + 0.0))
         except (ValueError, KeyError) as e:
-            raise DocumentError(f"Row {n} of the CSV file can't be read ({e}).") from None
+            raise DocumentError(msg("Row {n} of the CSV file can't be read ({error}).", n=n, error=e)) from None
     periods = {(r.get("Session Period") or "").strip() for r in rows}
     period = next(iter(periods)) if len(periods) == 1 else ""
     total = (first.get("Invoice Amount Incl") or "").strip()
@@ -158,7 +159,7 @@ def _pdf_text(content: bytes) -> str:
         reader = pypdf.PdfReader(io.BytesIO(content))
         return "\n".join(page.extract_text() or "" for page in reader.pages)
     except (PyPdfError, ValueError, OSError) as e:
-        raise DocumentError(f"This PDF file can't be read ({e}).") from None
+        raise DocumentError(msg("This PDF file can't be read ({error}).", error=e)) from None
 
 
 def parse_lms_text(text: str) -> ParsedDocument:
@@ -166,17 +167,17 @@ def parse_lms_text(text: str) -> ParsedDocument:
     (id, start and end as '01-oct. 17:34', energy, price per kWh, total)."""
     ids = list(_SESSION_ID.finditer(text))
     if not ids:
-        raise DocumentError("No charging session was found in this PDF: only reimbursement documents of Last Mile Solutions (50five…) are read.")
+        raise DocumentError(msg("No charging session was found in this PDF: only reimbursement documents of Last Mile Solutions (50five…) are read."))
     head = text[: ids[0].start()]
     number = re.search(r"\b\d{12,}\b", head)
     summary = _SUMMARY.search(head)
     if number is None or summary is None:
-        raise DocumentError("The document number or its total wasn't found in this PDF.")
+        raise DocumentError(msg("The document number or its total wasn't found in this PDF."))
     document_date = next((date(int(y), m, int(d)) for d, w, y in _DOC_DATE.findall(head) if (m := _month(w))), None)
     period = next(((int(y), m) for w, y in _DOC_PERIOD.findall(head) if (m := _month(w))), None)
     ref = period or ((document_date.year, document_date.month) if document_date else None)
     if ref is None:
-        raise DocumentError("The date of this document wasn't found: the year of its sessions is unknown.")
+        raise DocumentError(msg("The date of this document wasn't found: the year of its sessions is unknown."))
 
     def moment(day: str, word: str, hour: str, minute: str) -> datetime:
         month = _month(word)
@@ -197,9 +198,9 @@ def parse_lms_text(text: str) -> ParsedDocument:
             end = moment(*times[1]) if len(times) > 1 else None
             lines.append(DocLine(m.group(1), start, end, _num(kwh.group(1)), _num(amounts[-1])))
         except ValueError as e:
-            raise DocumentError(f"Session {m.group(1)} of the PDF can't be read ({e}).") from None
+            raise DocumentError(msg("Session {number} of the PDF can't be read ({error}).", number=m.group(1), error=e)) from None
     if not lines:
-        raise DocumentError("No charging session was found in this PDF.")
+        raise DocumentError(msg("No charging session was found in this PDF."))
     return ParsedDocument(
         source="lms",
         number=number.group(0),
@@ -215,14 +216,14 @@ def parse_lms_text(text: str) -> ParsedDocument:
 
 def parse_document(filename: str, content: bytes) -> ParsedDocument:
     if not content:
-        raise DocumentError("The file is empty.")
+        raise DocumentError(msg("The file is empty."))
     if len(content) > MAX_FILE_BYTES:
-        raise DocumentError("The file is too large (10 MB at most).")
+        raise DocumentError(msg("The file is too large (10 MB at most)."))
     if content.lstrip()[:5] == b"%PDF-":
         return parse_lms_text(_pdf_text(content))
     if filename.lower().endswith((".csv", ".txt")) or b";" in content[:2000]:
         return parse_eneco_csv(content)
-    raise DocumentError("Unknown file: send the CSV of Eneco eMobility or the PDF of Last Mile Solutions (50five).")
+    raise DocumentError(msg("Unknown file: send the CSV of Eneco eMobility or the PDF of Last Mile Solutions (50five)."))
 
 
 # ── Matching ─────────────────────────────────────────────────────────────────

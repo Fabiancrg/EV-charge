@@ -1,26 +1,25 @@
 {% extends "base.html" %}
-{% block title %}Sign-up requests · EV Charge{% endblock %}
+{% block title %}{{ t("Sign-up requests") }} · EV Charge{% endblock %}
 {% block content %}
 <div class="content">
-    <div class="page-head"><h2>Sign-up requests</h2></div>
-    <p class="muted small" style="margin-bottom:12px">When sign-up requests are open, the sign-in page offers <b>Request access</b>: someone gives their name, e-mail and the name of their group, and confirms their address with a link sent by e-mail.
-        You then <b>approve</b> the request here — their group is created with them as its manager, and they receive a link to choose their password — or <b>reject</b> it. Once in, a manager invites the other members of their group, within the size you allow.</p>
+    <div class="page-head"><h2>{{ t("Sign-up requests") }}</h2></div>
+    <p class="muted small" style="margin-bottom:12px">{{ t("When sign-up requests are open, the sign-in page offers <b>Request access</b>: someone gives their name, e-mail and the name of their group, and confirms their address with a link sent by e-mail. You then <b>approve</b> the request here — their group is created with them as its manager, and they receive a link to choose their password — or <b>reject</b> it. Once in, a manager invites the other members of their group, within the size you allow.") }}</p>
     <div id="settings" style="margin-bottom:16px"></div>
-    <div class="table-wrap" id="requests"><p class="muted">Loading…</p></div>
+    <div class="table-wrap" id="requests"><p class="muted">{{ t("Loading…") }}</p></div>
 </div>
 
 <div class="modal" id="approve-modal">
     <div class="modal-box" style="max-width:520px">
-        <h3><span>✓ Approve the request</span><button class="icon-btn" data-close title="Close">✕</button></h3>
+        <h3><span>✓ {{ t("Approve the request") }}</span><button class="icon-btn" data-close title="{{ t("Close") }}">✕</button></h3>
         <div class="form-error"></div>
         <form id="approve-form" autocomplete="off">
             <p class="muted small" style="margin-bottom:12px" id="ap-intro"></p>
             <div class="form-grid">
-                <div class="field span-2"><label>Group name *</label><input type="text" name="group_name" required minlength="2" maxlength="100"></div>
-                <div class="field"><label>Members allowed *</label><input type="number" name="max_members" required min="1" max="1000" step="1" inputmode="numeric"><div class="hint">The manager included</div></div>
-                <div class="field span-2"><label>Username of the manager *</label><input type="text" name="username" required minlength="2" maxlength="50" pattern="[A-Za-z0-9._@\-]+" autocapitalize="none"></div>
+                <div class="field span-2"><label>{{ t("Group name") }} *</label><input type="text" name="group_name" required minlength="2" maxlength="100"></div>
+                <div class="field"><label>{{ t("Members allowed") }} *</label><input type="number" name="max_members" required min="1" max="1000" step="1" inputmode="numeric"><div class="hint">{{ t("The manager included") }}</div></div>
+                <div class="field span-2"><label>{{ t("Username of the manager") }} *</label><input type="text" name="username" required minlength="2" maxlength="50" pattern="[A-Za-z0-9._@\-]+" autocapitalize="none"></div>
             </div>
-            <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn">✓ Create the group and send the link</button></div>
+            <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>{{ t("Cancel") }}</button><button type="submit" class="btn">✓ {{ t("Create the group and send the link") }}</button></div>
         </form>
     </div>
 </div>
@@ -31,31 +30,31 @@
     const $ = (id) => document.getElementById(id);
     let settings = null, requests = [], approving = null;
     const when = (iso) => iso ? new Date(iso).toLocaleString(EV.locale, { dateStyle: 'medium', timeStyle: 'short' }) : '';
-    const STATUS = { pending: ['To review', 'badge-warn', '📨'], unverified: ['Address not confirmed yet', 'badge', '⏳'], approved: ['Approved', 'badge-ok', '✓'], rejected: ['Rejected', 'badge-err', '✖'] };
+    const STATUS = { pending: [EV.t('To review'), 'badge-warn', '📨'], unverified: [EV.t('Address not confirmed yet'), 'badge', '⏳'], approved: [EV.t('Approved'), 'badge-ok', '✓'], rejected: [EV.t('Rejected'), 'badge-err', '✖'] };
 
     function renderSettings() {
         $('settings').innerHTML = `<div class="filters" style="align-items:end">
-            <div class="field"><label class="check"><input type="checkbox" id="su-enabled" ${settings.enabled ? 'checked' : ''}> Open sign-up requests</label></div>
-            <div class="field"><label>Members allowed in a new group</label><input type="number" id="su-max" min="1" max="1000" step="1" value="${settings.default_max_members}" style="max-width:120px"></div>
+            <div class="field"><label class="check"><input type="checkbox" id="su-enabled" ${settings.enabled ? 'checked' : ''}> ${EV.t('Open sign-up requests')}</label></div>
+            <div class="field"><label>${EV.t('Members allowed in a new group')}</label><input type="number" id="su-max" min="1" max="1000" step="1" value="${settings.default_max_members}" style="max-width:120px"></div>
         </div>
-        ${!settings.mail_enabled ? '<div class="note">⚠ Sign-up requests and invitations are sent by e-mail: set and enable the SMTP server first (<a href="/settings/email">Settings → E-mail</a>).</div>'
-            : settings.open ? `<div class="note">ℹ Open: the sign-in page shows <i>Request access</i> → <code>${EV.esc(location.origin)}/signup</code></div>` : ''}`;
+        ${!settings.mail_enabled ? `<div class="note">⚠ ${EV.t('Sign-up requests and invitations are sent by e-mail: set and enable the SMTP server first (<a href="/settings/email">Settings → E-mail</a>).')}</div>`
+            : settings.open ? `<div class="note">ℹ ${EV.t('Open: the sign-in page shows <i>Request access</i>')} → <code>${EV.esc(location.origin)}/signup</code></div>` : ''}`;
     }
     async function saveSettings() {
-        try { settings = await EV.api('PUT', '/api/signup/settings', { enabled: $('su-enabled').checked, default_max_members: Number($('su-max').value) || 5 }); EV.toast('Saved'); }
+        try { settings = await EV.api('PUT', '/api/signup/settings', { enabled: $('su-enabled').checked, default_max_members: Number($('su-max').value) || 5 }); EV.toast(EV.t('Saved')); }
         catch (err) { EV.toast(err.message, true); settings = await EV.api('GET', '/api/signup/settings'); }
         renderSettings();
     }
     function render() {
-        if (!requests.length) { $('requests').innerHTML = '<div class="empty-state"><h3>No request</h3><p>Requests appear here once their address is confirmed.</p></div>'; return; }
-        $('requests').innerHTML = `<table><thead><tr><th>Who</th><th>Group wished</th><th>Message</th><th>Received</th><th>Status</th><th></th></tr></thead><tbody>
+        if (!requests.length) { $('requests').innerHTML = `<div class="empty-state"><h3>${EV.t('No request')}</h3><p>${EV.t('Requests appear here once their address is confirmed.')}</p></div>`; return; }
+        $('requests').innerHTML = `<table><thead><tr><th>${EV.t('Who')}</th><th>${EV.t('Group wished')}</th><th>${EV.t('Message')}</th><th>${EV.t('Received')}</th><th>${EV.t('Status')}</th><th></th></tr></thead><tbody>
             ${requests.map(r => { const [label, cls, icon] = STATUS[r.status] || [r.status, 'badge', '']; return `<tr>
                 <td><strong>${EV.esc(r.full_name)}</strong><br><span class="muted small">${EV.esc(r.email)}</span></td>
                 <td>👥 ${EV.esc(r.group_name)}</td><td class="small" style="max-width:320px;white-space:pre-line">${EV.esc(r.message || '')}</td>
                 <td class="small">${when(r.verified_at || r.created_at)}</td>
                 <td><span class="badge ${cls}">${icon} ${label}</span>${r.decided_by ? `<br><span class="muted small">${EV.esc(r.decided_by)}, ${when(r.decided_at)}</span>` : ''}</td>
-                <td style="white-space:nowrap">${r.status === 'pending' ? `<button class="btn btn-sm" data-approve="${r.id}">✓ Approve</button> <button class="btn btn-ghost btn-sm" data-reject="${r.id}">✖ Reject</button>`
-                    : `<button class="icon-btn" data-delete="${r.id}" title="Remove from the list">🗑</button>`}</td></tr>`; }).join('')}</tbody></table>`;
+                <td style="white-space:nowrap">${r.status === 'pending' ? `<button class="btn btn-sm" data-approve="${r.id}">✓ ${EV.t('Approve')}</button> <button class="btn btn-ghost btn-sm" data-reject="${r.id}">✖ ${EV.t('Reject')}</button>`
+                    : `<button class="icon-btn" data-delete="${r.id}" title="${EV.esc(EV.t('Remove from the list'))}">🗑</button>`}</td></tr>`; }).join('')}</tbody></table>`;
     }
     async function load() {
         try { [settings, requests] = await Promise.all([EV.api('GET', '/api/signup/settings'), EV.api('GET', '/api/signup/requests')]); renderSettings(); render(); }
@@ -69,15 +68,15 @@
             if (b.dataset.approve) {
                 approving = requests.find(r => r.id === Number(b.dataset.approve));
                 const f = $('approve-form');
-                $('ap-intro').innerHTML = `<b>${EV.esc(approving.full_name)}</b> (${EV.esc(approving.email)}) becomes the manager of a new group, and receives a link to choose a password.`;
+                $('ap-intro').innerHTML = EV.t('<b>{name}</b> ({email}) becomes the manager of a new group, and receives a link to choose a password.', { name: EV.esc(approving.full_name), email: EV.esc(approving.email) });
                 EV.fillForm(f, { group_name: approving.group_name, max_members: settings.default_max_members,
                     username: approving.email.split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '') });
                 EV.openModal('approve-modal');
             } else if (b.dataset.reject) {
                 const r = requests.find(x => x.id === Number(b.dataset.reject));
-                if (!confirm(`Reject the request of ${r.full_name}? They are told by e-mail.`)) return;
+                if (!confirm(EV.t('Reject the request of {name}? They are told by e-mail.', { name: r.full_name }))) return;
                 await EV.api('POST', `/api/signup/requests/${r.id}/reject`, {});
-                EV.toast('Request rejected'); load();
+                EV.toast(EV.t('Request rejected')); load();
             } else if (b.dataset.delete) {
                 await EV.api('DELETE', `/api/signup/requests/${b.dataset.delete}`); load();
             }
@@ -87,7 +86,7 @@
         e.preventDefault();
         try {
             await EV.api('POST', `/api/signup/requests/${approving.id}/approve`, EV.formData(e.target));
-            EV.closeModal('approve-modal'); EV.toast(`Group created: the link was sent to ${approving.email}`); load();
+            EV.closeModal('approve-modal'); EV.toast(EV.t('Group created: the link was sent to {email}', { email: approving.email })); load();
         } catch (err) { EV.formError('approve-modal', err); }
     });
     load();
