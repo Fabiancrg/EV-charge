@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from .. import audit, sso
@@ -21,6 +21,9 @@ FLOW_COOKIE = "ev_sso"
 
 def _safe_next(url: str | None) -> str:
     return url if url and url.startswith("/") and not url.startswith("//") else "/"
+
+
+CALLBACK_PATH = "/auth/sso/callback"  # where the provider sends the user back: the only path EV Charge answers on
 
 
 def _redirect_uri(request: Request, db: Session) -> str:
@@ -45,7 +48,7 @@ async def sso_login(request: Request, next: str | None = None, db: Session = Dep
     return response
 
 
-@router.get("/auth/sso/callback", include_in_schema=False, name="sso_callback")
+@router.get(CALLBACK_PATH, include_in_schema=False, name="sso_callback")
 async def sso_callback(
     request: Request, code: str | None = None, state: str | None = None, error: str | None = None, error_description: str | None = None,
     db: Session = Depends(get_db),
@@ -86,6 +89,11 @@ class GroupRole(BaseModel):
 
 
 class SsoSettings(BaseModel):
+    @field_validator("name", "issuer", "client_id", "scopes", "redirect_uri", "username_claim", "groups_claim", mode="before")
+    @classmethod
+    def _empty(cls, v: Any) -> Any:
+        return "" if v is None else v  # a field emptied in the form
+
     enabled: bool = False
     name: str = Field(default="Authelia", max_length=50)
     issuer: str = Field(default="", max_length=300)
@@ -105,7 +113,13 @@ class SsoSettings(BaseModel):
 @router.get("/api/settings/sso")
 def get_sso(request: Request, _: Principal = Depends(require("settings:manage")), db: Session = Depends(get_db)) -> dict[str, Any]:
     cfg = sso.get_config(db)
-    return {**cfg, "has_secret": bool(sso.get_secret(db)), "callback_url": _redirect_uri(request, db), "allow_local_login_override": sso.CONFIG.allow_local_login}
+    return {
+        **cfg,
+        "has_secret": bool(sso.get_secret(db)),
+        "callback_url": _redirect_uri(request, db),  # the one in use
+        "default_callback_url": str(request.url_for("sso_callback")),  # used when redirect_uri is empty: this server as it sees itself
+        "allow_local_login_override": sso.CONFIG.allow_local_login,
+    }
 
 
 @router.put("/api/settings/sso")
@@ -118,6 +132,11 @@ def put_sso(body: SsoSettings, request: Request, me: Principal = Depends(require
     if body.enabled and not body.local_login and not me.user.oidc_subject and not sso.CONFIG.allow_local_login:
         raise HTTPException(409, "Sign in once with single sign-on before turning password sign-in off, so you can't lock yourself out")
     cfg = body.model_dump(exclude={"client_secret"})
+    cfg["redirect_uri"] = cfg["redirect_uri"].strip()
+    if cfg["redirect_uri"]:
+        parts = urlsplit(cfg["redirect_uri"])
+        if parts.scheme not in ("http", "https") or not parts.netloc or not parts.path.endswith(CALLBACK_PATH) or parts.query or parts.fragment:
+            raise HTTPException(422, f"The redirect URI must be the public address of EV Charge followed by {CALLBACK_PATH}, e.g. https://ev-charge.example.com{CALLBACK_PATH}")
     cfg["issuer"] = cfg["issuer"].strip().rstrip("/")
     cfg["group_roles"] = [g.model_dump() for g in body.group_roles]
     sso.save_config(db, cfg, (body.client_secret or "").strip() or None)

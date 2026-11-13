@@ -173,3 +173,17 @@ def test_sso_rejects_bad_states(client, provider):
     assert client.get("/api/audit?action=login.failed").json()["total"] == 3
     browser.close()
     stranger.close()
+
+
+def test_redirect_uri_must_be_the_callback_address(client):
+    """Any other path would send users to a page that doesn't exist after the sign-in ("Not Found")."""
+    cfg = client.get("/api/settings/sso").json()
+    assert cfg["default_callback_url"] == "http://testserver/auth/sso/callback" == cfg["callback_url"]
+    for bad in ("https://ev.example.com/oauth/callback", "https://ev.example.com", "ev.example.com/auth/sso/callback", "https://ev.example.com/auth/sso/callback?x=1"):
+        r = client.put("/api/settings/sso", json={"redirect_uri": bad})
+        assert r.status_code == 422 and "/auth/sso/callback" in r.json()["detail"], bad
+    cfg = client.put("/api/settings/sso", json={"redirect_uri": " https://ev.example.com/auth/sso/callback "}).json()
+    assert cfg["redirect_uri"] == cfg["callback_url"] == "https://ev.example.com/auth/sso/callback"
+    assert cfg["default_callback_url"] == "http://testserver/auth/sso/callback"  # what an empty field would use
+    assert client.put("/api/settings/sso", json={"redirect_uri": ""}).json()["callback_url"] == "http://testserver/auth/sso/callback"
+    assert client.put("/api/settings/sso", json={"redirect_uri": None, "issuer": None}).json()["redirect_uri"] == ""  # a field emptied in the form
