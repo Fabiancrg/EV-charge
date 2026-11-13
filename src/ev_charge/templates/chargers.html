@@ -9,7 +9,7 @@
             <button class="btn" id="add-charger">＋ Add a charger</button>
         </div>
     </div>
-    <p class="muted small" style="margin-bottom:12px">Chargers whose sessions are reimbursed: home wall box, mobile charger… Picking one in a session makes it <b>to be reimbursed</b>
+    <p class="muted small" style="margin-bottom:12px">The chargers of your group, whose sessions are reimbursed: home wall box, mobile charger… Picking one in a session makes it <b>to be reimbursed</b>
         and, when the charger uses the home tariff, prices it at the <a href="/tariffs">CREG tariff</a> of its date. The <b>reimbursing company</b> (e.g. 50five, Enco e-Mobility)
         is the one that pays the sessions back; the reimbursement statement can be filtered on it.</p>
     <div class="table-wrap" id="chargers-table"><p class="muted">Loading…</p></div>
@@ -69,6 +69,7 @@
         <form id="charger-form" autocomplete="off">
             <div class="form-grid">
                 <div class="field span-2"><label>Name *</label><input type="text" name="name" required maxlength="100" placeholder="e.g. Zaptec Go (garage), Ohme mobile" autofocus></div>
+                <div class="field span-2" data-group-field style="display:none"><label>Group</label><select name="group_id"></select><div class="hint">Whose charger it is: offered for the sessions of that group's cars</div></div>
                 <div class="field"><label>Brand</label><input type="text" name="brand" maxlength="100" placeholder="Zaptec, Ohme…"></div>
                 <div class="field"><label>Model</label><input type="text" name="model" maxlength="100"></div>
                 <div class="field"><label>Serial number</label><input type="text" name="serial_number" maxlength="100"><div class="hint">Also matched by the Excel import</div></div>
@@ -109,6 +110,16 @@
         }).catch(() => {});
         form.default_car_id.innerHTML = '<option value="">— none —</option>' + EV.activeOptions(cars, undefined, { only: c ? [c.default_car_id] : [] });
         if (c) EV.fillForm(form, c); else { form.active.checked = true; form.uses_home_tariff.checked = true; }
+        EV.groupField(form, 'chargers:manage', c?.group_id);
+        // The cars a charger can serve are those of its group
+        const fillCars = () => {
+            const group = Number(form.group_id.value) || null, keep = form.default_car_id.value;
+            form.default_car_id.innerHTML = '<option value="">— none —</option>' + EV.activeOptions(cars.filter(x => x.group_id === group), undefined, { only: c ? [c.default_car_id] : [] });
+            form.default_car_id.value = [...form.default_car_id.options].some(o => o.value === keep) ? keep : '';
+        };
+        form.group_id.onchange = fillCars;
+        fillCars();
+        if (c) form.default_car_id.value = c.default_car_id ?? '';
         EV.openModal('charger-modal');
     }
 
@@ -130,7 +141,7 @@
         box.innerHTML = `<table><thead><tr><th>Name</th><th>Brand / model</th><th class="hide-sm">Serial number</th><th>Reimbursed by</th><th>Pricing</th>
             <th class="num">Sessions</th><th class="num hide-sm">kWh</th><th>Connection</th><th>Status</th><th></th></tr></thead><tbody>
             ${shown.map(c => `<tr>
-                <td><strong>🔌 ${EV.esc(c.name)}</strong>${c.notes ? `<br><span class="muted small">${EV.esc(c.notes)}</span>` : ''}</td>
+                <td><strong>🔌 ${EV.esc(c.name)}</strong>${EV.groups.length > 1 && c.group_name ? `<br><span class="muted small">👥 ${EV.esc(c.group_name)}</span>` : ''}${c.notes ? `<br><span class="muted small">${EV.esc(c.notes)}</span>` : ''}</td>
                 <td>${EV.esc([c.brand, c.model].filter(Boolean).join(' '))}</td>
                 <td class="hide-sm">${EV.esc(c.serial_number || '')}</td>
                 <td>${EV.esc(c.reimbursement_company || '—')}${c.default_provider ? `<br><span class="muted small">Provider: ${EV.esc(c.default_provider)}</span>` : ''}</td>
@@ -139,9 +150,9 @@
                 <td class="num hide-sm">${EV.num(c.kwh, 1)}</td>
                 <td class="small">${connCell(c)}</td>
                 <td>${c.active ? '<span class="badge badge-ok">Active</span>' : '<span class="badge badge-warn">Inactive</span>'}</td>
-                <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" data-edit="${c.id}">✏ Edit</button>
-                    <button class="btn btn-ghost btn-sm" data-conn="${c.id}" title="Connect to the charger's API">🔌</button>
-                    ${c.connector && (connectors.find(k => k.id === c.connector) || {}).history !== false ? `<button class="btn btn-ghost btn-sm" data-hist="${c.id}" title="Import the charging history">📜</button>` : ''}</td>
+                <td style="white-space:nowrap">${!c.manageable ? '' : `<button class="btn btn-ghost btn-sm" data-edit="${c.id}">✏ Edit</button>
+                    <button class="btn btn-ghost btn-sm" data-conn="${c.id}" title="Connect to the charger's API">🔌</button>`}
+                    ${c.manageable && c.connector && (connectors.find(k => k.id === c.connector) || {}).history !== false ? `<button class="btn btn-ghost btn-sm" data-hist="${c.id}" title="Import the charging history">📜</button>` : ''}</td>
             </tr>`).join('')}</tbody></table>`;
     }
 
@@ -149,7 +160,7 @@
 
     async function load() {
         try {
-            [chargers, connectors, cars] = await Promise.all([EV.loadChargers(), EV.api('GET', '/api/chargers/connectors'), EV.loadCars()]);
+            [chargers, connectors, cars] = await Promise.all([EV.loadChargers(), EV.api('GET', '/api/chargers/connectors'), EV.loadCars(), EV.loadGroups()]);
             render();
         } catch (err) { EV.toast(err.message, true); }
     }
@@ -158,6 +169,7 @@
         e.preventDefault();
         try {
             const body = EV.formData(form);
+            body.group_id = form.group_id.disabled ? null : Number(form.group_id.value) || null;
             const saved = editing ? await EV.api('PUT', `/api/chargers/${editing.id}`, body) : await EV.api('POST', '/api/chargers', body);
             EV.toast(`${saved.name} saved`);
             EV.closeModal('charger-modal');

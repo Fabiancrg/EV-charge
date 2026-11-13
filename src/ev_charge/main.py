@@ -19,17 +19,18 @@ from . import __version__
 from .config import CONFIG
 from .database import SessionLocal, init_db
 from .routes import audit as audit_routes
-from .routes import auth, cars, chargers, documents, imports, mail, reports, roles, sessions, sso, tariffs, tokens, ui, users
+from .routes import auth, cars, chargers, documents, groups, imports, mail, reports, roles, sessions, sso, tariffs, tokens, ui, users
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     init_db()
     from .audit import purge
-    from .permissions import ensure_builtin_roles
+    from .permissions import ensure_builtin_roles, ensure_default_group
 
     with SessionLocal() as db:
         ensure_builtin_roles(db)
+        ensure_default_group(db)
         purge(db, CONFIG.audit_retention_days)
     poller = None
     if CONFIG.charger_polling:
@@ -57,7 +58,7 @@ class _StaticFiles(StaticFiles):
 
 
 app.mount("/static", _StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
-for module in (auth, sso, mail, tokens, users, roles, audit_routes, cars, chargers, sessions, tariffs, imports, reports, documents, ui):
+for module in (auth, sso, mail, tokens, users, groups, roles, audit_routes, cars, chargers, sessions, tariffs, imports, reports, documents, ui):
     app.include_router(module.router)
 
 

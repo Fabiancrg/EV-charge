@@ -56,6 +56,7 @@ def purge(db: Session, keep_days: int) -> int:
 _SKIP_PREFIXES = (
     "/api/auth",
     "/api/users",
+    "/api/groups",
     "/api/roles",
     "/api/settings",
     "/api/tokens",

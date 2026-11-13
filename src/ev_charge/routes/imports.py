@@ -43,11 +43,11 @@ def _check(req: ImportRequest, user: Principal) -> None:
 @router.post("/sessions/preview")
 def preview(req: ImportRequest, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     _check(req, user)
-    rows = parse_rows(db, req, car_scope(user, "sessions:import"))
+    rows = parse_rows(db, req, car_scope(user, "sessions:import"), user.group_id)
     return {"summary": summary(rows, req), "rows": [row_out(r) for r in rows]}
 
 
 @router.post("/sessions")
 def do_import(req: ImportRequest, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     _check(req, user)
-    return import_rows(db, req, car_scope(user, "sessions:import"), user.id)
+    return import_rows(db, req, car_scope(user, "sessions:import"), user.id, user.group_id)

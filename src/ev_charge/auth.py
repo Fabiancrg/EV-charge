@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from .config import CONFIG
 from .database import get_db
-from .models import ApiToken, AuthSession, User
+from .models import ApiToken, AuthSession, Car, Group, User
 from .permissions import ALL_PERMISSIONS, CAR_PERMISSIONS, GLOBAL_PERMISSIONS, Grants, expand
 
 COOKIE_NAME = "ev_session"
@@ -211,6 +211,11 @@ def compute_grants(user: User) -> Grants:
     for grant in user.grants:
         if grant.role is not None:
             g.per_car.setdefault(grant.car_id, set()).update(expand(grant.role.permission_set, CAR_PERMISSIONS))
+    g.group_id = user.group_id
+    if user.group_manager and user.group is not None:  # a group manager: everything on the cars of the group
+        g.group_manager = True
+        for car in user.group.cars:
+            g.per_car.setdefault(car.id, set()).update(CAR_PERMISSIONS)
     return g
 
 
@@ -247,6 +252,19 @@ class Principal:
     def cars_with(self, permission: str = "car:view") -> set[int] | None:
         return self.grants.cars_with(permission)
 
+    @property
+    def group_id(self) -> int | None:
+        return self.grants.group_id
+
+    def manages_group(self, group_id: int | None, permission: str = "groups:manage") -> bool:
+        """May manage what belongs to this group: with the global permission (any group, or no group at all),
+        or as a manager of that very group."""
+        return self.has(permission) or (group_id is not None and self.grants.group_manager and self.grants.group_id == group_id)
+
+    @property
+    def is_group_manager(self) -> bool:
+        return self.grants.group_manager and self.grants.group_id is not None
+
 
 def token_grants(token: ApiToken) -> Grants:
     """An API token's own access: its role (or permissions), on all cars or on its chosen cars."""
@@ -257,6 +275,7 @@ def token_grants(token: ApiToken) -> Grants:
         global_perms=expand(perms, GLOBAL_PERMISSIONS),
         all_cars=car_perms if cars is None else set(),
         per_car={} if cars is None else {c: set(car_perms) for c in cars},
+        group_id=token.user.group_id,  # what it adds goes to the group of who created it
     )
 
 
@@ -302,6 +321,39 @@ def browser_only(principal: Principal = Depends(current_user)) -> Principal:
     if principal.token is not None:
         raise HTTPException(403, "Not available with an API token")
     return principal
+
+
+def visible_groups(principal: Principal, db: Session) -> set[int] | None:
+    """Groups whose chargers the caller may see: their own, and those of the cars they may see; None: every group."""
+    cars = principal.cars_with("car:view")
+    if principal.has("groups:manage") or cars is None:
+        return None
+    ids = {principal.group_id} if principal.group_id is not None else set()
+    if cars:
+        ids |= {g for g in db.scalars(select(Car.group_id).where(Car.id.in_(cars))) if g is not None}
+    return ids
+
+
+def target_group(db: Session, principal: Principal, wanted: int | None, permission: str) -> int | None:
+    """The group a new car or charger goes to: administrators choose (default: their own group),
+    group managers add to their own group only."""
+    if principal.has(permission):
+        group_id = wanted if wanted is not None else principal.group_id
+        if group_id is not None and db.get(Group, group_id) is None:
+            raise HTTPException(422, "Unknown group")
+        return group_id
+    if principal.is_group_manager:
+        if wanted not in (None, principal.group_id):
+            raise HTTPException(403, "You can only add to your own group")
+        return principal.group_id
+    label = ALL_PERMISSIONS.get(permission, (permission,))[0].lower()
+    raise HTTPException(403, f"Not allowed ({label}): ask an administrator, or a manager of your group")
+
+
+def check_group_manager(principal: Principal, group_id: int | None, permission: str) -> None:
+    if not principal.manages_group(group_id, permission):
+        label = ALL_PERMISSIONS.get(permission, (permission,))[0].lower()
+        raise HTTPException(403, f"Not allowed ({label}): this isn't managed by you")
 
 
 def car_scope(principal: Principal, permission: str = "car:view") -> set[int] | None:

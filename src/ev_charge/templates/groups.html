@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Groups · EV Charge{% endblock %}
+{% block content %}
+<div class="content">
+    <div class="page-head">
+        <h2>Groups</h2>
+        <button class="btn" id="add-group">＋ Add a group</button>
+    </div>
+    <p class="muted small" style="margin-bottom:12px">A group is who shares cars and chargers: a household, a team. Each group sees and manages <b>its own</b> cars, chargers, sessions and members, and nothing of the others.
+        Its <b>managers</b> add its cars, chargers and members, up to the <b>number of members</b> you allow here. Name a manager on the <a href="/users">Users</a> page (tick <i>Group manager</i>).
+        Administrators see and manage every group.</p>
+    <div class="table-wrap" id="groups-table"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="modal" id="group-modal">
+    <div class="modal-box" style="max-width:520px">
+        <h3><span id="gf-title">Group</span><button class="icon-btn" data-close title="Close">✕</button></h3>
+        <div class="form-error"></div>
+        <form id="group-form" autocomplete="off">
+            <div class="form-grid">
+                <div class="field span-2"><label>Name *</label><input type="text" name="name" required maxlength="100" placeholder="e.g. Dupont family" autofocus></div>
+                <div class="field"><label>Members allowed *</label><input type="number" name="max_members" required min="1" max="1000" step="1" inputmode="numeric"><div class="hint">Active users in the group</div></div>
+                <div class="field span-all"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-danger left" id="gf-delete">🗑 Delete</button>
+                <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+                <button type="submit" class="btn">💾 Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+    const form = document.getElementById('group-form');
+    let groups = [], editing = null;
+
+    function open(g) {
+        editing = g;
+        form.reset();
+        document.getElementById('gf-title').textContent = g ? `Edit ${g.name}` : 'New group';
+        document.getElementById('gf-delete').style.display = g ? '' : 'none';
+        EV.fillForm(form, g || { max_members: 5 });
+        EV.openModal('group-modal');
+    }
+    function render() {
+        document.getElementById('groups-table').innerHTML = `<table><thead><tr><th>Group</th><th>Managers</th><th class="num">Members</th><th class="num">Cars</th><th class="num">Chargers</th><th></th></tr></thead><tbody>
+            ${groups.map(g => `<tr>
+                <td><strong>👥 ${EV.esc(g.name)}</strong>${g.id === EV.me.group_id ? ' <span class="muted small">(yours)</span>' : ''}${g.notes ? `<br><span class="muted small">${EV.esc(g.notes)}</span>` : ''}</td>
+                <td>${g.managers.map(EV.esc).join('<br>') || '<span class="badge badge-warn" title="Name one on the Users page">no manager</span>'}</td>
+                <td class="num">${EV.num(g.members)} / ${EV.num(g.max_members)}${g.members >= g.max_members ? ' <span class="badge badge-warn" title="No place left for a new member">full</span>' : ''}</td>
+                <td class="num">${EV.num(g.cars)}</td><td class="num">${EV.num(g.chargers)}</td>
+                <td><button class="btn btn-ghost btn-sm" data-edit="${g.id}">✏ Edit</button></td></tr>`).join('')}</tbody></table>`;
+    }
+    async function load() {
+        try { groups = await EV.loadGroups(); render(); } catch (err) { EV.toast(err.message, true); }
+    }
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+            const saved = editing ? await EV.api('PUT', `/api/groups/${editing.id}`, EV.formData(form)) : await EV.api('POST', '/api/groups', EV.formData(form));
+            EV.toast(`${saved.name} saved`);
+            EV.closeModal('group-modal');
+            load();
+        } catch (err) { EV.formError('group-modal', err); }
+    });
+    document.getElementById('gf-delete').addEventListener('click', async () => {
+        if (!editing || !confirm(`Delete the group ${editing.name}?`)) return;
+        try { await EV.api('DELETE', `/api/groups/${editing.id}`); EV.toast('Group deleted'); EV.closeModal('group-modal'); load(); }
+        catch (err) { EV.formError('group-modal', err); }
+    });
+    document.getElementById('add-group').addEventListener('click', () => open(null));
+    document.getElementById('groups-table').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-edit]');
+        if (b) open(groups.find(g => g.id === Number(b.dataset.edit)));
+    });
+    load();
+})();
+</script>
+{% endblock %}

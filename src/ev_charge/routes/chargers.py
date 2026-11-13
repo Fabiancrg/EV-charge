@@ -8,12 +8,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import history as hist
 from .. import live
-from ..auth import Principal, car_scope, current_user, require
+from ..auth import Principal, car_scope, check_group_manager, current_user, target_group, visible_groups
 from ..connectors import CONNECTORS, ConnectorError
 from ..database import get_db
 from ..models import Car, Charger, ChargeSession, ReimbursementDocument
@@ -31,21 +30,40 @@ def _get(db: Session, charger_id: int) -> Charger:
     return c
 
 
+def _managed(db: Session, charger_id: int, user: Principal) -> Charger:
+    """The charger, for who may manage it: administrators, and the managers of its group."""
+    c = _get(db, charger_id)
+    groups = visible_groups(user, db)
+    if groups is not None and c.group_id not in groups:
+        raise HTTPException(404, "Charger not found")
+    check_group_manager(user, c.group_id, "chargers:manage")
+    return c
+
+
 def _save(db: Session, c: Charger) -> None:
-    try:
-        db.commit()
-    except IntegrityError:
+    """Names are unique within a group."""
+    same_group = Charger.group_id == c.group_id if c.group_id is not None else Charger.group_id.is_(None)
+    if db.scalar(select(Charger.id).where(same_group, func.lower(Charger.name) == c.name.lower(), Charger.id != (c.id or -1))):
         db.rollback()
-        raise HTTPException(409, f"A charger named '{c.name}' already exists") from None
+        raise HTTPException(409, f"A charger named '{c.name}' already exists")
+    db.commit()
 
 
-def _check_car(db: Session, car_id: int | None) -> None:
-    if car_id is not None and db.get(Car, car_id) is None:
+def _check_car(db: Session, car_id: int | None, user: Principal, group_id: int | None) -> None:
+    """The car of a charger's sessions: one the caller may see, in the charger's group."""
+    if car_id is None:
+        return
+    car = db.get(Car, car_id)
+    if car is None or not user.can("car:view", car_id):
         raise HTTPException(422, "Unknown car")
+    if car.group_id != group_id:
+        raise HTTPException(422, f"The car '{car.name}' isn't in the group of this charger")
 
 
 def charger_out(c: Charger, user: Principal, usage: list[ChargeSession] | None = None) -> ChargerOut:
     o = ChargerOut.model_validate({**{k: getattr(c, k) for k in ChargerIn.model_fields}, "id": c.id})
+    o.group_name = c.group.name if c.group else None
+    o.manageable = user.manages_group(c.group_id, "chargers:manage")
     used = usage or []
     o.sessions = len(used)
     o.kwh = round(sum(s.kwh for s in used), 3)
@@ -56,7 +74,7 @@ def charger_out(c: Charger, user: Principal, usage: list[ChargeSession] | None =
     o.live = live.live_state(c) or None
     o.last_poll_at = c.last_poll_at
     o.last_poll_error = c.last_poll_error
-    if user.has("chargers:manage") and c.connector and c.connector in CONNECTORS:
+    if o.manageable and c.connector and c.connector in CONNECTORS:
         try:
             config = decrypt_json(c.connector_secret)
         except SecretError:
@@ -68,8 +86,8 @@ def charger_out(c: Charger, user: Principal, usage: list[ChargeSession] | None =
 
 
 def _visible(user: Principal, c: Charger) -> bool:
-    """The live data of a charger is shown to who manages chargers, or may see its default car."""
-    return user.has("chargers:manage") or (c.default_car_id is not None and user.can("car:view", c.default_car_id))
+    """The live data of a charger is shown to who manages it, or may see its default car."""
+    return user.manages_group(c.group_id, "chargers:manage") or (c.default_car_id is not None and user.can("car:view", c.default_car_id))
 
 
 @router.get("", response_model=list[ChargerOut])
@@ -80,7 +98,10 @@ def list_chargers(user: Principal = Depends(current_user), db: Session = Depends
         if scope is None or s.car_id in scope:
             usage.setdefault(s.charger_id, []).append(s)  # type: ignore[arg-type]
     out = []
+    groups = visible_groups(user, db)  # the chargers of one's group, and of the groups of the cars one may see
     for c in db.scalars(select(Charger).order_by(Charger.active.desc(), Charger.name)):
+        if groups is not None and c.group_id not in groups:
+            continue
         o = charger_out(c, user, usage.get(c.id))
         if not _visible(user, c):
             o.live = None
@@ -100,27 +121,33 @@ def _field(f: tuple) -> dict[str, Any]:
 
 
 @router.post("", response_model=ChargerOut, status_code=201)
-def create_charger(body: ChargerIn, user: Principal = Depends(require("chargers:manage")), db: Session = Depends(get_db)) -> ChargerOut:
-    _check_car(db, body.default_car_id)
-    c = Charger(**body.model_dump())
+def create_charger(body: ChargerIn, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> ChargerOut:
+    """Administrators add chargers to any group; a group manager adds chargers to their group."""
+    group_id = target_group(db, user, body.group_id, "chargers:manage")
+    _check_car(db, body.default_car_id, user, group_id)
+    c = Charger(**body.model_dump(exclude={"group_id"}), group_id=group_id)
     db.add(c)
     _save(db, c)
     return charger_out(c, user)
 
 
 @router.put("/{charger_id}", response_model=ChargerOut)
-def update_charger(charger_id: int, body: ChargerIn, user: Principal = Depends(require("chargers:manage")), db: Session = Depends(get_db)) -> ChargerOut:
-    c = _get(db, charger_id)
-    _check_car(db, body.default_car_id)
-    for k, v in body.model_dump().items():
+def update_charger(charger_id: int, body: ChargerIn, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> ChargerOut:
+    c = _managed(db, charger_id, user)
+    if body.group_id is not None and body.group_id != c.group_id:  # moving a charger to another group: administrators
+        if not user.has("chargers:manage"):
+            raise HTTPException(403, "Only an administrator can move a charger to another group")
+        c.group_id = target_group(db, user, body.group_id, "chargers:manage")
+    _check_car(db, body.default_car_id, user, c.group_id)
+    for k, v in body.model_dump(exclude={"group_id"}).items():
         setattr(c, k, v)
     _save(db, c)
     return charger_out(c, user)
 
 
 @router.delete("/{charger_id}", status_code=204)
-async def delete_charger(charger_id: int, _: Principal = Depends(require("chargers:manage")), db: Session = Depends(get_db)) -> Response:
-    c = _get(db, charger_id)
+async def delete_charger(charger_id: int, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> Response:
+    c = _managed(db, charger_id, user)
     count = db.scalar(select(func.count()).select_from(ChargeSession).where(ChargeSession.charger_id == charger_id)) or 0
     if count:
         raise HTTPException(409, f"'{c.name}' was used for {count} session(s): mark it inactive instead")
@@ -136,9 +163,9 @@ async def delete_charger(charger_id: int, _: Principal = Depends(require("charge
 
 
 @router.put("/{charger_id}/connection", response_model=ChargerOut)
-async def set_connection(charger_id: int, body: ChargerConnection, user: Principal = Depends(require("chargers:manage")), db: Session = Depends(get_db)) -> ChargerOut:
+async def set_connection(charger_id: int, body: ChargerConnection, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> ChargerOut:
     """Store (encrypted) or remove the credentials of the charger's cloud account, and test them."""
-    c = _get(db, charger_id)
+    c = _managed(db, charger_id, user)
     await live.forget_connector(c.id)
     if body.connector is None:
         c.connector = c.connector_secret = c.external_id = c.live_state = c.last_poll_error = None
@@ -217,18 +244,19 @@ async def _rebuilt(c: Charger, date_from: date, date_to: date) -> list[hist.Rebu
 
 @router.get("/{charger_id}/history")
 async def history_preview(
-    charger_id: int, date_from: date, date_to: date, car_id: int | None = None, _: Principal = Depends(require("chargers:manage")), db: Session = Depends(get_db)
+    charger_id: int, date_from: date, date_to: date, car_id: int | None = None, user: Principal = Depends(current_user), db: Session = Depends(get_db)
 ) -> dict[str, Any]:
     """Sessions rebuilt from the charger's history, compared with the sessions already recorded (nothing is saved)."""
-    c = _get(db, charger_id)
+    c = _managed(db, charger_id, user)
     car_id = car_id or c.default_car_id
+    _check_car(db, car_id, user, c.group_id)
     rebuilt = await _rebuilt(c, date_from, date_to)
     return {"charger_id": c.id, "car_id": car_id, "items": hist.preview(db, c, rebuilt, car_id)}
 
 
 @router.post("/{charger_id}/history/apply")
-async def history_apply(charger_id: int, body: HistoryApply, _: Principal = Depends(require("chargers:manage")), db: Session = Depends(get_db)) -> dict[str, int]:
-    c = _get(db, charger_id)
-    _check_car(db, body.car_id)
+async def history_apply(charger_id: int, body: HistoryApply, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, int]:
+    c = _managed(db, charger_id, user)
+    _check_car(db, body.car_id, user, c.group_id)
     rebuilt = await _rebuilt(c, body.date_from, body.date_to)  # fetched again: only the charger's own data is imported
     return hist.apply(db, c, rebuilt, set(body.keys), body.car_id, body.link_matches)

@@ -3,11 +3,15 @@
 {% block content %}
 <div class="content">
     <div class="page-head">
-        <h2>Users &amp; car access</h2>
-        <button class="btn" id="add-user">＋ Add a user</button>
+        <h2>{{ 'Users &amp; car access'|safe if 'users:manage' in can else 'Members of your group' }}</h2>
+        <button class="btn" id="add-user">＋ Add a {{ 'user' if 'users:manage' in can else 'member' }}</button>
     </div>
-    <p class="muted small" style="margin-bottom:12px">Each user has a <b>global role</b> (app-wide permissions; a role marked <i>all cars</i>, like Administrator or Accountant, also applies to every car)
-        and a <b>role on each car</b> they work with (e.g. Driver on one car, Viewer on another). Roles and their permissions are edited on the <a href="/roles">Roles</a> page.</p>
+    {% if 'users:manage' in can %}
+    <p class="muted small" style="margin-bottom:12px">Each user belongs to a <b>group</b> (who shares cars and chargers, see <a href="/groups">Groups</a>), has a <b>global role</b> (app-wide permissions; a role marked <i>all cars</i>, like Administrator or Accountant, also applies to every car of every group)
+        and a <b>role on each car</b> they work with (e.g. Driver on one car, Viewer on another). A <b>group manager</b> has every right on the cars of the group and adds its cars, chargers and members. Roles and their permissions are edited on the <a href="/roles">Roles</a> page.</p>
+    {% else %}
+    <p class="muted small" style="margin-bottom:12px" id="group-info">The members of your group. Give each one a <b>role on the cars</b> they use (e.g. Driver on one car, Viewer on another). As a group manager you have every right on the group's cars.</p>
+    {% endif %}
     <div class="table-wrap" id="users-table"><p class="muted">Loading…</p></div>
 </div>
 
@@ -21,6 +25,8 @@
                 <div class="field"><label>Full name</label><input type="text" name="full_name" maxlength="100"></div>
                 <div class="field span-2"><label>E-mail</label><input type="text" name="email" maxlength="200"><div class="hint">Also used to link the account at the first single sign-on</div></div>
                 <div class="field span-2"><label>Global role</label><select name="role_id"></select><div class="hint" id="uf-role-hint"></div></div>
+                <div class="field span-2" data-admin-only><label>Group</label><select name="group_id"></select><div class="hint">Who this user shares cars and chargers with</div></div>
+                <div class="field span-2" data-admin-only><label class="check" style="margin-top:22px"><input type="checkbox" name="group_manager"> Group manager</label><div class="hint">Every right on the group's cars; adds its cars, chargers and members</div></div>
                 <div class="field span-2"><label id="uf-pw-label">Password</label><input type="password" name="password" minlength="8" autocomplete="new-password"><div class="hint" id="uf-pw-hint"></div></div>
                 <div class="field span-all"><label>Role on each car</label>
                     <div class="imp-grid" style="max-height:260px"><table><thead><tr><th>Car</th><th style="min-width:200px">Role</th></tr></thead><tbody id="uf-cars"></tbody></table></div>
@@ -41,8 +47,12 @@
 <script>
 (() => {
     const form = document.getElementById('user-form');
-    let users = [], cars = [], roles = [], editing = null;
+    let users = [], cars = [], roles = [], editing = null, grants = {};
     const role = (id) => roles.find(r => r.id === id);
+    const admin = EV.can('users:manage');
+    // Roles a group manager may give as global role: those with car permissions only
+    const privileged = (r) => r.all_cars || r.permissions.some(p => !/^(car|sessions|reimbursement):/.test(p));
+    const groupCars = (groupId) => cars.filter(c => admin ? (groupId == null || c.group_id === groupId || (editing?.grants || []).some(g => g.car_id === c.id)) : c.group_id === EV.me.group_id);
     const carName = (id) => (cars.find(c => c.id === id) || {}).name || `#${id}`;
     const when = (iso) => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'never';
 
@@ -63,15 +73,25 @@
         document.getElementById('uf-pw-hint').textContent = u
             ? (u.has_password ? 'Leave empty to keep it. Changing it signs the user out.' : 'No password: signs in with single sign-on. Set one to allow password sign-in.')
             : 'At least 8 characters. Leave empty for a user who signs in with single sign-on only.';
-        form.role_id.innerHTML = '<option value="">— none —</option>' + roles.map(r => `<option value="${r.id}">${EV.esc(r.name)}${r.all_cars ? ' (all cars)' : ''}</option>`).join('');
-        const grants = Object.fromEntries((u?.grants || []).map(g => [g.car_id, g.role_id]));
-        document.getElementById('uf-cars').innerHTML = cars.length ? cars.map(c => `<tr><td>${EV.carDot(c.id)}${EV.esc(c.name)}${c.active ? '' : ' <span class="muted">(inactive)</span>'}</td>
-            <td><select data-car="${c.id}"><option value="">— no access —</option>${roles.map(r => `<option value="${r.id}" ${grants[c.id] === r.id ? 'selected' : ''}>${EV.esc(r.name)}</option>`).join('')}</select></td></tr>`).join('')
-            : '<tr><td colspan="2" class="muted">No car yet.</td></tr>';
-        if (u) EV.fillForm(form, { ...u, password: '' });
+        form.role_id.innerHTML = '<option value="">— none —</option>' + roles.filter(r => admin || !privileged(r) || r.id === u?.role_id)
+            .map(r => `<option value="${r.id}">${EV.esc(r.name)}${r.all_cars ? ' (all cars)' : ''}</option>`).join('');
+        form.querySelectorAll('[data-admin-only]').forEach(el => { el.style.display = admin ? '' : 'none'; });
+        form.group_id.innerHTML = '<option value="">— none —</option>' + (EV.groups || []).map(g => `<option value="${g.id}">${EV.esc(g.name)} (${g.members}/${g.max_members})</option>`).join('');
+        form.group_id.value = String(u ? (u.group_id ?? '') : (EV.me.group_id ?? ''));
+        grants = Object.fromEntries((u?.grants || []).map(g => [g.car_id, g.role_id]));
+        fillCars();
+        if (u) EV.fillForm(form, { ...u, password: '', group_id: u.group_id ?? '' });
         else { form.active.checked = true; form.role_id.value = String((roles.find(r => r.name === 'Driver') || {}).id || ''); }
         roleHint();
         EV.openModal('user-modal');
+    }
+
+    /* The cars of the user's group (plus those the user already has a role on), with the roles chosen so far */
+    function fillCars() {
+        const list = groupCars(Number(form.group_id.value) || null);
+        document.getElementById('uf-cars').innerHTML = list.length ? list.map(c => `<tr><td>${EV.carDot(c.id)}${EV.esc(c.name)}${c.active ? '' : ' <span class="muted">(inactive)</span>'}</td>
+            <td><select data-car="${c.id}"><option value="">— no access —</option>${roles.map(r => `<option value="${r.id}" ${grants[c.id] === r.id ? 'selected' : ''}>${EV.esc(r.name)}</option>`).join('')}</select></td></tr>`).join('')
+            : '<tr><td colspan="2" class="muted">No car in this group yet.</td></tr>';
     }
 
     function render() {
@@ -83,6 +103,7 @@
                     || '<span class="badge badge-warn">no car</span>';
                 return `<tr>
                 <td><strong>${EV.esc(u.username)}</strong>${u.id === EV.me.id ? ' <span class="muted small">(you)</span>' : ''}
+                    ${admin && u.group_name && EV.groups.length > 1 ? `<br><span class="muted small">👥 ${EV.esc(u.group_name)}</span>` : ''}${u.group_manager ? ' <span class="badge badge-info" title="Manages the cars, chargers and members of the group">👥 Manager</span>' : ''}
                     ${u.sso ? '<br><span class="badge badge-info" title="Linked to a single sign-on account">🔐 SSO</span>' : ''}${u.has_password ? '' : ' <span class="muted small">no password</span>'}</td>
                 <td>${EV.esc(u.full_name || '')}${u.email ? `<br><span class="muted small">${EV.esc(u.email)}</span>` : ''}</td>
                 <td>${r ? `<span class="badge badge-info">${EV.esc(r.name)}</span>` : '<span class="muted">—</span>'}</td>
@@ -94,15 +115,23 @@
     }
 
     async function load() {
-        try { [users, cars, roles] = await Promise.all([EV.api('GET', '/api/users'), EV.loadCars(), EV.api('GET', '/api/roles')]); render(); }
+        try {
+            [users, cars, roles] = await Promise.all([EV.api('GET', '/api/users'), EV.loadCars(), EV.api('GET', '/api/roles'), EV.loadGroups()]);
+            const mine = EV.groups.find(g => g.id === EV.me.group_id), info = document.getElementById('group-info');
+            if (info && mine) info.insertAdjacentHTML('beforeend', ` <b>${EV.esc(mine.name)}</b>: ${mine.members} of ${mine.max_members} member(s) allowed (the limit is set by an administrator).`);
+            render();
+        }
         catch (err) { EV.toast(err.message, true); }
     }
 
     form.role_id.addEventListener('change', roleHint);
+    form.group_id.addEventListener('change', fillCars);
+    document.getElementById('uf-cars').addEventListener('change', (e) => { if (e.target.dataset.car) grants[Number(e.target.dataset.car)] = Number(e.target.value) || undefined; });
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const body = EV.formData(form);
         body.role_id = body.role_id ? Number(body.role_id) : null;
+        body.group_id = body.group_id ? Number(body.group_id) : null;
         body.grants = [...document.querySelectorAll('#uf-cars select')].filter(s => s.value).map(s => ({ car_id: Number(s.dataset.car), role_id: Number(s.value) }));
         try {
             const saved = editing ? await EV.api('PUT', `/api/users/${editing.id}`, body) : await EV.api('POST', '/api/users', body);

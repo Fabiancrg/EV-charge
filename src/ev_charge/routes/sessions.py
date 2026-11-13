@@ -37,13 +37,15 @@ def _check_car(db: Session, car_id: int, user: Principal, permission: str) -> No
     check_car_access(user, car_id, permission)
 
 
-def _check_charger(db: Session, charger_id: int | None, previous: int | None = None) -> None:
-    if charger_id is None:
+def _check_charger(db: Session, charger_id: int | None, car_id: int, previous: int | None = None) -> None:
+    """previous: the charger the session already has (kept as it is, even inactive)."""
+    if charger_id is None or charger_id == previous:
         return
     c = db.get(Charger, charger_id)
-    if c is None:
+    car = db.get(Car, car_id)
+    if c is None or car is None or c.group_id != car.group_id:  # a charger of another group doesn't exist for this car
         raise HTTPException(422, "Unknown charger")
-    if not c.active and charger_id != previous:
+    if not c.active:
         raise HTTPException(422, f"The charger '{c.name}' is inactive")
 
 
@@ -166,7 +168,7 @@ def get_session(session_id: int, user: Principal = Depends(current_user), db: Se
 @router.post("", response_model=SessionOut, status_code=201)
 def create_session(body: SessionIn, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> SessionOut:
     _check_car(db, body.car_id, user, "sessions:create")
-    _check_charger(db, body.charger_id)
+    _check_charger(db, body.charger_id, body.car_id)
     values = body.model_dump()
     if not user.can("reimbursement:manage", body.car_id):  # the reimbursement follows the defaults
         values["to_reimburse"] = body.charger_id is not None
@@ -183,7 +185,7 @@ def update_session(session_id: int, body: SessionIn, user: Principal = Depends(c
     s = _get(db, session_id, user, "sessions:edit")
     if body.car_id != s.car_id:
         _check_car(db, body.car_id, user, "sessions:create")
-    _check_charger(db, body.charger_id, previous=s.charger_id)
+    _check_charger(db, body.charger_id, body.car_id, previous=s.charger_id if body.car_id == s.car_id else None)
     values = body.model_dump()
     if not (user.can("reimbursement:manage", s.car_id) and user.can("reimbursement:manage", body.car_id)):
         values["to_reimburse"], values["reimbursement_status"] = s.to_reimburse, s.reimbursement_status  # unchanged
@@ -199,14 +201,19 @@ def bulk_update(body: SessionBulk, user: Principal = Depends(current_user), db: 
     """Change the reimbursement flag, reimbursement status, charger and/or provider of the selected sessions."""
     charger = None
     if body.charger_id is not None:
-        _check_charger(db, body.charger_id)
         charger = db.get(Charger, body.charger_id)
+        if charger is None:
+            raise HTTPException(422, "Unknown charger")
+        if not charger.active:
+            raise HTTPException(422, f"The charger '{charger.name}' is inactive")
     needs = []
     if body.to_reimburse is not None or body.reimbursement_status is not None:
         needs.append("reimbursement:manage")
     if body.charger_id is not None or body.clear_charger or body.provider is not None or body.clear_provider:
         needs.append("sessions:edit")
     rows = [s for s in db.scalars(select(ChargeSession).where(ChargeSession.id.in_(body.ids))) if all(user.can(p, s.car_id) for p in needs or ["car:view"])]
+    if charger is not None:  # a charger is set on the sessions of the cars of its group only
+        rows = [s for s in rows if s.car.group_id == charger.group_id]
     for s in rows:
         if body.clear_charger:
             s.charger_id = None

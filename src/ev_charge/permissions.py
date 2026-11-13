@@ -18,6 +18,7 @@ from typing import Any
 # name: (label, group)
 GLOBAL_PERMISSIONS: dict[str, tuple[str, str]] = {
     "users:manage": ("Manage users, their roles and car access", "Administration"),
+    "groups:manage": ("Manage groups: their name, size and group managers", "Administration"),
     "roles:manage": ("Create and edit roles", "Administration"),
     "settings:manage": ("Single sign-on and security settings", "Administration"),
     "audit:read": ("Read the audit log", "Administration"),
@@ -59,6 +60,8 @@ class Grants:
     global_perms: set[str] = field(default_factory=set)
     all_cars: set[str] = field(default_factory=set)  # car permissions on every car
     per_car: dict[int, set[str]] = field(default_factory=dict)
+    group_id: int | None = None  # the user's group
+    group_manager: bool = False  # manages the cars, chargers and members of that group
 
     def has(self, permission: str) -> bool:
         return permission in self.global_perms
@@ -78,6 +81,7 @@ class Grants:
             global_perms={p for p in self.global_perms if matches(allowed, p)},
             all_cars={p for p in self.all_cars if matches(allowed, p)},
             per_car={c: {p for p in perms if matches(allowed, p)} for c, perms in self.per_car.items()},
+            group_id=self.group_id,
         )
 
     def car_permissions(self, car_id: int) -> set[str]:
@@ -96,6 +100,17 @@ BUILTIN_ROLES: list[tuple[str, str, list[str], bool]] = [
     ("Viewer", "Sees the cars given to them, their sessions and reports", ["car:view"], False),
     ("Accountant", "Sees every car and follows the reimbursements (status, statements)", ["car:view", "reimbursement:manage"], True),
 ]
+
+
+def ensure_default_group(db: Any) -> None:
+    """There is always a group for the first users and cars (created by migration 010 on an existing database)."""
+    from sqlalchemy import select
+
+    from .models import Group
+
+    if db.scalar(select(Group.id).limit(1)) is None:
+        db.add(Group(name="Default", max_members=20))
+        db.commit()
 
 
 def ensure_builtin_roles(db: Any) -> None:
