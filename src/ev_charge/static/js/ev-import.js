@@ -12,10 +12,10 @@
     'use strict';
     const EV = window.EV;
     const FIELDS = [
-        ['charge_date', 'Charge date *'], ['car', 'Car (name or plate)'], ['odometer', 'Odometer (km)'], ['location', 'Location'], ['provider', 'Provider'],
-        ['kwh', 'Energy (kWh) *'], ['start_time', 'Start time'], ['end_time', 'End time'], ['duration', 'Duration (if no end time)'],
-        ['to_reimburse', 'To be reimbursed (yes/no)'], ['charger', 'Charger (name or serial number)'], ['reimbursement_status', 'Reimbursement status'],
-        ['cost', 'Cost'], ['notes', 'Notes'],
+        ['charge_date', EV.t('Charge date') + ' *'], ['car', EV.t('Car (name or plate)')], ['odometer', EV.t('Odometer (km)')], ['location', EV.t('Location')], ['provider', EV.t('Provider')],
+        ['kwh', EV.t('Energy (kWh)') + ' *'], ['start_time', EV.t('Start time')], ['end_time', EV.t('End time')], ['duration', EV.t('Duration (if no end time)')],
+        ['to_reimburse', EV.t('To be reimbursed (yes/no)')], ['charger', EV.t('Charger (name or serial number)')], ['reimbursement_status', EV.t('Reimbursement status')],
+        ['cost', EV.t('Cost')], ['notes', EV.t('Notes')],
     ];
     const LABEL = Object.fromEntries(FIELDS);
     // Header names recognised for each field (compared after normalisation: lower case, no accents/punctuation). EN / FR / NL.
@@ -96,7 +96,7 @@
         EV.openModal('import-modal');
         alertBox(null);
         $('[data-steps]').innerHTML = '';
-        $('[data-body]').innerHTML = '<p class="muted">Reading the file…</p>';
+        $('[data-body]').innerHTML = `<p class="muted">${EV.t('Reading the file…')}</p>`;
         $('[data-actions]').innerHTML = '';
         const form = new FormData();
         form.append('file', file);
@@ -107,12 +107,12 @@
             if (!r.ok) throw new Error(data.detail || r.statusText);
         } catch (e) {
             $('[data-body]').innerHTML = '';
-            alertBox('Cannot read the file: ' + e.message);
-            setActions('<button class="btn btn-ghost" data-act="close">Close</button>');
+            alertBox(EV.t('Cannot read the file: {error}', { error: e.message }));
+            setActions(`<button class="btn btn-ghost" data-act="close">${EV.t('Close')}</button>`);
             return;
         }
         const sheets = data.sheets.filter(s => s.rows.length);
-        if (!sheets.length) { $('[data-body]').innerHTML = ''; alertBox('The file contains no data.'); setActions('<button class="btn btn-ghost" data-act="close">Close</button>'); return; }
+        if (!sheets.length) { $('[data-body]').innerHTML = ''; alertBox(EV.t('The file contains no data.')); setActions(`<button class="btn btn-ghost" data-act="close">${EV.t('Close')}</button>`); return; }
         const cars = EV.cars || await EV.loadCars();
         // Start on the visible sheet that looks most like a session list
         const scored = sheets.map((s, i) => ({ i, score: s.hidden ? -1 : headerCandidate(s.rows).score + Math.min(s.rows.length, 50) / 1000 }));
@@ -142,7 +142,7 @@
 
     function render() {
         alertBox(null);
-        const titles = ['Sheet & header row', 'Columns', 'Review & import'];
+        const titles = [EV.t('Sheet & header row'), EV.t('Columns'), EV.t('Review & import')];
         $('[data-steps]').innerHTML = titles.map((t, i) =>
             `<span class="imp-step${state.step === i + 1 ? ' on' : ''}${state.step > i + 1 ? ' done' : ''}">${i + 1}. ${t}</span>`).join('<span class="muted">›</span>');
         if (state.step === 1) renderSheet();
@@ -168,9 +168,9 @@
 
     function missingFields() {
         const m = state.mapping;
-        if (!m.includes('charge_date') && !m.includes('start_time')) return 'Map the column holding the charge date.';
-        if (!m.includes('kwh')) return 'Map the column holding the energy (kWh).';
-        if (!m.includes('car') && !state.carId) return 'Choose the car, or map the column holding the car.';
+        if (!m.includes('charge_date') && !m.includes('start_time')) return EV.t('Map the column holding the charge date.');
+        if (!m.includes('kwh')) return EV.t('Map the column holding the energy (kWh).');
+        if (!m.includes('car') && !state.carId) return EV.t('Choose the car, or map the column holding the car.');
         return '';
     }
 
@@ -181,27 +181,27 @@
         const shown = sheet.rows.slice(0, Math.max(PREVIEW_ROWS, state.headerRow + 6));
         $('[data-body]').innerHTML = `
             <div class="form-grid">
-                <div class="field span-2"><label>Sheet</label>
-                    <select id="imp-sheet">${state.sheets.map((s, i) => `<option value="${i}" ${i === state.sheetIndex ? 'selected' : ''}>${esc(s.name)} — ${s.rows.length} rows${s.hidden ? ' (hidden)' : ''}</option>`).join('')}</select></div>
-                <div class="field"><label>Header row</label><input id="imp-header" type="number" min="1" max="${sheet.rows.length}" value="${state.headerRow + 1}"></div>
+                <div class="field span-2"><label>${EV.t('Sheet')}</label>
+                    <select id="imp-sheet">${state.sheets.map((s, i) => `<option value="${i}" ${i === state.sheetIndex ? 'selected' : ''}>${esc(s.name)} — ${EV.t('{n} rows', { n: s.rows.length })}${s.hidden ? ` (${EV.t('hidden')})` : ''}</option>`).join('')}</select></div>
+                <div class="field"><label>${EV.t('Header row')}</label><input id="imp-header" type="number" min="1" max="${sheet.rows.length}" value="${state.headerRow + 1}"></div>
             </div>
-            <p class="hint">The header row is detected automatically. Click a row in the preview to change it. Rows below it are imported.${sheet.truncated ? ' <b>Only the first rows of this sheet were read.</b>' : ''}</p>
+            <p class="hint">${EV.t('The header row is detected automatically. Click a row in the preview to change it. Rows below it are imported.')}${sheet.truncated ? ` <b>${EV.t('Only the first rows of this sheet were read.')}</b>` : ''}</p>
             <div class="imp-grid"><table><thead><tr><th></th>${Array.from({ length: width }, (_, c) => `<th>${colLetter(c)}</th>`).join('')}</tr></thead><tbody>
                 ${shown.map((r, i) => `<tr data-row="${i}" class="${i === state.headerRow ? 'imp-header' : i < state.headerRow ? 'imp-above' : ''}"><th>${i + 1}</th>${Array.from({ length: width }, (_, c) => `<td title="${esc(r[c] || '')}">${esc(clip(oneLine(r[c]), 40))}</td>`).join('')}</tr>`).join('')}
             </tbody></table></div>
-            ${sheet.rows.length > shown.length ? `<p class="hint">${sheet.rows.length - shown.length} more rows not shown.</p>` : ''}`;
+            ${sheet.rows.length > shown.length ? `<p class="hint">${EV.t('{n} more rows not shown.', { n: sheet.rows.length - shown.length })}</p>` : ''}`;
         $('#imp-sheet').addEventListener('change', e => { selectSheet(+e.target.value); renderSheet(); });
         $('#imp-header').addEventListener('change', e => {
             state.headerRow = Math.min(sheet.rows.length - 1, Math.max(0, (parseInt(e.target.value, 10) || 1) - 1));
             remap(); renderSheet();
         });
         $('[data-body]').querySelectorAll('tr[data-row]').forEach(tr => tr.addEventListener('click', () => { state.headerRow = +tr.dataset.row; remap(); renderSheet(); }));
-        setActions('<button class="btn btn-ghost" data-act="close">Cancel</button><button class="btn" data-act="next">Next ›</button>');
+        setActions(`<button class="btn btn-ghost" data-act="close">${EV.t('Cancel')}</button><button class="btn" data-act="next">${EV.t('Next ›')}</button>`);
     }
 
     // ── Step 2: columns & options ───────────────────────────────────────
     function fieldSelect(col, value) {
-        return `<select data-col="${col}"><option value="ignore" ${value === 'ignore' ? 'selected' : ''}>— not imported —</option>
+        return `<select data-col="${col}"><option value="ignore" ${value === 'ignore' ? 'selected' : ''}>— ${EV.t('not imported')} —</option>
             ${FIELDS.map(([k, l]) => `<option value="${k}" ${k === value ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
     }
 
@@ -214,27 +214,26 @@
         const hasCarCol = state.mapping.includes('car');
         const hasReimbCol = state.mapping.includes('to_reimburse');
         $('[data-body]').innerHTML = `
-            <p class="hint">Columns were mapped from their header names (English, French or Dutch). Check each one; unmapped columns are not imported.
-                <b>One row = one charging session.</b> Numbers may use a decimal comma (<code>12,5</code>); dates may be <code>31/12/2026</code>, <code>2026-12-31</code> or Excel dates;
-                a date column holding a date and time also gives the start time.</p>
-            <div class="imp-grid"><table><thead><tr><th>Col.</th><th>Header</th><th>Examples</th><th style="min-width:220px">Imported as</th></tr></thead><tbody>
-                ${cols.map(({ c, h, s }) => `<tr class="${state.mapping[c] !== 'ignore' ? 'imp-mapped' : ''}"><th>${colLetter(c)}</th><td><b>${esc(h || '(no header)')}</b></td>
+            <p class="hint">${EV.t('Columns were mapped from their header names (English, French or Dutch). Check each one; unmapped columns are not imported.')}
+                <b>${EV.t('One row = one charging session.')}</b> ${EV.t('Numbers may use a decimal comma (<code>12,5</code>); dates may be <code>31/12/2026</code>, <code>2026-12-31</code> or Excel dates; a date column holding a date and time also gives the start time.')}</p>
+            <div class="imp-grid"><table><thead><tr><th>${EV.t('Col.')}</th><th>${EV.t('Header')}</th><th>${EV.t('Examples')}</th><th style="min-width:220px">${EV.t('Imported as')}</th></tr></thead><tbody>
+                ${cols.map(({ c, h, s }) => `<tr class="${state.mapping[c] !== 'ignore' ? 'imp-mapped' : ''}"><th>${colLetter(c)}</th><td><b>${esc(h || EV.t('(no header)'))}</b></td>
                     <td class="muted">${s.map(v => esc(clip(oneLine(v), 30))).join(' · ') || '—'}</td><td>${fieldSelect(c, state.mapping[c])}</td></tr>`).join('')}
             </tbody></table></div>
             <div class="form-grid" style="margin-top:14px">
                 ${hasCarCol
-                    ? (EV.can('cars:manage') ? `<div class="field span-2"><label class="check"><input type="checkbox" id="imp-create" ${state.createMissing ? 'checked' : ''}> Create the cars that don't exist yet</label>
-                        <div class="hint">The car column is matched on the car name or license plate.</div></div>`
-                        : '<div class="field span-2"><div class="hint">The car column is matched on the name or license plate of your cars.</div></div>')
-                    : `<div class="field span-2"><label>Car for every row *</label><select id="imp-car">${state.cars.filter(c => EV.canCar('sessions:import', c.id)).map(c => `<option value="${c.id}" ${c.id === state.carId ? 'selected' : ''}>${esc(c.name)}${c.license_plate ? ' · ' + esc(c.license_plate) : ''}</option>`).join('') || '<option value="">(add a car first)</option>'}</select></div>`}
-                <div class="field"><label>Dates are written</label>
-                    <select id="imp-order">${[['auto', 'Detect automatically'], ['dmy', 'day/month/year'], ['mdy', 'month/day/year'], ['ymd', 'year-month-day']].map(([k, l]) => `<option value="${k}" ${k === state.dateOrder ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-                ${hasReimbCol ? '' : `<div class="field"><label class="check" style="margin-top:22px"><input type="checkbox" id="imp-reimb" ${state.defaultReimb ? 'checked' : ''}> Mark all as to be reimbursed</label></div>`}
-                ${state.mapping.includes('charger') || !state.chargers.length ? '' : `<div class="field span-2"><label>Charger for every row</label>
-                    <select id="imp-charger"><option value="">— none —</option>${state.chargers.filter(c => c.active).map(c => `<option value="${c.id}" ${String(c.id) === String(state.chargerId) ? 'selected' : ''}>🔌 ${esc(c.name)}</option>`).join('')}</select>
-                    <div class="hint">Its sessions are to be reimbursed and priced at the home tariff.</div></div>`}
-                ${state.mapping.includes('reimbursement_status') ? '' : `<div class="field"><label>Status of sessions to reimburse</label>
-                    <select id="imp-status"><option value="">Default (recorded with a charger, else not recorded)</option>${EV.STATUSES.map(([k, l, i]) => `<option value="${k}" ${k === state.defaultStatus ? 'selected' : ''}>${i} ${l}</option>`).join('')}</select></div>`}
+                    ? (EV.can('cars:manage') ? `<div class="field span-2"><label class="check"><input type="checkbox" id="imp-create" ${state.createMissing ? 'checked' : ''}> ${EV.t('Create the cars that don\'t exist yet')}</label>
+                        <div class="hint">${EV.t('The car column is matched on the car name or license plate.')}</div></div>`
+                        : `<div class="field span-2"><div class="hint">${EV.t('The car column is matched on the name or license plate of your cars.')}</div></div>`)
+                    : `<div class="field span-2"><label>${EV.t('Car for every row')} *</label><select id="imp-car">${state.cars.filter(c => EV.canCar('sessions:import', c.id)).map(c => `<option value="${c.id}" ${c.id === state.carId ? 'selected' : ''}>${esc(c.name)}${c.license_plate ? ' · ' + esc(c.license_plate) : ''}</option>`).join('') || `<option value="">${EV.t('(add a car first)')}</option>`}</select></div>`}
+                <div class="field"><label>${EV.t('Dates are written')}</label>
+                    <select id="imp-order">${[['auto', EV.t('Detect automatically')], ['dmy', EV.t('day/month/year')], ['mdy', EV.t('month/day/year')], ['ymd', EV.t('year-month-day')]].map(([k, l]) => `<option value="${k}" ${k === state.dateOrder ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+                ${hasReimbCol ? '' : `<div class="field"><label class="check" style="margin-top:22px"><input type="checkbox" id="imp-reimb" ${state.defaultReimb ? 'checked' : ''}> ${EV.t('Mark all as to be reimbursed')}</label></div>`}
+                ${state.mapping.includes('charger') || !state.chargers.length ? '' : `<div class="field span-2"><label>${EV.t('Charger for every row')}</label>
+                    <select id="imp-charger"><option value="">— ${EV.t('none')} —</option>${state.chargers.filter(c => c.active).map(c => `<option value="${c.id}" ${String(c.id) === String(state.chargerId) ? 'selected' : ''}>🔌 ${esc(c.name)}</option>`).join('')}</select>
+                    <div class="hint">${EV.t('Its sessions are to be reimbursed and priced at the home tariff.')}</div></div>`}
+                ${state.mapping.includes('reimbursement_status') ? '' : `<div class="field"><label>${EV.t('Status of sessions to reimburse')}</label>
+                    <select id="imp-status"><option value="">${EV.t('Default (recorded with a charger, else not recorded)')}</option>${EV.STATUSES.map(([k, l, i]) => `<option value="${k}" ${k === state.defaultStatus ? 'selected' : ''}>${i} ${l}</option>`).join('')}</select></div>`}
             </div>`;
         $('[data-body]').querySelectorAll('select[data-col]').forEach(sel => sel.addEventListener('change', () => {
             const col = +sel.dataset.col, field = sel.value;
@@ -249,7 +248,7 @@
         $('#imp-charger')?.addEventListener('change', e => { state.chargerId = e.target.value; });
         $('#imp-status')?.addEventListener('change', e => { state.defaultStatus = e.target.value; });
         const missing = missingFields();
-        setActions(`${missing ? `<span class="imp-missing">${esc(missing)}</span>` : ''}<button class="btn btn-ghost" data-act="back">‹ Back</button><button class="btn" data-act="next" ${missing ? 'disabled' : ''}>Next ›</button>`);
+        setActions(`${missing ? `<span class="imp-missing">${esc(missing)}</span>` : ''}<button class="btn btn-ghost" data-act="back">‹ ${EV.t('Back')}</button><button class="btn" data-act="next" ${missing ? 'disabled' : ''}>${EV.t('Next ›')}</button>`);
     }
 
     // ── Step 3: review (server-side parsing) & import ───────────────────
@@ -272,13 +271,13 @@
 
     const STATUS = {
         ok: '<span class="badge badge-ok">✓ OK</span>',
-        duplicate: '<span class="badge badge-warn">≡ Duplicate</span>',
-        error: '<span class="badge badge-err">✖ Error</span>',
+        duplicate: `<span class="badge badge-warn">≡ ${EV.t('Duplicate')}</span>`,
+        error: `<span class="badge badge-err">✖ ${EV.t('Error')}</span>`,
     };
 
     async function renderReview() {
-        $('[data-body]').innerHTML = '<p class="muted">Checking the rows…</p>';
-        setActions('<button class="btn btn-ghost" data-act="back">‹ Back</button>');
+        $('[data-body]').innerHTML = `<p class="muted">${EV.t('Checking the rows…')}</p>`;
+        setActions(`<button class="btn btn-ghost" data-act="back">‹ ${EV.t('Back')}</button>`);
         let res;
         const token = state.reviewToken = {};
         try { res = await EV.api('POST', '/api/import/sessions/preview', payload()); }
@@ -289,8 +288,8 @@
         const filter = state.reviewFilter || 'all';
         const rows = res.rows.filter(r => filter === 'all' || r.status === filter);
         const mapped = new Set(state.mapping.filter(f => f !== 'ignore'));
-        const cols = [['car_name', 'Car'], ['charge_date', 'Date'], ['odometer', 'Odometer'], ['location', 'Location'], ['provider', 'Provider'], ['kwh', 'kWh'],
-            ['start_time', 'Start'], ['end_time', 'End'], ['charger_name', 'Charger'], ['to_reimburse', 'Reimb.'], ['reimbursement_status', 'Status'], ['cost', 'Cost'], ['notes', 'Notes']]
+        const cols = [['car_name', EV.t('Car')], ['charge_date', EV.t('Date')], ['odometer', EV.t('Odometer')], ['location', EV.t('Location')], ['provider', EV.t('Provider')], ['kwh', 'kWh'],
+            ['start_time', EV.t('Start')], ['end_time', EV.t('End')], ['charger_name', EV.t('Charger')], ['to_reimburse', EV.t('Reimb.')], ['reimbursement_status', EV.t('Status')], ['cost', EV.t('Cost')], ['notes', EV.t('Notes')]]
             .filter(([k]) => k === 'car_name' || k === 'charge_date' || k === 'kwh' || mapped.has(k) || (k === 'end_time' && mapped.has('duration'))
                 || (k === 'charger_name' && (mapped.has('charger') || state.chargerId)) || (['to_reimburse', 'reimbursement_status'].includes(k)));
         const fmt = (r, k) => {
@@ -299,29 +298,29 @@
             if (k === 'kwh') return v == null ? '' : EV.num(v, 3);
             if (k === 'cost') return v == null ? '' : EV.num(v, 2);
             if (k === 'odometer') return v == null ? '' : EV.num(v);
-            if (k === 'to_reimburse') return v ? '💶 Yes' : '';
+            if (k === 'to_reimburse') return v ? `💶 ${EV.t('Yes')}` : '';
             if (k === 'reimbursement_status') return EV.statusBadge(v);
             if (k === 'charger_name') return v ? `🔌 ${esc(v)}` : '';
             return esc(clip(v || '', 40));
         };
         $('[data-body]').innerHTML = `
-            <p><b>${EV.num(s.total)}</b> row(s): <b>${EV.num(s.ok)}</b> OK · <b>${EV.num(s.duplicates)}</b> duplicate(s) · <b>${EV.num(s.errors)}</b> with errors.
-               <b>${EV.num(s.to_import)}</b> session(s), ${EV.kwh(s.kwh)} will be imported.</p>
-            ${s.new_cars.length ? `<p class="hint">New car(s) to create: <b>${s.new_cars.map(esc).join(', ')}</b> (complete their specs and lease on the Cars page).</p>` : ''}
+            <p>${EV.t('{total} row(s): {ok} OK · {duplicates} duplicate(s) · {errors} with errors.', { total: `<b>${EV.num(s.total)}</b>`, ok: `<b>${EV.num(s.ok)}</b>`, duplicates: `<b>${EV.num(s.duplicates)}</b>`, errors: `<b>${EV.num(s.errors)}</b>` })}
+               ${EV.t('{n} session(s), {kwh} will be imported.', { n: `<b>${EV.num(s.to_import)}</b>`, kwh: EV.kwh(s.kwh) })}</p>
+            ${s.new_cars.length ? `<p class="hint">${EV.t('New car(s) to create: {cars} (complete their specs and lease on the Cars page).', { cars: `<b>${s.new_cars.map(esc).join(', ')}</b>` })}</p>` : ''}
             <div class="form-grid" style="margin:10px 0">
-                <div class="field"><label>Show</label><select id="imp-filter">${[['all', 'All rows'], ['ok', 'OK'], ['duplicate', 'Duplicates'], ['error', 'Errors']].map(([k, l]) => `<option value="${k}" ${k === filter ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-                ${s.duplicates ? `<div class="field span-2"><label class="check" style="margin-top:22px"><input type="checkbox" id="imp-skipdup" ${state.skipDuplicates ? 'checked' : ''}> Skip duplicates (same car, date, kWh and odometer)</label></div>` : ''}
+                <div class="field"><label>${EV.t('Show')}</label><select id="imp-filter">${[['all', EV.t('All rows')], ['ok', 'OK'], ['duplicate', EV.t('Duplicates')], ['error', EV.t('Errors')]].map(([k, l]) => `<option value="${k}" ${k === filter ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+                ${s.duplicates ? `<div class="field span-2"><label class="check" style="margin-top:22px"><input type="checkbox" id="imp-skipdup" ${state.skipDuplicates ? 'checked' : ''}> ${EV.t('Skip duplicates (same car, date, kWh and odometer)')}</label></div>` : ''}
             </div>
-            <div class="imp-grid"><table><thead><tr><th>Row</th><th>Status</th>${cols.map(([, l]) => `<th>${l}</th>`).join('')}<th>Messages</th></tr></thead><tbody>
+            <div class="imp-grid"><table><thead><tr><th>${EV.t('Row')}</th><th>${EV.t('Status')}</th>${cols.map(([, l]) => `<th>${l}</th>`).join('')}<th>${EV.t('Messages')}</th></tr></thead><tbody>
                 ${rows.slice(0, 1000).map(r => `<tr class="${r.status === 'error' ? 'imp-error' : r.status === 'duplicate' && state.skipDuplicates ? 'imp-above' : ''}"><th>${r.row}</th><td>${STATUS[r.status]}</td>
                     ${cols.map(([k]) => `<td class="${['kwh', 'cost', 'odometer'].includes(k) ? 'num' : ''}">${fmt(r, k)}</td>`).join('')}
                     <td class="small">${[...r.errors.map(e => `<span class="imp-err-text">${esc(e)}</span>`), ...r.warnings.map(w => `<span class="muted">${esc(w)}</span>`)].join('<br>')}</td></tr>`).join('')}
-                ${rows.length ? '' : `<tr><td colspan="${cols.length + 3}" class="muted">No row.</td></tr>`}
+                ${rows.length ? '' : `<tr><td colspan="${cols.length + 3}" class="muted">${EV.t('No row.')}</td></tr>`}
             </tbody></table></div>
-            ${s.errors ? '<p class="hint">Rows with errors are not imported: fix them in the file, or go back and check the column mapping and the date order.</p>' : ''}`;
+            ${s.errors ? `<p class="hint">${EV.t('Rows with errors are not imported: fix them in the file, or go back and check the column mapping and the date order.')}</p>` : ''}`;
         $('#imp-filter').addEventListener('change', e => { state.reviewFilter = e.target.value; renderReview(); });
         $('#imp-skipdup')?.addEventListener('change', e => { state.skipDuplicates = e.target.checked; renderReview(); });
-        setActions(`<button class="btn btn-ghost" data-act="back">‹ Back</button><button class="btn" data-act="import" ${s.to_import ? '' : 'disabled'}>⬆ Import ${EV.num(s.to_import)} session(s)</button>`);
+        setActions(`<button class="btn btn-ghost" data-act="back">‹ ${EV.t('Back')}</button><button class="btn" data-act="import" ${s.to_import ? '' : 'disabled'}>⬆ ${EV.t('Import {n} session(s)', { n: EV.num(s.to_import) })}</button>`);
     }
 
     async function doImport(button) {
@@ -329,12 +328,12 @@
         try {
             const r = await EV.api('POST', '/api/import/sessions', payload());
             EV.closeModal('import-modal');
-            EV.toast(`${r.imported} session(s) imported${r.cars_created.length ? `, ${r.cars_created.length} car(s) created` : ''}`);
+            EV.toast(EV.t('{n} session(s) imported', { n: r.imported }) + (r.cars_created.length ? `, ${EV.t('{n} car(s) created', { n: r.cars_created.length })}` : ''));
             EV.cars = null;
             state.onDone && state.onDone(r);
         } catch (e) {
             button.disabled = false;
-            alertBox('Import failed: ' + e.message);
+            alertBox(EV.t('Import failed: {error}', { error: e.message }));
         }
     }
 

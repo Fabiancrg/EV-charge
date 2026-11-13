@@ -1,38 +1,38 @@
 <div class="modal" id="session-modal">
     <div class="modal-box">
-        <h3><span id="sf-title">New charging session</span><button class="icon-btn" data-close title="Close">✕</button></h3>
+        <h3><span id="sf-title">{{ t("New charging session") }}</span><button class="icon-btn" data-close title="{{ t("Close") }}">✕</button></h3>
         <div class="form-error"></div>
         <form id="session-form" autocomplete="off">
             <div class="form-grid">
-                <div class="field span-2"><label>Car *</label><select name="car_id" required></select></div>
-                <div class="field"><label>Charge date *</label><input type="date" name="charge_date" required></div>
-                <div class="field"><label>Odometer (km)</label><input type="number" name="odometer" min="0" step="1" inputmode="numeric"><div class="hint" id="sf-odo-hint"></div></div>
-                <div class="field span-2"><label>Location</label><input type="text" name="location" list="dl-locations" placeholder="Home, Office, Fastned A4…"></div>
-                <div class="field span-2"><label>Provider</label><input type="text" name="provider" list="dl-providers" placeholder="Ionity, Engie, home wallbox…"></div>
-                <div class="field"><label>Energy (kWh) *</label><input type="number" name="kwh" min="0.001" step="0.001" inputmode="decimal" required></div>
-                <div class="field"><label>Start time</label><input type="time" name="start_time"></div>
-                <div class="field"><label>End time</label><input type="time" name="end_time"><div class="hint" id="sf-duration-hint"></div></div>
-                <div class="field span-2" id="sf-charger-field"><label>Charger</label><select name="charger_id"></select><div class="hint" id="sf-charger-hint"></div></div>
-                <div class="field"><label>Cost ({{ currency }})</label><input type="number" name="cost" min="0" step="0.01" inputmode="decimal"><div class="hint" id="sf-cost-hint">Optional</div></div>
-                <div class="field span-2"><label class="check" style="margin-top:24px"><input type="checkbox" name="to_reimburse"> To be reimbursed</label></div>
-                <div class="field span-2" id="sf-status"><label>Reimbursement status</label>
+                <div class="field span-2"><label>{{ t("Car") }} *</label><select name="car_id" required></select></div>
+                <div class="field"><label>{{ t("Charge date") }} *</label><input type="date" name="charge_date" required></div>
+                <div class="field"><label>{{ t("Odometer (km)") }}</label><input type="number" name="odometer" min="0" step="1" inputmode="numeric"><div class="hint" id="sf-odo-hint"></div></div>
+                <div class="field span-2"><label>{{ t("Location") }}</label><input type="text" name="location" list="dl-locations" placeholder="{{ t("Home, Office, Fastned A4…") }}"></div>
+                <div class="field span-2"><label>{{ t("Provider") }}</label><input type="text" name="provider" list="dl-providers" placeholder="{{ t("Ionity, Engie, home wallbox…") }}"></div>
+                <div class="field"><label>{{ t("Energy (kWh)") }} *</label><input type="number" name="kwh" min="0.001" step="0.001" inputmode="decimal" required></div>
+                <div class="field"><label>{{ t("Start time") }}</label><input type="time" name="start_time"></div>
+                <div class="field"><label>{{ t("End time") }}</label><input type="time" name="end_time"><div class="hint" id="sf-duration-hint"></div></div>
+                <div class="field span-2" id="sf-charger-field"><label>{{ t("Charger") }}</label><select name="charger_id"></select><div class="hint" id="sf-charger-hint"></div></div>
+                <div class="field"><label>{{ t("Cost") }} ({{ currency }})</label><input type="number" name="cost" min="0" step="0.01" inputmode="decimal"><div class="hint" id="sf-cost-hint">{{ t("Optional") }}</div></div>
+                <div class="field span-2"><label class="check" style="margin-top:24px"><input type="checkbox" name="to_reimburse"> {{ t("To be reimbursed") }}</label></div>
+                <div class="field span-2" id="sf-status"><label>{{ t("Reimbursement status") }}</label>
                     <select name="reimbursement_status">
                         <option value="" hidden></option>
-                        <option value="in_progress">⏳ In progress</option>
-                        <option value="not_recorded">⚠ Not recorded — not exported to the provider</option>
-                        <option value="recorded">✓ Recorded by the charger / provider</option>
-                        <option value="invoiced">🧾 Invoiced — invoice received</option>
-                        <option value="paid">💰 Paid</option>
+                        <option value="in_progress">⏳ {{ t("In progress") }}</option>
+                        <option value="not_recorded">⚠ {{ t("Not recorded — not exported to the provider") }}</option>
+                        <option value="recorded">✓ {{ t("Recorded by the charger / provider") }}</option>
+                        <option value="invoiced">🧾 {{ t("Invoiced — invoice received") }}</option>
+                        <option value="paid">💰 {{ t("Paid") }}</option>
                     </select></div>
-                <div class="field span-all"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
+                <div class="field span-all"><label>{{ t("Notes") }}</label><textarea name="notes" rows="2"></textarea></div>
             </div>
             <datalist id="dl-locations"></datalist>
             <datalist id="dl-providers"></datalist>
             <div class="modal-actions">
-                <button type="button" class="btn btn-danger left" id="sf-delete">🗑 Delete</button>
-                <button type="button" class="btn btn-ghost" data-close>Cancel</button>
-                <button type="button" class="btn btn-ghost" id="sf-again" title="Save and enter another session">Save &amp; add another</button>
-                <button type="submit" class="btn">💾 Save</button>
+                <button type="button" class="btn btn-danger left" id="sf-delete">🗑 {{ t("Delete") }}</button>
+                <button type="button" class="btn btn-ghost" data-close>{{ t("Cancel") }}</button>
+                <button type="button" class="btn btn-ghost" id="sf-again" title="{{ t("Save and enter another session") }}">{{ t("Save & add another") }}</button>
+                <button type="submit" class="btn">💾 {{ t("Save") }}</button>
             </div>
         </form>
     </div>

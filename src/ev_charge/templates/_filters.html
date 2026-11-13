@@ -1,42 +1,42 @@
 {# Shared filter bar (sessions and reports). The page script reads it with EV.readFilters(). #}
 <div class="filters" id="filters">
-    <div class="field"><label>Car</label><select id="f-car"><option value="">All cars</option></select></div>
-    <div class="field"><label>Period</label>
+    <div class="field"><label>{{ t("Car") }}</label><select id="f-car"><option value="">{{ t("All cars") }}</option></select></div>
+    <div class="field"><label>{{ t("Period") }}</label>
         <select id="f-preset">
-            <option value="all">All time</option>
-            <option value="this-month">This month</option>
-            <option value="last-month">Last month</option>
-            <option value="this-quarter">This quarter</option>
-            <option value="last-quarter">Last quarter</option>
-            <option value="last-3">Last 3 months</option>
-            <option value="last-12">Last 12 months</option>
-            <option value="this-year">This year</option>
-            <option value="last-year">Last year</option>
-            <option value="custom">Custom…</option>
+            <option value="all">{{ t("All time") }}</option>
+            <option value="this-month">{{ t("This month") }}</option>
+            <option value="last-month">{{ t("Last month") }}</option>
+            <option value="this-quarter">{{ t("This quarter") }}</option>
+            <option value="last-quarter">{{ t("Last quarter") }}</option>
+            <option value="last-3">{{ t("Last 3 months") }}</option>
+            <option value="last-12">{{ t("Last 12 months") }}</option>
+            <option value="this-year">{{ t("This year") }}</option>
+            <option value="last-year">{{ t("Last year") }}</option>
+            <option value="custom">{{ t("Custom…") }}</option>
         </select>
     </div>
-    <div class="field"><label>From</label><input type="date" id="f-from"></div>
-    <div class="field"><label>To</label><input type="date" id="f-to"></div>
+    <div class="field"><label>{{ t("From") }}</label><input type="date" id="f-from"></div>
+    <div class="field"><label>{{ t("To") }}</label><input type="date" id="f-to"></div>
     {% if with_reimburse %}
-    <div class="field"><label>Reimbursement</label>
-        <select id="f-reimb"><option value="">All</option><option value="true">To reimburse</option><option value="false">Not to reimburse</option></select>
+    <div class="field"><label>{{ t("Reimbursement") }}</label>
+        <select id="f-reimb"><option value="">{{ t("All") }}</option><option value="true">{{ t("To reimburse") }}</option><option value="false">{{ t("Not to reimburse") }}</option></select>
     </div>
     {% endif %}
     {% if with_status %}
-    <div class="field"><label>Status</label>
-        <select id="f-status"><option value="">All statuses</option><option value="outstanding">Not paid yet</option>
-            <option value="in_progress">⏳ In progress</option><option value="not_recorded">⚠ Not recorded</option><option value="recorded">✓ Recorded</option>
-            <option value="invoiced">🧾 Invoiced</option><option value="paid">💰 Paid</option></select>
+    <div class="field"><label>{{ t("Status") }}</label>
+        <select id="f-status"><option value="">{{ t("All statuses") }}</option><option value="outstanding">{{ t("Not paid yet") }}</option>
+            <option value="in_progress">⏳ {{ t("In progress") }}</option><option value="not_recorded">⚠ {{ t("Not recorded") }}</option><option value="recorded">✓ {{ t("Recorded") }}</option>
+            <option value="invoiced">🧾 {{ t("Invoiced") }}</option><option value="paid">💰 {{ t("Paid") }}</option></select>
     </div>
     {% endif %}
     {% if with_charger %}
-    <div class="field"><label>Charger</label><select id="f-charger"><option value="">All chargers</option></select></div>
+    <div class="field"><label>{{ t("Charger") }}</label><select id="f-charger"><option value="">{{ t("All chargers") }}</option></select></div>
     {% endif %}
     {% if with_company %}
-    <div class="field"><label>Reimbursed by</label><select id="f-company"><option value="__all__">All</option></select></div>
+    <div class="field"><label>{{ t("Reimbursed by") }}</label><select id="f-company"><option value="__all__">{{ t("All") }}</option></select></div>
     {% endif %}
     {% if with_reimburse %}
-    <div class="field grow"><label>Search</label><input type="search" id="f-q" placeholder="Location, provider, notes…"></div>
+    <div class="field grow"><label>{{ t("Search") }}</label><input type="search" id="f-q" placeholder="{{ t("Location, provider, notes…") }}"></div>
     {% endif %}
 </div>
 <script>
@@ -81,8 +81,8 @@
     EV.initFilters = async (onChange, defaultPreset = 'all') => {
         const cars = EV.cars || await EV.loadCars();
         const mixed = cars.some(c => c.active) && cars.some(c => !c.active);
-        $('f-car').innerHTML = `<option value="">All cars${mixed ? ' (active and inactive)' : ''}</option>`
-            + (mixed ? '<option value="@active">Active cars</option><option value="@inactive">Inactive cars</option>' : '') + EV.activeOptions(cars);
+        $('f-car').innerHTML = `<option value="">${mixed ? EV.t('All cars (active and inactive)') : EV.t('All cars')}</option>`
+            + (mixed ? `<option value="@active">${EV.t('Active cars')}</option><option value="@inactive">${EV.t('Inactive cars')}</option>` : '') + EV.activeOptions(cars);
         const u = new URLSearchParams(location.search);
         const wanted = u.getAll('car_id').sort().join(',');
         const group = (on) => cars.filter(c => c.active === on).map(c => String(c.id)).sort().join(',');
@@ -103,12 +103,12 @@
         if ($('f-charger') || $('f-company')) {
             const chargers = EV.chargers || await EV.loadChargers();
             if ($('f-charger')) {
-                $('f-charger').innerHTML = '<option value="">All chargers</option><option value="0">No charger</option>' + EV.activeOptions(chargers, c => `🔌 ${EV.esc(c.name)}`);
+                $('f-charger').innerHTML = `<option value="">${EV.t('All chargers')}</option><option value="0">${EV.t('No charger')}</option>` + EV.activeOptions(chargers, c => `🔌 ${EV.esc(c.name)}`);
                 $('f-charger').value = u.get('charger_id') || '';
             }
             if ($('f-company')) {
                 const companies = [...new Set(chargers.map(c => c.reimbursement_company).filter(Boolean))].sort();
-                $('f-company').innerHTML = '<option value="__all__">All</option>' + companies.map(c => `<option value="${EV.esc(c)}">${EV.esc(c)}</option>`).join('') + '<option value="__none__">No charger</option>';
+                $('f-company').innerHTML = `<option value="__all__">${EV.t('All')}</option>` + companies.map(c => `<option value="${EV.esc(c)}">${EV.esc(c)}</option>`).join('') + `<option value="__none__">${EV.t('No charger')}</option>`;
                 $('f-company').value = !u.has('company') ? '__all__' : (u.get('company') === '' ? '__none__' : u.get('company'));
                 if (!$('f-company').value) $('f-company').value = '__all__';
             }

@@ -72,7 +72,7 @@
         const opts = { method, headers: {} };
         if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
         const r = await fetch(url, opts);
-        if (r.status === 401 && !url.startsWith('/api/auth/')) { location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`; throw new Error('Signed out'); }
+        if (r.status === 401 && !url.startsWith('/api/auth/')) { location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`; throw new Error(EV.t('Signed out')); }
         if (r.status === 204) return null;
         const data = await r.json().catch(() => null);
         if (!r.ok) {
@@ -87,11 +87,11 @@
 
     /* Reimbursement status: label, badge (icon + text, never colour alone) */
     EV.STATUSES = [
-        ['in_progress', 'In progress', '⏳', 'badge-info'],
-        ['not_recorded', 'Not recorded', '⚠', 'badge-err'],
-        ['recorded', 'Recorded', '✓', 'badge-warn'],
-        ['invoiced', 'Invoiced', '🧾', 'badge-info'],
-        ['paid', 'Paid', '💰', 'badge-ok'],
+        ['in_progress', EV.t('In progress'), '⏳', 'badge-info'],
+        ['not_recorded', EV.t('Not recorded'), '⚠', 'badge-err'],
+        ['recorded', EV.t('Recorded'), '✓', 'badge-warn'],
+        ['invoiced', EV.t('Invoiced'), '🧾', 'badge-info'],
+        ['paid', EV.t('Paid'), '💰', 'badge-ok'],
     ];
     EV.statusLabel = (st) => (EV.STATUSES.find(x => x[0] === st) || [null, ''])[1];
     EV.statusBadge = (st) => {
@@ -101,14 +101,14 @@
 
     /* Live charger state (from the charger's API) */
     EV.LIVE = {
-        unplugged: ['Unplugged', '⏏', 'badge'], pending_approval: ['Waiting for approval', '⏸', 'badge-warn'], plugged_in: ['Plugged in', '🔌', 'badge-info'],
-        charging: ['Charging', '⚡', 'badge-ok'], paused: ['Paused', '⏸', 'badge-warn'], finished: ['Finished', '✓', 'badge-info'], offline: ['Offline', '⚠', 'badge-err'],
+        unplugged: [EV.t('Unplugged'), '⏏', 'badge'], pending_approval: [EV.t('Waiting for approval'), '⏸', 'badge-warn'], plugged_in: [EV.t('Plugged in'), '🔌', 'badge-info'],
+        charging: [EV.t('Charging'), '⚡', 'badge-ok'], paused: [EV.t('Paused'), '⏸', 'badge-warn'], finished: [EV.t('Finished'), '✓', 'badge-info'], offline: [EV.t('Offline'), '⚠', 'badge-err'],
     };
     EV.liveBadge = (lv) => { const x = EV.LIVE[lv?.status] || [lv?.status || '?', '', 'badge']; return `<span class="badge ${x[2]}">${x[1]} ${x[0]}</span>`; };
     EV.ago = (iso) => {
         if (!iso) return '';
         const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-        return s < 90 ? 'just now' : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 129600 ? `${Math.round(s / 3600)} h ago` : EV.date(iso.slice(0, 10));
+        return s < 90 ? EV.t('just now') : s < 5400 ? EV.t('{n} min ago', { n: Math.round(s / 60) }) : s < 129600 ? EV.t('{n} h ago', { n: Math.round(s / 3600) }) : EV.date(iso.slice(0, 10));
     };
 
     /* <option>s of cars or chargers: the active ones, then the inactive ones under "Inactive" (old cars and chargers stay
@@ -123,7 +123,7 @@
         const n = list.filter(x => !x.active).length;
         const all = state.show || n === list.length;  // nothing but inactive ones: show them
         btn.style.display = n && n < list.length ? '' : 'none';
-        btn.textContent = state.show ? `Hide inactive (${n})` : `Show inactive (${n})`;
+        btn.textContent = state.show ? EV.t('Hide inactive ({n})', { n }) : EV.t('Show inactive ({n})', { n });
         return all ? list : list.filter(x => x.active);
     };
 
@@ -227,14 +227,14 @@
         const charger = chargerOf(f.charger_id.value);
         const home = !!(charger && charger.uses_home_tariff);
         f.cost.disabled = home;
-        document.getElementById('sf-charger-hint').textContent = charger?.reimbursement_company ? `Reimbursed by ${charger.reimbursement_company}` : '';
-        if (!home) { hint.textContent = 'Optional'; return; }
+        document.getElementById('sf-charger-hint').textContent = charger?.reimbursement_company ? EV.t('Reimbursed by {company}', { company: charger.reimbursement_company }) : '';
+        if (!home) { hint.textContent = EV.t('Optional'); return; }
         const d = f.charge_date.value;
         const t = (tariffs || []).find(t => t.valid_from <= d && (!t.valid_to || d <= t.valid_to));
         const kwh = Number(f.kwh.value);
         hint.textContent = t
-            ? `🏠 Home tariff: ${EV.money(t.price_per_kwh, 4)}/kWh${kwh ? ` → ${EV.money(kwh * t.price_per_kwh)}` : ''}`
-            : '🏠 No tariff for this date yet';
+            ? `🏠 ${EV.t('Home tariff: {price}/kWh', { price: EV.money(t.price_per_kwh, 4) })}${kwh ? ` → ${EV.money(kwh * t.price_per_kwh)}` : ''}`
+            : `🏠 ${EV.t('No tariff for this date yet')}`;
     }
     // The reimbursement status only applies to sessions to be reimbursed
     function updateStatus() {
@@ -249,7 +249,7 @@
     function fillChargers(current) {
         const f = document.getElementById('session-form');
         const list = (EV.chargers || []).filter(c => c.active || c.id === current);
-        f.charger_id.innerHTML = '<option value="">— none (public charger…) —</option>' +
+        f.charger_id.innerHTML = `<option value="">— ${EV.t('none (public charger…)')} —</option>` +
             list.map(c => `<option value="${c.id}">${EV.esc(c.name)}${c.reimbursement_company ? ' · ' + EV.esc(c.reimbursement_company) : ''}</option>`).join('');
         document.getElementById('sf-charger-field').style.display = list.length ? '' : 'none';
     }
@@ -261,7 +261,7 @@
         fill('dl-locations', suggestions.locations);
         fill('dl-providers', suggestions.providers);
         const hint = document.getElementById('sf-odo-hint');
-        hint.textContent = suggestions.last_odometer != null ? `Last reading: ${EV.km(suggestions.last_odometer)} (${EV.date(suggestions.last_odometer_date)})` : '';
+        hint.textContent = suggestions.last_odometer != null ? EV.t('Last reading: {km} ({date})', { km: EV.km(suggestions.last_odometer), date: EV.date(suggestions.last_odometer_date) }) : '';
     }
 
     function updateDuration() {
@@ -281,14 +281,14 @@
         if (!EV.cars) await EV.loadCars();
         // New sessions: the active cars the user may add sessions to; editing: the session's car too
         const active = EV.cars.filter(c => (c.active && EV.canCar('sessions:create', c.id)) || (session && c.id === session.car_id));
-        if (!active.length) { EV.toast('No car where you may add sessions', true); return; }
+        if (!active.length) { EV.toast(EV.t('No car where you may add sessions'), true); return; }
         if (!tariffs) tariffs = await EV.api('GET', '/api/tariffs').catch(() => []);
         if (!EV.chargers) await EV.loadChargers();
         fillChargers(session?.charger_id);
         f.car_id.innerHTML = active.map(c => `<option value="${c.id}">${EV.esc(c.name)}${c.license_plate ? ' · ' + EV.esc(c.license_plate) : ''}</option>`).join('');
         editingId = session ? session.id : null;
         afterSave = opts.onSaved || null;
-        document.getElementById('sf-title').textContent = session ? 'Edit charging session' : 'New charging session';
+        document.getElementById('sf-title').textContent = session ? EV.t('Edit charging session') : EV.t('New charging session');
         document.getElementById('sf-delete').style.display = session ? '' : 'none';
         document.getElementById('sf-again').style.display = session ? 'none' : '';
         if (session) {
@@ -316,9 +316,9 @@
                 ? await EV.api('PUT', `/api/sessions/${editingId}`, body)
                 : await EV.api('POST', '/api/sessions', body);
             if (body.odometer != null && suggestions && suggestions.last_odometer != null && !editingId && body.odometer < suggestions.last_odometer) {
-                EV.toast(`Saved — note: odometer is lower than the last reading (${EV.km(suggestions.last_odometer)})`, true);
+                EV.toast(EV.t('Saved — note: odometer is lower than the last reading ({km})', { km: EV.km(suggestions.last_odometer) }), true);
             } else {
-                EV.toast(editingId ? 'Session updated' : `Session saved: ${EV.kwh(saved.kwh)}`);
+                EV.toast(editingId ? EV.t('Session updated') : EV.t('Session saved: {kwh}', { kwh: EV.kwh(saved.kwh) }));
             }
             if (keepOpen) {
                 const keep = { car_id: f.car_id.value, charge_date: f.charge_date.value };
@@ -342,10 +342,10 @@
         f.addEventListener('submit', (e) => { e.preventDefault(); saveSession(false); });
         document.getElementById('sf-again').addEventListener('click', () => { if (f.reportValidity()) saveSession(true); });
         document.getElementById('sf-delete').addEventListener('click', async () => {
-            if (!editingId || !confirm('Delete this charging session?')) return;
+            if (!editingId || !confirm(EV.t('Delete this charging session?'))) return;
             try {
                 await EV.api('DELETE', `/api/sessions/${editingId}`);
-                EV.toast('Session deleted');
+                EV.toast(EV.t('Session deleted'));
                 EV.closeModal('session-modal');
                 afterSave && afterSave(null);
             } catch (err) { EV.formError('session-modal', err); }
