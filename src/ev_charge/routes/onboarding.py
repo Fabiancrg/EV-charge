@@ -25,9 +25,10 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import audit, mail
+from .. import audit, i18n, mail
 from ..auth import Principal, _recent, check_password_strength, client_ip, hash_password, principal_for, require, start_session
 from ..database import get_db
+from ..i18n import translate as tr
 from ..models import Car, CarGrant, Group, Invitation, Role, SignupRequest, User
 from ..pricing import get_setting, set_setting
 from ..schemas import CarGrantIO, Me
@@ -73,7 +74,8 @@ def _origin(request: Request) -> str:
     return str(request.base_url).rstrip("/")
 
 
-async def _send(db: Session, to: str, subject: str, lines: list[str], link: str | None = None, button: str = "") -> None:
+async def _send(db: Session, to: str, language: str | None, subject: str, lines: list[str], link: str | None = None, button: str = "") -> None:
+    """An e-mail of a few lines and, usually, a button to a link; subject, lines and button already in the recipient's language."""
     text = "\n\n".join(lines + ([f"{button}: {link}"] if link else []) + ["— EV Charge"])
     esc = lambda s: s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")  # noqa: E731
     html = "".join(f"<p>{esc(line)}</p>" for line in lines)
@@ -81,11 +83,15 @@ async def _send(db: Session, to: str, subject: str, lines: list[str], link: str 
         html += (
             f'<p><a href="{esc(link)}" style="display:inline-block;padding:10px 18px;background:#4f6df5;color:#fff;border-radius:8px;text-decoration:none">{esc(button)}</a></p>'
         )
-        html += f'<p style="color:#666;font-size:12px">If the button doesn\'t work, copy this address into your browser:<br>{esc(link)}</p>'
+        html += f'<p style="color:#666;font-size:12px">{esc(tr(language, "If the button doesn't work, copy this address into your browser:"))}<br>{esc(link)}</p>'
     try:
         await mail.send_mail(db, [to], subject, text, f'<div style="font-family:sans-serif;font-size:14px">{html}<p style="color:#666">— EV Charge</p></div>')
     except mail.MailError as exc:
-        raise HTTPException(502, f"The e-mail couldn't be sent ({exc})") from None
+        raise HTTPException(502, tr(language, "The e-mail couldn't be sent ({error})", error=exc)) from None
+
+
+def _hello(language: str | None, name: str | None) -> str:
+    return tr(language, "Hello {name},", name=name) if name else tr(language, "Hello,")
 
 
 def _email(value: str) -> str:
@@ -134,13 +140,14 @@ def signup_state(db: Session = Depends(get_db)) -> dict[str, bool]:
 @router.post("/api/signup", status_code=202)
 async def request_signup(body: SignupIn, request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
     """Ask for a group. Answers the same whatever the address, so nobody learns who has an account here."""
+    lang = i18n.language_of(request)
     if not signup_enabled(db):
-        raise HTTPException(403, "Sign-up requests are closed")
+        raise HTTPException(403, tr(lang, "Sign-up requests are closed"))
     key = f"signup:{client_ip(request) or '?'}"
     if len(_recent(key)) >= MAX_REQUESTS_PER_ADDRESS:
-        raise HTTPException(429, "Too many requests: try again in a few minutes")
+        raise HTTPException(429, tr(lang, "Too many requests: try again in a few minutes"))
     _recent(key).append(time.monotonic())
-    answer = {"detail": "Check your mailbox: a link to confirm your address was sent"}
+    answer = {"detail": tr(lang, "Check your mailbox: a link to confirm your address was sent")}
     if db.scalar(select(User.id).where(func.lower(User.email) == body.email)):
         return answer  # already has an account: nothing to do (and nothing to tell)
     existing = db.scalar(select(SignupRequest).where(SignupRequest.email == body.email, SignupRequest.status.in_(("unverified", "pending"))))
@@ -149,13 +156,14 @@ async def request_signup(body: SignupIn, request: Request, db: Session = Depends
     token = secrets.token_urlsafe(32)
     req = existing or SignupRequest(email=body.email)
     req.full_name, req.group_name, req.message = body.full_name, body.group_name, (body.message or "").strip() or None
-    req.status, req.token_hash, req.ip, req.created_at = "unverified", _hash(token), client_ip(request), datetime.now(UTC)
+    req.status, req.token_hash, req.ip, req.created_at, req.language = "unverified", _hash(token), client_ip(request), datetime.now(UTC), lang
     db.add(req)
     await _send(
-        db, body.email, "Confirm your e-mail address",
-        [f"Hello {body.full_name},", f"You asked for access to EV Charge for “{body.group_name}”. Confirm your e-mail address to send your request to the administrator.",
-         f"The link is valid for {VERIFY_HOURS} hours. If you didn't ask for this, ignore this e-mail."],
-        f"{_origin(request)}/signup/verify?token={token}", "Confirm my address",
+        db, body.email, lang, tr(lang, "Confirm your e-mail address"),
+        [_hello(lang, body.full_name),
+         tr(lang, "You asked for access to EV Charge for “{group}”. Confirm your e-mail address to send your request to the administrator.", group=body.group_name),
+         tr(lang, "The link is valid for {hours} hours. If you didn't ask for this, ignore this e-mail.", hours=VERIFY_HOURS)],
+        f"{_origin(request)}/signup/verify?token={token}", tr(lang, "Confirm my address"),
     )  # fmt: skip
     db.commit()
     return answer
@@ -164,26 +172,23 @@ async def request_signup(body: SignupIn, request: Request, db: Session = Depends
 @router.post("/api/signup/verify")
 async def verify_signup(body: TokenIn, request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
     """The link of the verification e-mail: the request now waits for an administrator."""
+    lang = i18n.language_of(request)
     req = db.scalar(select(SignupRequest).where(SignupRequest.token_hash == _hash(body.token)))
     if req is None:
-        raise HTTPException(404, "This link isn't valid (already used, or replaced by a newer one)")
+        raise HTTPException(404, tr(lang, "This link isn't valid (already used, or replaced by a newer one)"))
     if req.status == "unverified":
         if datetime.now(UTC) - _aware(req.created_at) > timedelta(hours=VERIFY_HOURS):
-            raise HTTPException(410, "This link has expired: fill in the request again")
+            raise HTTPException(410, tr(lang, "This link has expired: fill in the request again"))
         req.status, req.verified_at = "pending", datetime.now(UTC)
-        admins = [u.email for u in db.scalars(select(User).where(User.active.is_(True))) if u.email and principal_for(u).has("users:manage")]
+        admins = [(u.email, u.language) for u in db.scalars(select(User).where(User.active.is_(True))) if u.email and principal_for(u).has("users:manage")]
         db.commit()
-        for address in admins:  # best effort: the request is recorded whatever happens
+        for address, theirs in admins:  # best effort: the request is recorded whatever happens
             try:
-                await mail.send_mail(
-                    db,
-                    [address],
-                    "EV Charge: a sign-up request to review",
-                    f"{req.full_name} <{req.email}> asks for a group “{req.group_name}”.\n\n{_origin(request)}/signup-requests\n",
-                )
+                line = tr(theirs, "{name} <{email}> asks for a group “{group}”.", name=req.full_name, email=req.email, group=req.group_name)
+                await mail.send_mail(db, [address], tr(theirs, "EV Charge: a sign-up request to review"), f"{line}\n\n{_origin(request)}/signup-requests\n")
             except mail.MailError:
                 pass
-    return {"status": req.status, "detail": "Your address is confirmed: an administrator will review your request and you will receive an e-mail"}
+    return {"status": req.status, "detail": tr(lang, "Your address is confirmed: an administrator will review your request and you will receive an e-mail")}
 
 
 # ── Sign-up requests: administrators ─────────────────────────────────────────
@@ -264,20 +269,22 @@ async def approve_request(request_id: int, body: Approval, request: Request, me:
     group = Group(name=body.group_name, max_members=body.max_members, notes=f"Requested by {r.full_name} ({r.email})")
     db.add(group)
     db.flush()
-    user = User(username=body.username, full_name=r.full_name, email=r.email, password_hash="!", group_id=group.id, group_manager=True)
+    lang = r.language
+    user = User(username=body.username, full_name=r.full_name, email=r.email, password_hash="!", group_id=group.id, group_manager=True, language=lang)
     db.add(user)
     db.flush()
     token = secrets.token_urlsafe(32)
-    db.add(Invitation(group_id=group.id, email=r.email, full_name=r.full_name, token_hash=_hash(token), user_id=user.id, invited_by=me.display_name,
+    db.add(Invitation(group_id=group.id, email=r.email, full_name=r.full_name, token_hash=_hash(token), user_id=user.id, invited_by=me.display_name, language=lang,
                       expires_at=datetime.now(UTC) + timedelta(days=INVITATION_DAYS)))  # fmt: skip
     r.status, r.decided_at, r.decided_by, r.user_id, r.token_hash = "approved", datetime.now(UTC), me.display_name, user.id, None
     audit.record(db, request, "signup.approved", target=f"user:{user.id}", details={"email": r.email, "group": group.name, "username": user.username})
     await _send(
-        db, r.email, "Your EV Charge access is ready",
-        [f"Hello {r.full_name},", f"Your request was accepted. Your group “{group.name}” is ready, and your username is {user.username}.",
-         f"Choose your password to sign in (link valid for {INVITATION_DAYS} days). "
-         f"You can then add your cars and chargers, and invite up to {group.max_members - 1} other member(s)."],
-        f"{_origin(request)}/invite?token={token}", "Choose my password",
+        db, r.email, lang, tr(lang, "Your EV Charge access is ready"),
+        [_hello(lang, r.full_name),
+         tr(lang, "Your request was accepted. Your group “{group}” is ready, and your username is {username}.", group=group.name, username=user.username),
+         tr(lang, "Choose your password to sign in (link valid for {days} days). You can then add your cars and chargers, and invite up to {n} other member(s).",
+            days=INVITATION_DAYS, n=group.max_members - 1)],
+        f"{_origin(request)}/invite?token={token}", tr(lang, "Choose my password"),
     )  # fmt: skip
     db.commit()  # after the e-mail: a request isn't approved without its owner being told
     return _request_out(r)
@@ -290,7 +297,8 @@ async def reject_request(request_id: int, request: Request, me: Principal = Depe
     audit.record(db, request, "signup.rejected", details={"email": r.email, "group": r.group_name})
     db.commit()
     try:  # a courtesy: the decision stands even if the e-mail can't leave
-        await mail.send_mail(db, [r.email], "Your EV Charge request", f"Hello {r.full_name},\n\nYour request for access to EV Charge wasn't accepted.\n\n— EV Charge\n")
+        text = tr(r.language, "Your request for access to EV Charge wasn't accepted.")
+        await mail.send_mail(db, [r.email], tr(r.language, "Your EV Charge request"), f"{_hello(r.language, r.full_name)}\n\n{text}\n\n— EV Charge\n")
     except mail.MailError:
         pass
     return _request_out(r)
@@ -341,12 +349,14 @@ def _managed_invitation(db: Session, invitation_id: int, me: Principal) -> Invit
 
 
 async def _send_invitation(db: Session, request: Request, i: Invitation, token: str) -> None:
+    lang = i.language
+    who = i.invited_by or tr(lang, "A manager")
     await _send(
-        db, i.email, f"Join “{i.group.name}” on EV Charge",
-        [f"Hello{' ' + i.full_name if i.full_name else ''},",
-         f"{i.invited_by or 'A manager'} invites you to join the group “{i.group.name}” on EV Charge, to record and follow charging sessions.",
-         f"The link is valid for {INVITATION_DAYS} days."],
-        f"{_origin(request)}/invite?token={token}", "Join the group",
+        db, i.email, lang, tr(lang, "Join “{group}” on EV Charge", group=i.group.name),
+        [_hello(lang, i.full_name),
+         tr(lang, "{who} invites you to join the group “{group}” on EV Charge, to record and follow charging sessions.", who=who, group=i.group.name),
+         tr(lang, "The link is valid for {days} days.", days=INVITATION_DAYS)],
+        f"{_origin(request)}/invite?token={token}", tr(lang, "Join the group"),
     )  # fmt: skip
 
 
@@ -381,6 +391,7 @@ async def invite(body: InvitationIn, request: Request, me: Principal = Depends(m
     i = previous or Invitation(group_id=group.id, email=body.email)
     i.full_name, i.grants, i.token_hash = (body.full_name or "").strip() or None, json.dumps([g.model_dump() for g in body.grants]), _hash(token)
     i.invited_by, i.created_at, i.expires_at = me.display_name, datetime.now(UTC), datetime.now(UTC) + timedelta(days=INVITATION_DAYS)
+    i.language = i18n.language_of(request, me.user)  # the inviter's: the best guess for someone we know nothing of yet
     db.add(i)
     db.flush()
     audit.record(db, request, "invitation.sent", details={"email": i.email, "group": group.name})
@@ -398,8 +409,9 @@ async def resend_invitation(invitation_id: int, request: Request, me: Principal 
     if i.user_id is None:
         await _send_invitation(db, request, i, token)
     else:
-        lines = [f"Hello{' ' + i.full_name if i.full_name else ''},", f"Here is a new link to choose your password for the group “{i.group.name}”."]
-        await _send(db, i.email, "Your EV Charge access is ready", lines, f"{_origin(request)}/invite?token={token}", "Choose my password")
+        lang = i.language
+        lines = [_hello(lang, i.full_name), tr(lang, "Here is a new link to choose your password for the group “{group}”.", group=i.group.name)]
+        await _send(db, i.email, lang, tr(lang, "Your EV Charge access is ready"), lines, f"{_origin(request)}/invite?token={token}", tr(lang, "Choose my password"))
     db.commit()
     return _invitation_out(i)
 
@@ -413,19 +425,19 @@ def revoke_invitation(invitation_id: int, request: Request, me: Principal = Depe
     return Response(status_code=204)
 
 
-def _open(db: Session, token: str) -> Invitation:
+def _open(db: Session, token: str, lang: str | None = None) -> Invitation:
     i = db.scalar(select(Invitation).where(Invitation.token_hash == _hash(token)))
     if i is None or i.accepted_at is not None:
-        raise HTTPException(404, "This invitation isn't valid (already used, replaced by a newer one, or withdrawn)")
+        raise HTTPException(404, tr(lang, "This invitation isn't valid (already used, replaced by a newer one, or withdrawn)"))
     if _aware(i.expires_at) <= datetime.now(UTC):
-        raise HTTPException(410, "This invitation has expired: ask for a new one")
+        raise HTTPException(410, tr(lang, "This invitation has expired: ask for a new one"))
     return i
 
 
 @router.get("/api/invitations/open")
-def open_invitation(token: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+def open_invitation(token: str, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
     """What the invitation page shows (public: the token is the key)."""
-    i = _open(db, token)
+    i = _open(db, token, i18n.language_of(request))
     user = db.get(User, i.user_id) if i.user_id else None
     return {
         "group_name": i.group.name, "email": i.email, "full_name": i.full_name, "invited_by": i.invited_by,
@@ -437,24 +449,25 @@ def open_invitation(token: str, db: Session = Depends(get_db)) -> dict[str, Any]
 @router.post("/api/invitations/accept", response_model=Me)
 def accept_invitation(body: Acceptance, request: Request, response: Response, db: Session = Depends(get_db)) -> Me:
     """Create the member's account (or set the password of the account made for an approved request) and sign them in."""
-    i = _open(db, body.token)
+    lang = i18n.language_of(request)
+    i = _open(db, body.token, lang)
     with_password = local_login_allowed(db)
     if with_password:
-        if not body.password:
-            raise HTTPException(422, "Choose a password")
+        if not body.password or len(body.password) < 8:
+            raise HTTPException(422, tr(lang, "Choose a password of at least 8 characters"))
         check_password_strength(body.password)
     if i.user_id is not None:
         user = db.get(User, i.user_id)
         if user is None or not user.active:
-            raise HTTPException(404, "This account no longer exists")
+            raise HTTPException(404, tr(lang, "This account no longer exists"))
     else:
         if not body.username:
-            raise HTTPException(422, "Choose a username")
+            raise HTTPException(422, tr(lang, "Choose a username"))
         username = body.username.strip().lower()
         if db.scalar(select(User.id).where(User.username == username)):
-            raise HTTPException(409, f"The username '{username}' is taken: choose another one")
+            raise HTTPException(409, tr(lang, "The username '{username}' is taken: choose another one", username=username))
         if db.scalar(select(User.id).where(func.lower(User.email) == i.email)):
-            raise HTTPException(409, "An account with this e-mail address already exists: sign in instead")
+            raise HTTPException(409, tr(lang, "An account with this e-mail address already exists: sign in instead"))
         user = User(username=username, full_name=(body.full_name or i.full_name or "").strip() or None, email=i.email, password_hash="!", group_id=i.group_id)
         db.add(user)
         db.flush()
@@ -466,6 +479,7 @@ def accept_invitation(body: Acceptance, request: Request, response: Response, db
     if with_password:
         user.password_hash = hash_password(body.password)  # type: ignore[arg-type]
     i.accepted_at, i.user_id = datetime.now(UTC), user.id
+    user.language = i18n.valid(request.cookies.get(i18n.COOKIE)) or user.language or i18n.valid(i.language)  # the one chosen on the page, else the e-mail's
     audit.record(db, request, "invitation.accepted", target=f"user:{user.id}", user=user, details={"group": i.group.name})
     db.commit()
     db.refresh(user)

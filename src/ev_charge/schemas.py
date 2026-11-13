@@ -186,6 +186,7 @@ class UserOut(BaseModel):
     group_id: int | None = None
     group_name: str | None = None
     group_manager: bool = False
+    language: str | None = None  # of the interface; empty: the browser's
 
 
 class Me(UserOut):

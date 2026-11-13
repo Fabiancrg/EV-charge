@@ -39,7 +39,7 @@
     let data = null;
     const charts = {};
     const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-    const monthLabel = (m) => new Date(m + '-01T00:00:00').toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+    const monthLabel = (m) => new Date(m + '-01T00:00:00').toLocaleDateString(EV.locale, { month: 'short', year: '2-digit' });
 
     function chrome() {
         const dark = EV.theme() === 'dark';
@@ -157,7 +157,7 @@
             opts.interaction = { mode: 'nearest', intersect: false };
             opts.scales.x = {
                 type: 'linear', min: ts(l.start), max: ts(l.end), grid: { display: false }, border: { color: c.axis },
-                ticks: { color: c.muted, maxTicksLimit: 8, callback: (v) => new Date(v).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) },
+                ticks: { color: c.muted, maxTicksLimit: 8, callback: (v) => new Date(v).toLocaleDateString(EV.locale, { month: 'short', year: 'numeric' }) },
             };
             opts.scales.y.beginAtZero = false;
             opts.plugins.tooltip.callbacks.title = (items) => items.length ? EV.date(new Date(items[0].parsed.x).toISOString().slice(0, 10)) : '';

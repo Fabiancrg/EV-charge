@@ -1,19 +1,25 @@
 {% extends "base.html" %}
-{% block title %}My account · EV Charge{% endblock %}
+{% block title %}{{ t("My account") }} · EV Charge{% endblock %}
 {% block content %}
 <div class="content">
-    <div class="page-head"><h2>My account</h2><button class="btn btn-ghost" id="acc-pw">🔑 {{ 'Change password' if me.has_password else 'Set a password' }}</button></div>
+    <div class="page-head"><h2>{{ t("My account") }}</h2><button class="btn btn-ghost" id="acc-pw">🔑 {{ t("Change password") if me.has_password else t("Set a password") }}</button></div>
     <dl class="kv" style="max-width:520px;font-size:var(--font-base)">
-        <dt>Username</dt><dd>{{ me.username }}</dd>
-        <dt>Global role</dt><dd>{{ me.role_name or '—' }}</dd>
-        <dt>Sign-in</dt><dd>{{ 'Single sign-on' if me.sso else '' }}{{ ' + ' if me.sso and me.has_password }}{{ 'Password' if me.has_password }}</dd>
+        <dt>{{ t("Username") }}</dt><dd>{{ me.username }}</dd>
+        <dt>{{ t("Global role") }}</dt><dd>{{ me.role_name or '—' }}</dd>
+        <dt>{{ t("Sign-in") }}</dt><dd>{{ t("Single sign-on") if me.sso else '' }}{{ ' + ' if me.sso and me.has_password }}{{ t("Password") if me.has_password }}</dd>
+        {% if me.group_name %}<dt>{{ t("Group") }}</dt><dd>👥 {{ me.group_name }}{% if me.manages_group %} ({{ t("manager") }}){% endif %}</dd>{% endif %}
+        <dt><label for="acc-lang">{{ t("Language") }}</label></dt>
+        <dd><select id="acc-lang" style="max-width:260px">
+            <option value="">{{ t("Automatic (the language of my browser)") }}</option>
+            {% for code, name in languages.items() %}<option value="{{ code }}" {{ 'selected' if me.language == code }}>{{ name }}</option>{% endfor %}
+        </select><div class="hint">{{ t("Language of the interface and of the e-mails you receive. The translation is in progress: pages not translated yet stay in English.") }}</div></dd>
     </dl>
     <div id="acc-perms" class="small" style="margin-top:12px"></div>
 </div>
 
 <div class="content">
-    <div class="page-head"><h2>Where I'm signed in</h2><button class="btn btn-ghost btn-sm" id="acc-others">↪ Sign out all other sessions</button></div>
-    <div class="table-wrap" id="acc-sessions"><p class="muted">Loading…</p></div>
+    <div class="page-head"><h2>{{ t("Where I'm signed in") }}</h2><button class="btn btn-ghost btn-sm" id="acc-others">↪ {{ t("Sign out all other sessions") }}</button></div>
+    <div class="table-wrap" id="acc-sessions"><p class="muted">{{ t("Loading…") }}</p></div>
 </div>
 
 {% endblock %}
@@ -21,25 +27,25 @@
 <script>
 (() => {
     let catalogue = { global: [], car: [] };
-    const when = (iso) => iso ? new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z').toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
-    const label = (name) => name === '*' ? 'Everything' : ([...catalogue.global, ...catalogue.car].find(p => p.name === name)?.label || name);
+    const when = (iso) => iso ? new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z').toLocaleString(EV.locale, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+    const label = (name) => name === '*' ? EV.t('Everything') : EV.t([...catalogue.global, ...catalogue.car].find(p => p.name === name)?.label || name);
     const device = (ua) => !ua ? '—' : `${/Mobile|Android|iPhone/.test(ua) ? '📱' : '💻'} ${(ua.match(/(Firefox|Edg|Chrome|Safari)\/[\d.]+/) || [ua.slice(0, 40)])[0].replace('Edg', 'Edge')}`;
 
     async function sessions() {
         try {
             const rows = await EV.api('GET', '/api/auth/sessions');
-            document.getElementById('acc-sessions').innerHTML = `<table><thead><tr><th>Browser</th><th>Signed in</th><th>Last activity</th><th class="hide-sm">IP</th><th>With</th><th></th></tr></thead><tbody>
-                ${rows.map(s => `<tr><td>${EV.esc(device(s.user_agent))}${s.current ? ' <span class="badge badge-ok">this browser</span>' : ''}</td><td>${when(s.created_at)}</td><td>${when(s.last_seen_at)}</td>
-                    <td class="hide-sm">${EV.esc(s.ip || '')}</td><td>${s.method === 'sso' ? '🔐 SSO' : 'password'}</td>
-                    <td>${s.current ? '' : `<button class="btn btn-ghost btn-sm" data-revoke="${s.id}">Sign out</button>`}</td></tr>`).join('')}</tbody></table>`;
+            document.getElementById('acc-sessions').innerHTML = `<table><thead><tr><th>${EV.t('Browser')}</th><th>${EV.t('Signed in')}</th><th>${EV.t('Last activity')}</th><th class="hide-sm">IP</th><th>${EV.t('With')}</th><th></th></tr></thead><tbody>
+                ${rows.map(s => `<tr><td>${EV.esc(device(s.user_agent))}${s.current ? ` <span class="badge badge-ok">${EV.t('this browser')}</span>` : ''}</td><td>${when(s.created_at)}</td><td>${when(s.last_seen_at)}</td>
+                    <td class="hide-sm">${EV.esc(s.ip || '')}</td><td>${s.method === 'sso' ? '🔐 SSO' : EV.t('password')}</td>
+                    <td>${s.current ? '' : `<button class="btn btn-ghost btn-sm" data-revoke="${s.id}">${EV.t('Sign out')}</button>`}</td></tr>`).join('')}</tbody></table>`;
         } catch (err) { EV.toast(err.message, true); }
     }
     function perms() {
         const me = EV.me;
         const mine = new Set([...me.permissions, ...me.all_cars, ...Object.values(me.car_permissions).flat()]);
-        document.getElementById('acc-perms').innerHTML = `<b>What I can do:</b> ${[...mine].map(label).join(' · ') || 'nothing yet'}`
-            + (Object.keys(me.car_permissions).length ? `<br><b>Per car:</b> ${Object.entries(me.car_permissions).map(([c, p]) => `${EV.esc((EV.cars || []).find(x => x.id === Number(c))?.name || '#' + c)}: ${p.map(label).join(', ')}`).join(' — ')}` : '')
-            + (me.all_cars.length ? `<br><b>On every car:</b> ${me.all_cars.map(label).join(', ')}` : '');
+        document.getElementById('acc-perms').innerHTML = `<b>${EV.t('What I can do:')}</b> ${[...mine].map(label).join(' · ') || EV.t('nothing yet')}`
+            + (Object.keys(me.car_permissions).length ? `<br><b>${EV.t('Per car:')}</b> ${Object.entries(me.car_permissions).map(([c, p]) => `${EV.esc((EV.cars || []).find(x => x.id === Number(c))?.name || '#' + c)}: ${p.map(label).join(', ')}`).join(' — ')}` : '')
+            + (me.all_cars.length ? `<br><b>${EV.t('On every car:')}</b> ${me.all_cars.map(label).join(', ')}` : '');
     }
     document.getElementById('acc-sessions').addEventListener('click', async (e) => {
         const b = e.target.closest('[data-revoke]');
@@ -47,8 +53,9 @@
         try { await EV.api('DELETE', `/api/auth/sessions/${b.dataset.revoke}`); sessions(); } catch (err) { EV.toast(err.message, true); }
     });
     document.getElementById('acc-others').addEventListener('click', async () => {
-        try { await EV.api('POST', '/api/auth/sessions/revoke-others'); EV.toast('Other sessions signed out'); sessions(); } catch (err) { EV.toast(err.message, true); }
+        try { await EV.api('POST', '/api/auth/sessions/revoke-others'); EV.toast(EV.t('Other sessions signed out')); sessions(); } catch (err) { EV.toast(err.message, true); }
     });
+    document.getElementById('acc-lang').addEventListener('change', (e) => EV.setLanguage(e.target.value));
     document.getElementById('acc-pw').addEventListener('click', () => document.getElementById('pw-btn').click());
     (async () => {
         await EV.loadCars().catch(() => {});

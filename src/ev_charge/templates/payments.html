@@ -68,7 +68,7 @@
     let docs = [], pending = null /* file being previewed */, current = null /* detail shown */, paying = null, createCar = null /* car chosen for the sessions created from lines */;
 
     const dateTime = (iso) => iso ? `${EV.date(iso.slice(0, 10))} ${iso.slice(11, 16)}` : '';
-    const period = (p) => p ? new Date(p + '-01T00:00:00').toLocaleDateString(undefined, { year: 'numeric', month: 'long' }) : '';
+    const period = (p) => p ? new Date(p + '-01T00:00:00').toLocaleDateString(EV.locale, { year: 'numeric', month: 'long' }) : '';
     const diffTxt = (v) => `${v > 0 ? '+' : '−'}${EV.money(Math.abs(v))}`;
     function docStatus(d) {
         if (d.status === 'paid') {

@@ -20,7 +20,7 @@
     const PAGE = 100;
     let offset = 0;
     const $ = (id) => document.getElementById(id);
-    const when = (iso) => new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z').toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' });
+    const when = (iso) => new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z').toLocaleString(EV.locale, { dateStyle: 'medium', timeStyle: 'medium' });
     const badge = (a) => a.startsWith('login.failed') ? 'badge-err' : a.startsWith('login') ? 'badge-ok' : a.match(/delete|revoked|signed_out/) ? 'badge-warn' : 'badge-info';
     async function load() {
         const p = new URLSearchParams({ limit: PAGE, offset });
