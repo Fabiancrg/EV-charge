@@ -110,6 +110,20 @@
         return all ? list : list.filter(x => x.active);
     };
 
+    /* Groups (who shares cars and chargers). EV.canAdd('cars:manage'): administrators, and the managers of a group */
+    EV.canAdd = (perm) => EV.can(perm) || !!EV.me?.manages_group;
+    EV.loadGroups = async () => { EV.groups = await EV.api('GET', '/api/groups'); return EV.groups; };
+    /* The "Group" field of a form: only for who may choose (the given permission) among several groups */
+    EV.groupField = (form, perm, current) => {
+        const field = form.querySelector('[data-group-field]');
+        if (!field) return;
+        const choose = EV.can(perm) && (EV.groups || []).length > 1;
+        field.style.display = choose ? '' : 'none';
+        form.group_id.innerHTML = (EV.groups || []).map(g => `<option value="${g.id}">${EV.esc(g.name)}</option>`).join('');
+        form.group_id.value = String(current ?? EV.me.group_id ?? '');
+        form.group_id.disabled = !choose;  // not sent: the server keeps the group, or uses yours
+    };
+
     EV.loadCars = async () => {
         const cars = await EV.api('GET', '/api/cars');
         cars.forEach(c => { EV.carColorIndex[c.id] = c.color_index; });

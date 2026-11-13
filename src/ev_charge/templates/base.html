@@ -25,13 +25,15 @@
             <a href="/reimbursement" class="{{ 'active' if active == 'reimbursement' }}">Reimbursement</a>
             {% if can_reimburse %}<a href="/payments" class="{{ 'active' if active == 'payments' }}">Payments</a>{% endif %}
             <a href="/cars" class="{{ 'active' if active == 'cars' }}">Cars</a>
-            {% if 'chargers:manage' in can %}<a href="/chargers" class="{{ 'active' if active == 'chargers' }}">Chargers</a>{% endif %}
+            {% if 'chargers:manage' in can or me.manages_group %}<a href="/chargers" class="{{ 'active' if active == 'chargers' }}">Chargers</a>{% endif %}
+            {% if me.manages_group and 'users:manage' not in can %}<a href="/users" class="{{ 'active' if active == 'users' }}">Members</a>{% endif %}
             {% if 'tariffs:manage' in can %}<a href="/tariffs" class="{{ 'active' if active == 'tariffs' }}">Tariffs</a>{% endif %}
-            {% if 'users:manage' in can or 'roles:manage' in can or 'settings:manage' in can or 'audit:read' in can or 'tokens:manage' in can %}
+            {% if 'users:manage' in can or 'groups:manage' in can or 'roles:manage' in can or 'settings:manage' in can or 'audit:read' in can or 'tokens:manage' in can %}
             <div class="user-menu">
-                <button class="nav-btn {{ 'active' if active in ('users', 'roles', 'settings', 'email', 'tokens', 'audit') }}" id="admin-btn" aria-haspopup="true">⚙ Settings ▾</button>
+                <button class="nav-btn {{ 'active' if active in ('users', 'groups', 'roles', 'settings', 'email', 'tokens', 'audit') }}" id="admin-btn" aria-haspopup="true">⚙ Settings ▾</button>
                 <div class="user-dropdown" id="admin-dropdown">
-                    {% if 'users:manage' in can %}<a href="/users">👥 Users &amp; car access</a>{% endif %}
+                    {% if 'users:manage' in can %}<a href="/users">👤 Users &amp; car access</a>{% endif %}
+                    {% if 'groups:manage' in can %}<a href="/groups">👥 Groups</a>{% endif %}
                     {% if 'roles:manage' in can %}<a href="/roles">🛡 Roles &amp; permissions</a>{% endif %}
                     {% if 'settings:manage' in can %}<a href="/settings/sso">🔐 Single sign-on</a>
                     <a href="/settings/email">📧 E-mail (SMTP)</a>{% endif %}
@@ -44,7 +46,7 @@
             <div class="user-menu">
                 <button class="nav-btn" id="user-btn" aria-haspopup="true">👤 {{ me.display_name }} ▾</button>
                 <div class="user-dropdown" id="user-dropdown">
-                    <div class="muted small" style="padding:8px 14px">{{ me.username }}{% if me.role_name %} · {{ me.role_name }}{% endif %}</div>
+                    <div class="muted small" style="padding:8px 14px">{{ me.username }}{% if me.role_name %} · {{ me.role_name }}{% endif %}{% if me.group_name %}<br>👥 {{ me.group_name }}{% if me.manages_group %} (manager){% endif %}{% endif %}</div>
                     <a href="/account">👤 My account (sign-ins)</a>
                     <button id="pw-btn">🔑 {{ 'Change password' if me.has_password else 'Set a password' }}</button>
                     <button id="logout-btn">↪ Sign out</button>

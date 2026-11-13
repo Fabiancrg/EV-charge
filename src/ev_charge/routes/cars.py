@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..auth import Principal, check_car_access, current_user, require
+from ..auth import Principal, check_car_access, check_group_manager, current_user, target_group
 from ..database import get_db
 from ..models import Car, Charger, ChargeSession
 from ..schemas import CarIn, CarOut
@@ -24,11 +23,12 @@ def _get(db: Session, car_id: int) -> Car:
 
 
 def _save(db: Session, car: Car) -> None:
-    try:
-        db.commit()
-    except IntegrityError:
+    """Names are unique within a group (two groups may each have their "Tesla")."""
+    same_group = Car.group_id == car.group_id if car.group_id is not None else Car.group_id.is_(None)
+    if db.scalar(select(Car.id).where(same_group, func.lower(Car.name) == car.name.lower(), Car.id != (car.id or -1))):
         db.rollback()
-        raise HTTPException(409, f"A car named '{car.name}' already exists") from None
+        raise HTTPException(409, f"A car named '{car.name}' already exists")
+    db.commit()
 
 
 @router.get("", response_model=list[CarOut])
@@ -50,8 +50,9 @@ def get_car(car_id: int, user: Principal = Depends(current_user), db: Session = 
 
 
 @router.post("", response_model=CarOut, status_code=201)
-def create_car(body: CarIn, _: Principal = Depends(require("cars:manage")), db: Session = Depends(get_db)) -> CarOut:
-    car = Car(**body.model_dump())
+def create_car(body: CarIn, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> CarOut:
+    """Administrators add cars to any group; a group manager adds cars to their group."""
+    car = Car(**body.model_dump(exclude={"group_id"}), group_id=target_group(db, user, body.group_id, "cars:manage"))
     db.add(car)
     _save(db, car)
     db.refresh(car)
@@ -62,7 +63,11 @@ def create_car(body: CarIn, _: Principal = Depends(require("cars:manage")), db: 
 def update_car(car_id: int, body: CarIn, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> CarOut:
     car = _get(db, car_id)
     check_car_access(user, car_id, "car:edit")
-    for key, value in body.model_dump().items():
+    if body.group_id is not None and body.group_id != car.group_id:  # moving a car to another group: administrators
+        if not user.has("cars:manage"):
+            raise HTTPException(403, "Only an administrator can move a car to another group")
+        car.group_id = target_group(db, user, body.group_id, "cars:manage")
+    for key, value in body.model_dump(exclude={"group_id"}).items():
         setattr(car, key, value)
     _save(db, car)
     db.refresh(car)
@@ -70,8 +75,11 @@ def update_car(car_id: int, body: CarIn, user: Principal = Depends(current_user)
 
 
 @router.delete("/{car_id}", status_code=204)
-def delete_car(car_id: int, _: Principal = Depends(require("cars:manage")), db: Session = Depends(get_db)) -> Response:
+def delete_car(car_id: int, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> Response:
     car = _get(db, car_id)
+    if not user.can("car:view", car_id):
+        raise HTTPException(404, "Car not found")
+    check_group_manager(user, car.group_id, "cars:manage")
     count = db.scalar(select(func.count()).select_from(ChargeSession).where(ChargeSession.car_id == car_id)) or 0
     if count:
         raise HTTPException(409, f"'{car.name}' has {count} charging session(s): delete them first, or mark the car inactive")

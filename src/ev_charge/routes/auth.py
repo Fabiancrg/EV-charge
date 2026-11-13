@@ -28,7 +28,8 @@ from ..auth import (
     verify_password,
 )
 from ..database import get_db
-from ..models import AuthSession, Role, User
+from ..models import AuthSession, Group, Role, User
+from ..permissions import ensure_default_group
 from ..schemas import LoginIn, Me, PasswordChange, SessionInfo, SetupIn
 from ..sso import local_login_allowed
 from .users import user_out
@@ -45,6 +46,7 @@ def me_out(p: Principal) -> Me:
         all_cars=sorted(g.all_cars),
         car_permissions={c: sorted(perms) for c, perms in g.per_car.items() if perms},
         via_token=p.token is not None,
+        manages_group=p.is_group_manager,
     )
 
 
@@ -111,9 +113,11 @@ def setup(body: SetupIn, request: Request, response: Response, db: Session = Dep
         raise HTTPException(409, "Setup is already done: sign in")
     check_password_strength(body.password)
     admin_role = db.scalar(select(Role).where(Role.name == "Administrator"))
+    ensure_default_group(db)
     user = User(
         username=body.username.strip().lower(), full_name=(body.full_name or "").strip() or None,
         role_id=admin_role.id if admin_role else None, password_hash=hash_password(body.password),
+        group_id=db.scalar(select(Group.id).order_by(Group.id)), group_manager=True,
     )  # fmt: skip
     db.add(user)
     db.flush()

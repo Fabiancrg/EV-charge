@@ -17,7 +17,7 @@ from ev_charge import auth  # noqa: E402
 from ev_charge.database import Base, SessionLocal, engine, init_db  # noqa: E402
 from ev_charge.main import app  # noqa: E402
 from ev_charge.models import Role  # noqa: E402
-from ev_charge.permissions import ensure_builtin_roles  # noqa: E402
+from ev_charge.permissions import ensure_builtin_roles, ensure_default_group  # noqa: E402
 
 init_db()
 
@@ -30,6 +30,7 @@ def _empty_tables():
             conn.execute(table.delete())
     with SessionLocal() as db:
         ensure_builtin_roles(db)  # back to the installed roles
+        ensure_default_group(db)
     auth._FAILS.clear()
 
 

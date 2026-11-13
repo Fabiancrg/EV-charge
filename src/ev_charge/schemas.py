@@ -37,6 +37,7 @@ class CarIn(BaseModel):
     initial_odometer: int | None = Field(default=None, ge=0)
     notes: str | None = None
     active: bool = True
+    group_id: int | None = None  # empty: your own group (administrators may choose another)
 
     _strip = field_validator("*", mode="before")(_blank_to_none)
 
@@ -68,6 +69,7 @@ class CarOut(CarIn):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    group_name: str | None = None
     color_index: int = 0  # position among all cars (by id): a car keeps its colour for every user
     drivers: list[str] = []
     session_count: int = 0
@@ -157,8 +159,10 @@ class UserIn(BaseModel):
     active: bool = True
     grants: list[CarGrantIO] = []  # a role on each car
     password: str | None = Field(default=None, max_length=200)  # empty on update: unchanged; may stay empty for single sign-on users
+    group_id: int | None = None  # empty on creation: the group of who creates the user
+    group_manager: bool = False  # manages the cars, chargers and members of the group (set by administrators)
 
-    _strip = field_validator("full_name", "email", "password", "role_id", mode="before")(_blank_to_none)
+    _strip = field_validator("full_name", "email", "password", "role_id", "group_id", mode="before")(_blank_to_none)
 
     @field_validator("username", mode="after")
     @classmethod
@@ -179,6 +183,9 @@ class UserOut(BaseModel):
     sso: bool  # linked to a single sign-on account
     created_at: datetime
     last_login: datetime | None
+    group_id: int | None = None
+    group_name: str | None = None
+    group_manager: bool = False
 
 
 class Me(UserOut):
@@ -187,6 +194,7 @@ class Me(UserOut):
     all_cars: list[str]  # car permissions on every car
     car_permissions: dict[int, list[str]]  # car permissions per car
     via_token: bool = False
+    manages_group: bool = False  # a group manager: adds cars, chargers and members to their group
 
 
 class RoleIn(BaseModel):
@@ -311,16 +319,19 @@ class ChargerIn(BaseModel):
     default_car_id: int | None = None  # car of the sessions created from the charger (live, history)
     default_location: str | None = Field(default=None, max_length=200)
     default_provider: str | None = Field(default=None, max_length=200)  # e.g. the home electricity supplier
+    group_id: int | None = None  # empty: your own group (administrators may choose another)
 
-    _strip = field_validator("name", "brand", "model", "serial_number", "reimbursement_company", "notes", "default_car_id", "default_location", "default_provider", mode="before")(
-        _blank_to_none
-    )
+    _strip = field_validator(
+        "name", "brand", "model", "serial_number", "reimbursement_company", "notes", "default_car_id", "default_location", "default_provider", "group_id", mode="before"
+    )(_blank_to_none)
 
 
 class ChargerOut(ChargerIn):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    group_name: str | None = None
+    manageable: bool = False  # the caller may edit and connect this charger
     sessions: int = 0
     kwh: float = 0
     last_used: date | None = None
@@ -362,3 +373,19 @@ class CregApply(BaseModel):
     region: CregRegion
     items: list[CregItem] = Field(min_length=1, max_length=200)
     source: str | None = Field(default=None, max_length=500)
+
+
+class GroupIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    max_members: int = Field(default=5, ge=1, le=1000)
+    notes: str | None = None
+
+    _strip = field_validator("name", "notes", mode="before")(_blank_to_none)
+
+
+class GroupOut(GroupIn):
+    id: int
+    members: int = 0  # active members
+    managers: list[str] = []
+    cars: int = 0
+    chargers: int = 0

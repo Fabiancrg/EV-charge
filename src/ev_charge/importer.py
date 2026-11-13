@@ -231,12 +231,13 @@ def _cars_lookup(db: Session, scope: set[int] | None) -> dict[str, Car]:
     return lookup
 
 
-def _chargers_lookup(db: Session) -> dict[str, Charger]:
-    lookup: dict[str, Charger] = {}
+def _chargers_lookup(db: Session) -> dict[str, list[Charger]]:
+    """Chargers by name and serial number; names are unique within a group only, so each key lists its chargers."""
+    lookup: dict[str, list[Charger]] = {}
     for c in db.scalars(select(Charger)):
         for key in (c.name, c.serial_number):
             if key:
-                lookup.setdefault(re.sub(r"[\s\-.]", "", norm(key)), c)
+                lookup.setdefault(re.sub(r"[\s\-.]", "", norm(key)), []).append(c)
     return lookup
 
 
@@ -244,8 +245,9 @@ def _dup_key(car_key: Any, d: date, kwh: float, odometer: int | None) -> tuple:
     return (car_key, d, round(kwh, 3), odometer)
 
 
-def parse_rows(db: Session, req: ImportRequest, scope: set[int] | None = None) -> list[ParsedRow]:
-    """scope: the car ids the user may import into (None: every car)."""
+def parse_rows(db: Session, req: ImportRequest, scope: set[int] | None = None, new_car_group: int | None = None) -> list[ParsedRow]:
+    """scope: the car ids the user may import into (None: every car); new_car_group: the group of the cars created by the import.
+    A row's charger is one of its car's group."""
     mapping = {k: v for k, v in req.mapping.items() if k in FIELDS and v is not None and v >= 0}
     order = req.date_order
     if order == "auto":
@@ -316,12 +318,16 @@ def parse_rows(db: Session, req: ImportRequest, scope: set[int] | None = None) -
         reimb = parse("to_reimburse", "reimbursement", parse_bool)
         status = parse("reimbursement_status", "status", parse_status)
         charger: Charger | None = None
+        group = car.group_id if car else new_car_group
         if cell.get("charger"):
-            charger = chargers.get(re.sub(r"[\s\-.]", "", norm(cell["charger"])))
+            charger = next((c for c in chargers.get(re.sub(r"[\s\-.]", "", norm(cell["charger"])), []) if c.group_id == group), None)
             if charger is None:
                 p.errors.append(f'unknown charger "{cell["charger"]}" (add it on the Chargers page)')
         elif fixed_charger is not None:
-            charger = fixed_charger
+            if fixed_charger.group_id == group:
+                charger = fixed_charger
+            else:
+                p.errors.append(f'the charger "{fixed_charger.name}" isn\'t in the group of this car')
         if charge_date and charge_date > date.today() + timedelta(days=1):
             p.warnings.append("date in the future")
 
@@ -376,12 +382,12 @@ def summary(rows: list[ParsedRow], req: ImportRequest) -> dict[str, Any]:
     }
 
 
-def import_rows(db: Session, req: ImportRequest, scope: set[int] | None = None, user_id: int | None = None) -> dict[str, Any]:
-    rows = parse_rows(db, req, scope)
+def import_rows(db: Session, req: ImportRequest, scope: set[int] | None = None, user_id: int | None = None, new_car_group: int | None = None) -> dict[str, Any]:
+    rows = parse_rows(db, req, scope, new_car_group)
     info = summary(rows, req)
     created: dict[str, Car] = {}
     for name in info["new_cars"]:
-        created[norm(name)] = Car(name=name[:100])
+        created[norm(name)] = Car(name=name[:100], group_id=new_car_group)
         db.add(created[norm(name)])
     db.flush()
     count = 0

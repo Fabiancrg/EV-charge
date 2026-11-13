@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ..auth import Principal, car_scope, current_user, require
+from ..auth import Principal, car_scope, current_user, require, visible_groups
 from ..config import CONFIG
 from ..database import get_db
 from ..models import Car, Charger, ChargeSession, ReimbursementDocument, ReimbursementLine
@@ -181,10 +181,19 @@ def _span(lines: list[Any]) -> tuple[date, date]:
     return min(ln.started_at.date() for ln in lines), max((ln.ended_at or ln.started_at).date() for ln in lines)
 
 
+def _charger(db: Session, user: Principal, charger_id: int) -> Charger:
+    """A charger of a group the caller may see."""
+    charger = db.get(Charger, charger_id)
+    groups = visible_groups(user, db)
+    if charger is None or (groups is not None and charger.group_id not in groups):
+        raise HTTPException(422, "Unknown charger")
+    return charger
+
+
 def _analyse(db: Session, user: Principal, parsed: ParsedDocument, charger_id: int | None) -> tuple[dict[int, list[ChargeSession]], int, int | None, list[ChargeSession]]:
     """Match the lines; without a chosen charger, the one most matches were made with is kept and the match redone with it."""
-    if charger_id is not None and db.get(Charger, charger_id) is None:
-        raise HTTPException(422, "Unknown charger")
+    if charger_id is not None:
+        _charger(db, user, charger_id)
     first, last = _span(parsed.lines)
     sessions = _eligible(db, user, charger_id, first, last)
     matches, offset = match_lines(parsed.lines, sessions)
@@ -354,9 +363,7 @@ def _set_sessions(doc: ReimbursementDocument, status: str) -> None:
 def set_charger(document_id: int, body: ChargerIn, user: Principal = Depends(manager), db: Session = Depends(get_db)) -> dict[str, Any]:
     """Set the charger of a document (for those imported without one); its linked sessions must be this charger's."""
     doc = _get(db, document_id, user)
-    charger = db.get(Charger, body.charger_id)
-    if charger is None:
-        raise HTTPException(422, "Unknown charger")
+    charger = _charger(db, user, body.charger_id)
     others = sum(s.charger_id != charger.id for ln in doc.lines for s in ln.sessions)
     if others:
         raise HTTPException(422, f"{others} session(s) linked to this document weren't made with '{charger.name}': unlink them first")
@@ -429,7 +436,8 @@ def create_session_from_line(document_id: int, line_id: int, body: NewSession, u
     if doc.charger is None:
         raise HTTPException(422, "Choose the charger of the document first")
     car_id = body.car_id or _default_car(doc)
-    if car_id is None or db.get(Car, car_id) is None:
+    car = db.get(Car, car_id) if car_id is not None else None
+    if car is None or car.group_id != doc.charger.group_id:
         raise HTTPException(422, "Choose the car of the session")
     if not (user.can("sessions:create", car_id) and user.can("reimbursement:manage", car_id)):
         raise HTTPException(403, "Not allowed on this car (add sessions and manage their reimbursement)")

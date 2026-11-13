@@ -40,7 +40,8 @@ def _asset_version() -> str:
 templates.env.globals.update(app_version=__version__, asset_version=_asset_version(), currency=CONFIG.currency, poll_seconds=max(15, CONFIG.charger_poll_seconds))
 
 
-def _page(request: Request, db: Session, template: str, active: str, permission: str | None = None) -> Response:
+def _page(request: Request, db: Session, template: str, active: str, permission: str | None = None, managers: bool = False) -> Response:
+    """managers: the page is also for group managers (their own group's chargers and members)."""
     principal = principal_from_request(db, request) if not request.headers.get("authorization") else None
     user = principal.user if principal else None
     if user is None:
@@ -48,7 +49,7 @@ def _page(request: Request, db: Session, template: str, active: str, permission:
             return RedirectResponse("/setup", status_code=303)
         target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
         return RedirectResponse(f"/login?next={quote(target)}", status_code=303)
-    if permission and not principal.has(permission):  # type: ignore[union-attr]
+    if permission and not (principal.has(permission) or (managers and principal.is_group_manager)):  # type: ignore[union-attr]
         return RedirectResponse("/", status_code=303)
     me = me_out(principal).model_dump(mode="json")  # type: ignore[arg-type]
     can_reimburse = principal.cars_with("reimbursement:manage") != set()  # type: ignore[union-attr]
@@ -94,12 +95,17 @@ def tariffs(request: Request, db: Session = Depends(get_db)) -> Response:
 
 @router.get("/chargers", response_class=HTMLResponse)
 def chargers(request: Request, db: Session = Depends(get_db)) -> Response:
-    return _page(request, db, "chargers.html", "chargers", "chargers:manage")
+    return _page(request, db, "chargers.html", "chargers", "chargers:manage", managers=True)
 
 
 @router.get("/users", response_class=HTMLResponse)
 def users(request: Request, db: Session = Depends(get_db)) -> Response:
-    return _page(request, db, "users.html", "users", "users:manage")
+    return _page(request, db, "users.html", "users", "users:manage", managers=True)
+
+
+@router.get("/groups", response_class=HTMLResponse)
+def groups(request: Request, db: Session = Depends(get_db)) -> Response:
+    return _page(request, db, "groups.html", "groups", "groups:manage")
 
 
 @router.get("/roles", response_class=HTMLResponse)

@@ -38,6 +38,22 @@ class Role(Base):
             return set()
 
 
+class Group(Base):
+    """Who shares cars and chargers: a household, a team. Its cars, chargers and members are managed by its
+    group managers (User.group_manager); administrators manage every group."""
+
+    __tablename__ = "groups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    max_members: Mapped[int] = mapped_column(Integer, default=5)  # set by an administrator
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    cars: Mapped[list[Car]] = relationship(back_populates="group")
+    members: Mapped[list[User]] = relationship(back_populates="group")
+
+
 class CarGrant(Base):
     """A user's role on one car (table kept from the first version: user_cars)."""
 
@@ -56,7 +72,8 @@ class Car(Base):
     __tablename__ = "cars"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True)  # nickname shown everywhere
+    name: Mapped[str] = mapped_column(String(100))  # nickname shown everywhere; unique in its group
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id", ondelete="RESTRICT"), index=True)
     make: Mapped[str | None] = mapped_column(String(100))
     model: Mapped[str | None] = mapped_column(String(100))
     year: Mapped[int | None] = mapped_column(Integer)
@@ -83,6 +100,7 @@ class Car(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     sessions: Mapped[list[ChargeSession]] = relationship(back_populates="car")
+    group: Mapped[Group | None] = relationship(back_populates="cars")
     grants: Mapped[list[CarGrant]] = relationship(back_populates="car", cascade="all, delete-orphan")
 
 
@@ -177,7 +195,8 @@ class Charger(Base):
     __tablename__ = "chargers"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True)  # e.g. "Zaptec Go (garage)"
+    name: Mapped[str] = mapped_column(String(100))  # e.g. "Zaptec Go (garage)"; unique in its group
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id", ondelete="RESTRICT"), index=True)
     brand: Mapped[str | None] = mapped_column(String(100))
     model: Mapped[str | None] = mapped_column(String(100))
     serial_number: Mapped[str | None] = mapped_column(String(100))
@@ -200,6 +219,8 @@ class Charger(Base):
     last_poll_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_poll_error: Mapped[str | None] = mapped_column(Text)
 
+    group: Mapped[Group | None] = relationship()
+
 
 class User(Base):
     __tablename__ = "users"
@@ -217,8 +238,13 @@ class User(Base):
     # Single sign-on (OpenID Connect): the account at the identity provider
     oidc_issuer: Mapped[str | None] = mapped_column(String(300))
     oidc_subject: Mapped[str | None] = mapped_column(String(300), index=True)
+    # The group the user belongs to; a group manager has every car permission on the cars of the group,
+    # and manages its cars, chargers and members
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id", ondelete="SET NULL"), index=True)
+    group_manager: Mapped[bool] = mapped_column(Boolean, default=False)
 
     role: Mapped[Role | None] = relationship()
+    group: Mapped[Group | None] = relationship(back_populates="members")
     grants: Mapped[list[CarGrant]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
     @property

@@ -4,6 +4,24 @@ Record the charging sessions of your EV cars and report on them: energy, distanc
 
 Same stack and look as Flow Manager: FastAPI, SQLAlchemy + Alembic (SQLite), Jinja pages that load their data from a JSON API, and Chart.js for the charts (vendored, so it works offline).
 
+## Groups: several households or teams on one installation
+
+A **group** is who shares cars and chargers: a household, a team of colleagues. Each group sees and manages **its own** cars, chargers, sessions, reports, reimbursement documents and members, and nothing of the other groups.
+
+| Who | Can |
+|---|---|
+| **Administrator** | Everything, in every group: creates the groups (**Settings → Groups**), sets how many members each may have, names the group managers, moves a car or a charger to another group |
+| **Group manager** | In their group only: adds, edits and deletes cars and chargers (and connects the chargers), has every right on the group's cars, adds members up to the group's limit and gives them a role on the group's cars |
+| **Member** | What their role on each car allows (e.g. *Driver*: record and edit sessions); sees the group's chargers to pick one in a session, without their connection settings |
+
+- **An existing installation** becomes one group, *Default*, holding every car, charger and user; its first administrator is also its manager. Nothing else changes until a second group is created.
+- **A new group:** create it on *Settings → Groups* with its member limit, then add its first user on *Settings → Users* with that group and *Group manager* ticked. That person signs in and adds their own cars, chargers and members (**Members** in the menu).
+- **Names** of cars and chargers are unique within a group: two groups can each have their "Zaptec".
+- **A charger serves the cars of its group:** it can only be picked for a session of one of those cars, and its default car is one of them.
+- **What a group manager can't do:** give a global role with app-wide permissions or *all cars* (Administrator, Accountant…), name another manager, change the member limit, move anything to another group, or change an account that has such a role (an administrator who is a member of the group).
+- **The member limit** counts the active users of the group; disabling a member frees a place.
+- **Still common to every group for now:** the home charging tariffs, the roles, and the application settings (single sign-on, e-mail), all managed by administrators.
+
 ## Users, roles and permissions
 
 On first start, every page leads to **/setup**, where you create the first administrator. Users are managed on **Settings → Users & car access**, roles on **Settings → Roles & permissions**.
@@ -14,7 +32,8 @@ On first start, every page leads to **/setup**, where you create the first admin
 
 | Permission | Allows |
 |---|---|
-| `users:manage` | Manage users, their global role and their role on each car |
+| `users:manage` | Manage users, their group, their global role and their role on each car |
+| `groups:manage` | Create groups, set their member limit, name group managers |
 | `roles:manage` | Create and edit roles |
 | `settings:manage` | Single sign-on settings |
 | `audit:read` | Read the audit log |
@@ -237,7 +256,8 @@ The **Tariffs** page (administrators) holds the price per kWh of home charging, 
 | **Payments** `/payments` | Import the reimbursement documents (Eneco CSV, 50five / Last Mile Solutions PDF), reconcile them with the sessions (*Invoiced*), and follow the payments to receive (*Paid*), see above. |
 | **Chargers** `/chargers` | Chargers whose sessions are reimbursed, and the company paying them back (administrators, see above). Inactive chargers are hidden; *Show inactive (N)* lists them. |
 | **Tariffs** `/tariffs` | Home charging price periods and the CREG import (administrators, see above). |
-| **Users**, **Roles**, **Single sign-on**, **E-mail (SMTP)**, **API tokens**, **Audit log** (⚙ Settings menu) | Accounts with their global role and role per car; roles and permissions; OpenID Connect; SMTP; API tokens; audit log (see above). |
+| **Members** `/users` (group managers) | The members of your group: add them, up to the group's limit, and give them a role on the group's cars. |
+| **Users**, **Groups**, **Roles**, **Single sign-on**, **E-mail (SMTP)**, **API tokens**, **Audit log** (⚙ Settings menu) | Accounts with their global role and role per car; roles and permissions; OpenID Connect; SMTP; API tokens; audit log (see above). |
 | **My account** `/account` | Where you are signed in, your permissions. |
 | **Cars** `/cars` | Add and edit cars: identity (name, make, model, year, plate, VIN, colour), specs (usable battery, max AC/DC power, WLTP range and consumption), leasing (company, contract, start/end, km per year, monthly cost, odometer at start), notes, active flag. A car with sessions can't be deleted; mark it inactive instead (a returned car, or one that isn't delivered yet): it leaves the dashboard, the session form and this list (*Show inactive (N)* lists it again), and moves under *Inactive* in the car filters. Nothing is lost: the car filter of Sessions, Reports and Reimbursement offers *All cars*, *Active cars*, *Inactive cars* or one car, active or not. An active car whose lease is over is flagged *Lease ended*. |
 
@@ -392,6 +412,7 @@ Every endpoint needs a signed-in user (session cookie) or an API token (`Authori
 | `GET /api/auth/sessions`, `DELETE /api/auth/sessions/{id}`, `POST /api/auth/sessions/revoke-others` | My sign-ins |
 | `GET/POST /api/tokens`, `PUT/DELETE /api/tokens/{id}`, `POST /api/tokens/{id}/revoke` | API tokens: role or permissions, cars (`tokens:manage`, browser sign-in) |
 | `GET/PUT /api/settings/email`, `POST /api/settings/email/test` | SMTP settings and test e-mail (`settings:manage`) |
+| `GET/POST /api/groups`, `PUT/DELETE /api/groups/{id}` | Groups with their member limit and counts (`groups:manage`; others get their own group) |
 | `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`, `POST /api/users/{id}/signout` | Users, global role and role per car (`users:manage`) |
 | `GET/POST /api/roles`, `PUT/DELETE /api/roles/{id}`, `GET /api/roles/permissions` | Roles and the permission catalogue (`roles:manage`) |
 | `GET/PUT /api/settings/sso`, `POST /api/settings/sso/test` | Single sign-on settings (`settings:manage`) |
