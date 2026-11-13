@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ev_charge import i18n
+from ev_charge.connectors import CONNECTORS
 from ev_charge.main import app
 from ev_charge.permissions import ALL_PERMISSIONS
 
@@ -29,6 +30,9 @@ def used_texts() -> dict[str, str]:
                 found.setdefault(m.group(1)[1:-1].replace("\\'", "'").replace('\\"', '"'), path.name)
     for label, _group in ALL_PERMISSIONS.values():  # shown through EV.t(label)
         found.setdefault(label, "permissions.py")
+    for connector in CONNECTORS.values():  # the connection form of a charger: EV.t(label)
+        for label in (connector.label, *(field[1] for field in connector.fields)):
+            found.setdefault(label, "connectors")
     return found
 
 
