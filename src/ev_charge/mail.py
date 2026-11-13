@@ -14,6 +14,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from .i18n import msg as _msg
 from .pricing import get_setting, set_setting
 from .secretbox import decrypt_json, encrypt_json
 
@@ -90,15 +91,15 @@ def _send(cfg: dict[str, Any], password: str, msg: EmailMessage) -> None:
                 server.login(cfg["username"], password)
             server.send_message(msg)
     except smtplib.SMTPAuthenticationError as exc:
-        raise MailError(f"The SMTP server refused the login ({exc.smtp_code})") from exc
+        raise MailError(_msg("The SMTP server refused the login ({code})", code=exc.smtp_code)) from exc
     except smtplib.SMTPRecipientsRefused as exc:
-        raise MailError(f"The SMTP server refused the recipient(s): {', '.join(exc.recipients)}") from exc
+        raise MailError(_msg("The SMTP server refused the recipient(s): {recipients}", recipients=", ".join(exc.recipients))) from exc
     except smtplib.SMTPException as exc:
-        raise MailError(f"SMTP error: {exc}") from exc
+        raise MailError(_msg("SMTP error: {error}", error=exc)) from exc
     except ssl.SSLError as exc:
-        raise MailError(f"TLS error ({exc.reason or exc}): check the security mode and port") from exc
+        raise MailError(_msg("TLS error ({reason}): check the security mode and port", reason=exc.reason or exc)) from exc
     except OSError as exc:
-        raise MailError(f"Cannot reach {cfg['host']}:{cfg['port']} ({exc})") from exc
+        raise MailError(_msg("Cannot reach {host}:{port} ({error})", host=cfg["host"], port=cfg["port"], error=exc)) from exc
 
 
 async def send_mail(db: Session, to: list[str], subject: str, text: str, html: str | None = None,
@@ -107,8 +108,8 @@ async def send_mail(db: Session, to: list[str], subject: str, text: str, html: s
     """Send an e-mail with the saved settings (or the given ones, to test them before saving)."""
     cfg = cfg or get_config(db)
     if not cfg["host"] or not cfg["from_address"]:
-        raise MailError("Set the SMTP server and the sender address first (Settings → E-mail)")
+        raise MailError(_msg("Set the SMTP server and the sender address first (Settings → E-mail)"))
     if not to:
-        raise MailError("No recipient")
+        raise MailError(_msg("No recipient"))
     msg = build_message(cfg, to, subject, text, html, attachments)
     await asyncio.to_thread(_send, cfg, password if password is not None else get_password(db), msg)

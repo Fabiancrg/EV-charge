@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from ..auth import Principal, car_scope, check_car_access, current_user
 from ..database import get_db
+from ..i18n import language_of, localize, msg
 from ..importer import ImportRequest, import_rows, parse_rows, row_out, summary
 from ..spreadsheet import MAX_FILE_BYTES, SpreadsheetError, read_spreadsheet
 
@@ -27,27 +28,27 @@ async def read_sheet(file: UploadFile = File(...), _: Principal = Depends(curren
         raise HTTPException(422, str(e)) from None
     except Exception:
         logger.exception("Cannot read spreadsheet %r", file.filename)
-        raise HTTPException(422, "Cannot read this file: is it a valid .xlsx or .csv file?") from None
+        raise HTTPException(422, msg("Cannot read this file: is it a valid .xlsx or .csv file?")) from None
     return {"filename": file.filename, "sheets": [s.as_dict() for s in sheets]}
 
 
 def _check(req: ImportRequest, user: Principal) -> None:
     if "car" not in req.mapping and req.car_id is None:
-        raise HTTPException(422, "Choose a car, or map the column that holds the car")
+        raise HTTPException(422, msg("Choose a car, or map the column that holds the car"))
     if req.car_id is not None and "car" not in req.mapping:
         check_car_access(user, req.car_id, "sessions:import")
     if req.create_missing_cars and not user.has("cars:manage"):
-        raise HTTPException(403, "Creating cars needs the 'cars:manage' permission")
+        raise HTTPException(403, msg("Creating cars needs the 'cars:manage' permission"))
 
 
 @router.post("/sessions/preview")
-def preview(req: ImportRequest, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+def preview(req: ImportRequest, request: Request, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     _check(req, user)
     rows = parse_rows(db, req, car_scope(user, "sessions:import"), user.group_id)
-    return {"summary": summary(rows, req), "rows": [row_out(r) for r in rows]}
+    return localize(language_of(request, user.user), {"summary": summary(rows, req), "rows": [row_out(r) for r in rows]})
 
 
 @router.post("/sessions")
-def do_import(req: ImportRequest, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+def do_import(req: ImportRequest, request: Request, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     _check(req, user)
-    return import_rows(db, req, car_scope(user, "sessions:import"), user.id, user.group_id)
+    return localize(language_of(request, user.user), import_rows(db, req, car_scope(user, "sessions:import"), user.id, user.group_id))

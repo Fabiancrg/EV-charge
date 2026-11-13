@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from .. import audit, sso
 from ..auth import Principal, client_ip, require, start_session
 from ..database import get_db
+from ..i18n import msg
 from ..models import Role
 
 router = APIRouter(tags=["sso"])
@@ -126,17 +127,23 @@ def get_sso(request: Request, _: Principal = Depends(require("settings:manage"))
 def put_sso(body: SsoSettings, request: Request, me: Principal = Depends(require("settings:manage")), db: Session = Depends(get_db)) -> dict[str, Any]:
     for ref in [body.default_role_id] + [g.role_id for g in body.group_roles]:
         if ref is not None and db.get(Role, ref) is None:
-            raise HTTPException(422, "Unknown role")
+            raise HTTPException(422, msg("Unknown role"))
     if body.enabled and not (body.issuer and body.client_id and (body.client_secret or sso.get_secret(db))):
-        raise HTTPException(422, "To enable single sign-on, fill in the issuer, the client ID and the client secret")
+        raise HTTPException(422, msg("To enable single sign-on, fill in the issuer, the client ID and the client secret"))
     if body.enabled and not body.local_login and not me.user.oidc_subject and not sso.CONFIG.allow_local_login:
-        raise HTTPException(409, "Sign in once with single sign-on before turning password sign-in off, so you can't lock yourself out")
+        raise HTTPException(409, msg("Sign in once with single sign-on before turning password sign-in off, so you can't lock yourself out"))
     cfg = body.model_dump(exclude={"client_secret"})
     cfg["redirect_uri"] = cfg["redirect_uri"].strip()
     if cfg["redirect_uri"]:
         parts = urlsplit(cfg["redirect_uri"])
         if parts.scheme not in ("http", "https") or not parts.netloc or not parts.path.endswith(CALLBACK_PATH) or parts.query or parts.fragment:
-            raise HTTPException(422, f"The redirect URI must be the public address of EV Charge followed by {CALLBACK_PATH}, e.g. https://ev-charge.example.com{CALLBACK_PATH}")
+            raise HTTPException(
+                422,
+                msg(
+                    "The redirect URI must be the public address of EV Charge followed by {callback_path}, e.g. https://ev-charge.example.com{callback_path}",
+                    callback_path=CALLBACK_PATH,
+                ),
+            )
     cfg["issuer"] = cfg["issuer"].strip().rstrip("/")
     cfg["group_roles"] = [g.model_dump() for g in body.group_roles]
     sso.save_config(db, cfg, (body.client_secret or "").strip() or None)

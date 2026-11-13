@@ -1,61 +1,59 @@
 {% extends "base.html" %}
-{% block title %}Tariffs · EV Charge{% endblock %}
+{% block title %}{{ t("Tariffs") }} · EV Charge{% endblock %}
 {% block content %}
 <div class="content">
     <div class="page-head">
-        <h2>Home charging tariffs</h2>
+        <h2>{{ t("Home charging tariffs") }}</h2>
         <div style="display:flex;gap:8px;flex-wrap:wrap" id="tariff-actions">
-            <button class="btn" id="creg-btn" title="Read the quarterly tariffs published by the CREG">⟳ Import from CREG</button>
-            <button class="btn btn-ghost" id="add-quarter" title="New period for the quarter after the last one">＋ Next quarter</button>
-            <button class="btn btn-ghost" id="add-tariff">＋ Add a period</button>
+            <button class="btn" id="creg-btn" title="{{ t("Read the quarterly tariffs published by the CREG") }}">⟳ {{ t("Import from CREG") }}</button>
+            <button class="btn btn-ghost" id="add-quarter" title="{{ t("New period for the quarter after the last one") }}">＋ {{ t("Next quarter") }}</button>
+            <button class="btn btn-ghost" id="add-tariff">＋ {{ t("Add a period") }}</button>
         </div>
     </div>
-    <p class="muted small" style="margin-bottom:12px"><b>⟳ Import from CREG</b> reads the official quarterly amounts for your region. Sessions made with a <a href="/chargers">charger</a> that uses the home tariff (wall box, mobile charger…) are priced at kWh × the tariff valid on the charge date, whatever cost was typed in.
-        Other sessions keep the cost entered. Changing a tariff reprices those sessions in its period. Periods can't overlap; leave the end date empty for “until further notice”.</p>
+    <p class="muted small" style="margin-bottom:12px">{{ t("<b>⟳ Import from CREG</b> reads the official quarterly amounts for your region. Sessions made with a <a href=\"/chargers\">charger</a> that uses the home tariff (wall box, mobile charger…) are priced at kWh × the tariff valid on the charge date, whatever cost was typed in. Other sessions keep the cost entered. Changing a tariff reprices those sessions in its period. Periods can't overlap; leave the end date empty for “until further notice”.") }}</p>
     <div id="scope" style="margin-bottom:12px"></div>
     <div id="gaps"></div>
-    <div class="table-wrap" id="tariffs-table"><p class="muted">Loading…</p></div>
+    <div class="table-wrap" id="tariffs-table"><p class="muted">{{ t("Loading…") }}</p></div>
 </div>
 
 <div class="modal" id="tariff-modal">
     <div class="modal-box" style="max-width:560px">
-        <h3><span id="tf-title">Tariff</span><button class="icon-btn" data-close title="Close">✕</button></h3>
+        <h3><span id="tf-title">{{ t("Tariff") }}</span><button class="icon-btn" data-close title="{{ t("Close") }}">✕</button></h3>
         <div class="form-error"></div>
         <form id="tariff-form" autocomplete="off">
             <div class="form-grid">
-                <div class="field"><label>From *</label><input type="date" name="valid_from" required></div>
-                <div class="field"><label>To (inclusive)</label><input type="date" name="valid_to"><div class="hint">Empty: until further notice</div></div>
-                <div class="field"><label>Price per kWh ({{ currency }}) *</label><input type="number" name="price_per_kwh" required min="0.0001" max="10" step="0.0001" inputmode="decimal"></div>
-                <div class="field"><label>Label</label><input type="text" name="label" maxlength="100" placeholder="e.g. CREG Q1 2026"></div>
-                <div class="field span-all"><label>Notes</label><textarea name="notes" rows="2" placeholder="Source of the price, reference…"></textarea></div>
+                <div class="field"><label>{{ t("From") }} *</label><input type="date" name="valid_from" required></div>
+                <div class="field"><label>{{ t("To (inclusive)") }}</label><input type="date" name="valid_to"><div class="hint">{{ t("Empty: until further notice") }}</div></div>
+                <div class="field"><label>{{ t("Price per kWh") }} ({{ currency }}) *</label><input type="number" name="price_per_kwh" required min="0.0001" max="10" step="0.0001" inputmode="decimal"></div>
+                <div class="field"><label>{{ t("Label") }}</label><input type="text" name="label" maxlength="100" placeholder="{{ t("e.g. CREG Q1 2026") }}"></div>
+                <div class="field span-all"><label>{{ t("Notes") }}</label><textarea name="notes" rows="2" placeholder="{{ t("Source of the price, reference…") }}"></textarea></div>
             </div>
             <div class="modal-actions">
-                <button type="button" class="btn btn-danger left" id="tf-delete">🗑 Delete</button>
-                <button type="button" class="btn btn-ghost" data-close>Cancel</button>
-                <button type="submit" class="btn">💾 Save</button>
+                <button type="button" class="btn btn-danger left" id="tf-delete">🗑 {{ t("Delete") }}</button>
+                <button type="button" class="btn btn-ghost" data-close>{{ t("Cancel") }}</button>
+                <button type="submit" class="btn">💾 {{ t("Save") }}</button>
             </div>
         </form>
     </div>
 </div>
 <div class="modal" id="creg-modal">
     <div class="modal-box" style="max-width:900px">
-        <h3><span>⟳ Import tariffs from the CREG</span><button class="icon-btn" data-close title="Close">✕</button></h3>
+        <h3><span>⟳ {{ t("Import tariffs from the CREG") }}</span><button class="icon-btn" data-close title="{{ t("Close") }}">✕</button></h3>
         <div class="form-error"></div>
-        <p class="muted small" style="margin-bottom:12px">The CREG publishes, per quarter and per region, the maximum amount per kWh an employer can pay back for charging a company car at home
-            (set by the SPF Finances, circular 2024/C/77). Choose the region of the driver's home, check the quarters, then apply. Nothing changes until you click Apply.</p>
+        <p class="muted small" style="margin-bottom:12px">{{ t("The CREG publishes, per quarter and per region, the maximum amount per kWh an employer can pay back for charging a company car at home (set by the SPF Finances, circular 2024/C/77). Choose the region of the driver's home, check the quarters, then apply. Nothing changes until you click Apply.") }}</p>
         <div class="form-grid" style="align-items:end">
-            <div class="field"><label>Region</label><select id="creg-region">
-                <option value="wallonia">Wallonia</option><option value="brussels">Brussels</option><option value="flanders">Flanders</option></select></div>
+            <div class="field"><label>{{ t("Region") }}</label><select id="creg-region">
+                <option value="wallonia">{{ t("Wallonia") }}</option><option value="brussels">{{ t("Brussels") }}</option><option value="flanders">{{ t("Flanders") }}</option></select></div>
             <div class="field span-2" style="display:flex;gap:8px;flex-wrap:wrap">
-                <button class="btn btn-ghost" id="creg-refresh" type="button">⟳ Check the CREG website</button>
-                <label class="btn btn-ghost" title="If this server can't reach the internet: save the CREG page from your browser (HTML only) and upload it">⬆ Upload the saved page<input type="file" id="creg-file" accept=".html,.htm,text/html" hidden></label>
+                <button class="btn btn-ghost" id="creg-refresh" type="button">⟳ {{ t("Check the CREG website") }}</button>
+                <label class="btn btn-ghost" title="{{ t("If this server can't reach the internet: save the CREG page from your browser (HTML only) and upload it") }}">⬆ {{ t("Upload the saved page") }}<input type="file" id="creg-file" accept=".html,.htm,text/html" hidden></label>
             </div>
         </div>
-        <div id="creg-body" style="margin-top:14px"><p class="muted">Checking…</p></div>
+        <div id="creg-body" style="margin-top:14px"><p class="muted">{{ t("Checking…") }}</p></div>
         <div class="modal-actions">
             <span class="muted small left" id="creg-source"></span>
-            <button type="button" class="btn btn-ghost" data-close>Close</button>
-            <button type="button" class="btn" id="creg-apply" disabled>Apply</button>
+            <button type="button" class="btn btn-ghost" data-close>{{ t("Close") }}</button>
+            <button type="button" class="btn" id="creg-apply" disabled>{{ t("Apply") }}</button>
         </div>
     </div>
 </div>
@@ -71,7 +69,7 @@
     function open(t, prefill = {}) {
         editing = t;
         form.reset();
-        document.getElementById('tf-title').textContent = t ? 'Edit tariff' : 'New tariff period';
+        document.getElementById('tf-title').textContent = t ? EV.t('Edit tariff') : EV.t('New tariff period');
         document.getElementById('tf-delete').style.display = t ? '' : 'none';
         EV.fillForm(form, t || prefill);
         EV.openModal('tariff-modal');
@@ -97,9 +95,9 @@
         const last = sorted[sorted.length - 1];
         const today = iso(new Date());
         const msgs = [];
-        if (!tariffs.length) msgs.push('No tariff yet: home sessions have no cost until you add one.');
-        if (gaps.length) msgs.push(`No tariff between ${gaps.join(', ')}.`);
-        if (last && last.valid_to && last.valid_to < today) msgs.push(`The last period ended on ${EV.date(last.valid_to)}: add the next one.`);
+        if (!tariffs.length) msgs.push(EV.t('No tariff yet: home sessions have no cost until you add one.'));
+        if (gaps.length) msgs.push(EV.t('No tariff between {periods}.', { periods: gaps.join(', ') }));
+        if (last && last.valid_to && last.valid_to < today) msgs.push(EV.t('The last period ended on {date}: add the next one.', { date: EV.date(last.valid_to) }));
         document.getElementById('gaps').innerHTML = msgs.map(m => `<div class="note">⚠ ${EV.esc(m)}</div>`).join('');
     }
 
@@ -107,17 +105,17 @@
         renderGaps();
         const today = iso(new Date());
         const box = document.getElementById('tariffs-table');
-        if (!tariffs.length) { box.innerHTML = `<div class="empty-state"><h3>No tariff period yet</h3><p>${mode.can_edit ? 'Use ⟳ Import from CREG, ＋ Next quarter or ＋ Add a period.' : 'Home sessions have no price until one is added.'}</p></div>`; return; }
-        box.innerHTML = `<table><thead><tr><th>Period</th><th>Label</th><th class="num">Price / kWh</th><th class="num">Sessions</th><th class="num">kWh</th><th class="num hide-sm">Amount</th><th></th></tr></thead><tbody>
+        if (!tariffs.length) { box.innerHTML = `<div class="empty-state"><h3>${EV.t('No tariff period yet')}</h3><p>${mode.can_edit ? EV.t('Use ⟳ Import from CREG, ＋ Next quarter or ＋ Add a period.') : EV.t('Home sessions have no price until one is added.')}</p></div>`; return; }
+        box.innerHTML = `<table><thead><tr><th>${EV.t('Period')}</th><th>${EV.t('Label')}</th><th class="num">${EV.t('Price / kWh')}</th><th class="num">${EV.t('Sessions')}</th><th class="num">kWh</th><th class="num hide-sm">${EV.t('Amount')}</th><th></th></tr></thead><tbody>
             ${tariffs.map(t => {
                 const current = t.valid_from <= today && (!t.valid_to || today <= t.valid_to);
                 return `<tr>
-                <td>${EV.date(t.valid_from)} → ${t.valid_to ? EV.date(t.valid_to) : '<span class="muted">until further notice</span>'} ${current ? '<span class="badge badge-ok">Current</span>' : ''}</td>
+                <td>${EV.date(t.valid_from)} → ${t.valid_to ? EV.date(t.valid_to) : `<span class="muted">${EV.t('until further notice')}</span>`} ${current ? `<span class="badge badge-ok">${EV.t('Current')}</span>` : ''}</td>
                 <td>${EV.esc(t.label || '')}${t.notes ? `<br><span class="muted small">${EV.esc(t.notes)}</span>` : ''}</td>
                 <td class="num"><strong>${EV.money(t.price_per_kwh, 4)}</strong></td>
                 <td class="num">${EV.num(t.sessions)}</td><td class="num">${EV.num(t.kwh, 1)}</td>
                 <td class="num hide-sm">${EV.money(t.kwh * t.price_per_kwh)}</td>
-                <td>${mode.can_edit ? `<button class="btn btn-ghost btn-sm" data-edit="${t.id}">✏ Edit</button>` : ''}</td></tr>`;
+                <td>${mode.can_edit ? `<button class="btn btn-ghost btn-sm" data-edit="${t.id}">✏ ${EV.t('Edit')}</button>` : ''}</td></tr>`;
             }).join('')}</tbody></table>`;
     }
 
@@ -126,19 +124,19 @@
     let scope = admin ? null : EV.me.group_id, mode = { can_edit: false };
     const q = (sep = '?') => scope ? `${sep}group_id=${scope}` : '';
     function renderScope() {
-        const pick = admin && (EV.groups || []).length ? `<div class="field" style="max-width:340px"><label>Tariffs of</label><select id="scope-group"><option value="">The default tariffs</option>
+        const pick = admin && (EV.groups || []).length ? `<div class="field" style="max-width:340px"><label>${EV.t('Tariffs of')}</label><select id="scope-group"><option value="">${EV.t('The default tariffs')}</option>
             ${EV.groups.map(g => `<option value="${g.id}" ${g.id === scope ? 'selected' : ''}>👥 ${EV.esc(g.name)}</option>`).join('')}</select></div>` : '';
         let choice = '';
         if (mode.group_id) {
-            const kept = !mode.own_tariffs && mode.own_count ? ` <span class="muted small">(${mode.own_count} of its own kept)</span>` : '';
-            choice = mode.can_switch ? `<div class="field"><label>👥 ${EV.esc(mode.group_name)} uses</label><div style="display:flex;gap:16px;flex-wrap:wrap;padding:6px 0">
-                    <label class="check"><input type="radio" name="tariff-mode" value="default" ${mode.own_tariffs ? '' : 'checked'}> the default tariffs</label>
-                    <label class="check"><input type="radio" name="tariff-mode" value="own" ${mode.own_tariffs ? 'checked' : ''}> its own tariffs${kept}</label></div></div>`
-                : `<p class="muted small">👥 ${EV.esc(mode.group_name)} uses <b>${mode.own_tariffs ? 'its own tariffs' : 'the default tariffs'}</b> (chosen by a manager of the group).</p>`;
+            const kept = !mode.own_tariffs && mode.own_count ? ` <span class="muted small">(${EV.t('{n} of its own kept', { n: mode.own_count })})</span>` : '';
+            choice = mode.can_switch ? `<div class="field"><label>👥 ${EV.t('{group} uses', { group: EV.esc(mode.group_name) })}</label><div style="display:flex;gap:16px;flex-wrap:wrap;padding:6px 0">
+                    <label class="check"><input type="radio" name="tariff-mode" value="default" ${mode.own_tariffs ? '' : 'checked'}> ${EV.t('the default tariffs')}</label>
+                    <label class="check"><input type="radio" name="tariff-mode" value="own" ${mode.own_tariffs ? 'checked' : ''}> ${EV.t('its own tariffs')}${kept}</label></div></div>`
+                : `<p class="muted small">👥 ${EV.t('{group} uses', { group: EV.esc(mode.group_name) })} <b>${mode.own_tariffs ? EV.t('its own tariffs') : EV.t('the default tariffs')}</b> (${EV.t('chosen by a manager of the group')}).</p>`;
         }
         const note = mode.can_edit ? '' : mode.group_id && !mode.own_tariffs
-            ? '<div class="note">ℹ These are the default tariffs, managed by the administrator. Choose <i>its own tariffs</i> to set other prices for this group.</div>'
-            : '<div class="note">ℹ Read-only: these tariffs are managed by a manager of the group.</div>';
+            ? `<div class="note">ℹ ${EV.t('These are the default tariffs, managed by the administrator. Choose <i>its own tariffs</i> to set other prices for this group.')}</div>`
+            : `<div class="note">ℹ ${EV.t('Read-only: these tariffs are managed by a manager of the group.')}</div>`;
         document.getElementById('scope').innerHTML = `<div class="filters" style="align-items:end">${pick}${choice}</div>${note}`;
         document.getElementById('tariff-actions').style.display = mode.can_edit ? 'flex' : 'none';
     }
@@ -146,8 +144,8 @@
         if (e.target.id === 'scope-group') { scope = Number(e.target.value) || null; load(); return; }
         if (e.target.name !== 'tariff-mode') return;
         const own = e.target.value === 'own';
-        const copy = own && !mode.own_count && confirm('Start from a copy of the default tariffs?\n\nOK: copy them, then change the prices.\nCancel: start with no tariff.');
-        try { await EV.api('PUT', `/api/tariffs/mode${q()}`, { own_tariffs: own, copy_default: copy }); EV.toast(own ? 'The group now uses its own tariffs' : 'The group now uses the default tariffs'); }
+        const copy = own && !mode.own_count && confirm(`${EV.t('Start from a copy of the default tariffs?')}\n\n${EV.t('OK: copy them, then change the prices.')}\n${EV.t('Cancel: start with no tariff.')}`);
+        try { await EV.api('PUT', `/api/tariffs/mode${q()}`, { own_tariffs: own, copy_default: copy }); EV.toast(own ? EV.t('The group now uses its own tariffs') : EV.t('The group now uses the default tariffs')); }
         catch (err) { EV.toast(err.message, true); }
         load();
     });
@@ -166,14 +164,14 @@
         try {
             if (editing) await EV.api('PUT', `/api/tariffs/${editing.id}`, EV.formData(form));
             else await EV.api('POST', `/api/tariffs${q()}`, EV.formData(form));
-            EV.toast('Tariff saved');
+            EV.toast(EV.t('Tariff saved'));
             EV.closeModal('tariff-modal');
             load();
         } catch (err) { EV.formError('tariff-modal', err); }
     });
     document.getElementById('tf-delete').addEventListener('click', async () => {
-        if (!editing || !confirm('Delete this tariff period? Its home sessions will have no cost.')) return;
-        try { await EV.api('DELETE', `/api/tariffs/${editing.id}`); EV.toast('Tariff deleted'); EV.closeModal('tariff-modal'); load(); }
+        if (!editing || !confirm(EV.t('Delete this tariff period? Its home sessions will have no cost.'))) return;
+        try { await EV.api('DELETE', `/api/tariffs/${editing.id}`); EV.toast(EV.t('Tariff deleted')); EV.closeModal('tariff-modal'); load(); }
         catch (err) { EV.formError('tariff-modal', err); }
     });
     document.getElementById('add-tariff').addEventListener('click', () => open(null));
@@ -181,10 +179,10 @@
     // ── Import from the CREG ────────────────────────────────────────────
     let creg = null;  // last preview
     const STATUS = {
-        new: '<span class="badge badge-ok">＋ New</span>',
-        changed: '<span class="badge badge-warn">✎ Price differs</span>',
-        same: '<span class="badge badge-info">✓ Up to date</span>',
-        conflict: '<span class="badge badge-err">✖ Overlaps</span>',
+        new: `<span class="badge badge-ok">＋ ${EV.t('New')}</span>`,
+        changed: `<span class="badge badge-warn">✎ ${EV.t('Price differs')}</span>`,
+        same: `<span class="badge badge-info">✓ ${EV.t('Up to date')}</span>`,
+        conflict: `<span class="badge badge-err">✖ ${EV.t('Overlaps')}</span>`,
     };
     const cregBody = () => document.getElementById('creg-body');
     function cregError(msg) {
@@ -195,12 +193,12 @@
     function renderCreg() {
         document.querySelector('#creg-modal .form-error').style.display = 'none';
         document.getElementById('creg-region').value = creg.region;
-        const src = creg.source.startsWith('http') ? `<a href="${EV.esc(creg.source)}" target="_blank" rel="noopener">CREG page ↗</a>` : EV.esc(creg.source);
-        document.getElementById('creg-source').innerHTML = `Source: ${src}`;
+        const src = creg.source.startsWith('http') ? `<a href="${EV.esc(creg.source)}" target="_blank" rel="noopener">${EV.t('CREG page ↗')}</a>` : EV.esc(creg.source);
+        document.getElementById('creg-source').innerHTML = `${EV.t('Source:')} ${src}`;
         const pending = creg.items.filter(i => i.status === 'new' || i.status === 'changed').length;
         cregBody().innerHTML = `
-            <p style="margin-bottom:8px">${creg.items.length} quarter(s) published for <b>${EV.esc(creg.regions[creg.region])}</b>${pending ? ` — <b>${pending}</b> to add or update` : ' — your tariffs are up to date'}.</p>
-            <div class="imp-grid" style="max-height:52vh"><table><thead><tr><th><input type="checkbox" id="creg-all" title="Select all"></th><th>Quarter</th><th>Period</th><th class="num">CREG price</th><th>Your tariff</th><th>Status</th></tr></thead><tbody>
+            <p style="margin-bottom:8px">${EV.t('{n} quarter(s) published for {region}', { n: creg.items.length, region: `<b>${EV.esc(EV.t(creg.regions[creg.region]))}</b>` })} — ${pending ? EV.t('{n} to add or update', { n: `<b>${pending}</b>` }) : EV.t('your tariffs are up to date')}.</p>
+            <div class="imp-grid" style="max-height:52vh"><table><thead><tr><th><input type="checkbox" id="creg-all" title="${EV.esc(EV.t('Select all'))}"></th><th>${EV.t('Quarter')}</th><th>${EV.t('Period')}</th><th class="num">${EV.t('CREG price')}</th><th>${EV.t('Your tariff')}</th><th>${EV.t('Status')}</th></tr></thead><tbody>
             ${creg.items.map((i, n) => {
                 const selectable = i.status === 'new' || i.status === 'changed';
                 const cur = i.current ? `${EV.money(i.current.price_per_kwh, 4)}${i.status === 'conflict' ? ` <span class="muted small">(${EV.date(i.current.valid_from)} → ${i.current.valid_to ? EV.date(i.current.valid_to) : '…'})</span>` : ''}` : '<span class="muted">—</span>';
@@ -208,13 +206,13 @@
                     <td><b>${EV.esc(i.key.replace('-', ' '))}</b></td><td>${EV.date(i.valid_from)} → ${EV.date(i.valid_to)}</td>
                     <td class="num"><b>${EV.money(i.price_per_kwh, 4)}</b></td><td>${cur}</td><td>${STATUS[i.status]}</td></tr>`;
             }).join('')}</tbody></table></div>
-            ${creg.items.some(i => i.status === 'conflict') ? '<p class="muted small" style="margin-top:8px">“Overlaps”: one of your periods covers part of this quarter with other dates. Edit or delete it first to import the quarter.</p>' : ''}`;
+            ${creg.items.some(i => i.status === 'conflict') ? `<p class="muted small" style="margin-top:8px">${EV.t('“Overlaps”: one of your periods covers part of this quarter with other dates. Edit or delete it first to import the quarter.')}</p>` : ''}`;
         const boxes = () => [...cregBody().querySelectorAll('input[data-n]:not(:disabled)')];
         const update = () => {
             const n = boxes().filter(b => b.checked).length;
             const apply = document.getElementById('creg-apply');
             apply.disabled = !n;
-            apply.textContent = n ? `Apply ${n} quarter(s)` : 'Apply';
+            apply.textContent = n ? EV.t('Apply {n} quarter(s)', { n }) : EV.t('Apply');
             document.getElementById('creg-all').checked = n && n === boxes().length;
         };
         cregBody().addEventListener('change', (e) => {
@@ -224,14 +222,14 @@
         update();
     }
     async function cregCheck() {
-        cregBody().innerHTML = '<p class="muted">Reading the CREG website…</p>';
+        cregBody().innerHTML = `<p class="muted">${EV.t('Reading the CREG website…')}</p>`;
         document.getElementById('creg-apply').disabled = true;
         try { creg = await EV.api('GET', `/api/tariffs/creg?region=${document.getElementById('creg-region').value}${q('&')}`); renderCreg(); }
         catch (err) { cregError(`${err.message}`); }
     }
     document.getElementById('creg-btn').addEventListener('click', async () => {
         EV.openModal('creg-modal');
-        cregBody().innerHTML = '<p class="muted">Reading the CREG website…</p>';
+        cregBody().innerHTML = `<p class="muted">${EV.t('Reading the CREG website…')}</p>`;
         try { creg = await EV.api('GET', `/api/tariffs/creg${q()}`); renderCreg(); }  // the server remembers the last region
         catch (err) { cregError(err.message); }
     });
@@ -246,7 +244,7 @@
         const form = new FormData();
         form.append('region', document.getElementById('creg-region').value);
         form.append('file', file);
-        cregBody().innerHTML = '<p class="muted">Reading the file…</p>';
+        cregBody().innerHTML = `<p class="muted">${EV.t('Reading the file…')}</p>`;
         try {
             const r = await fetch(`/api/tariffs/creg/upload${q()}`, { method: 'POST', body: form });
             const data = await r.json();
@@ -260,7 +258,7 @@
         if (!items.length) return;
         try {
             const r = await EV.api('POST', `/api/tariffs/creg/apply${q()}`, { region: creg.region, source: creg.source, items });
-            EV.toast(`${r.created} quarter(s) added, ${r.updated} updated${r.skipped.length ? `, ${r.skipped.length} skipped (overlap)` : ''}`);
+            EV.toast(EV.t('{created} quarter(s) added, {updated} updated', { created: r.created, updated: r.updated }) + (r.skipped.length ? `, ${EV.t('{n} skipped (overlap)', { n: r.skipped.length })}` : ''));
             EV.closeModal('creg-modal');
             load();
         } catch (err) { EV.formError('creg-modal', err); }

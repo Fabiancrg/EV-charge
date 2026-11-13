@@ -29,6 +29,7 @@ from ..auth import (
     verify_password,
 )
 from ..database import get_db
+from ..i18n import msg
 from ..models import AuthSession, Group, Role, User
 from ..permissions import ensure_default_group
 from ..schemas import LoginIn, Me, PasswordChange, SessionInfo, SetupIn
@@ -62,13 +63,13 @@ def login(body: LoginIn, request: Request, response: Response, db: Session = Dep
     keys = [f"user:{body.username.strip().lower()}", f"ip:{client_ip(request) or '?'}"]
     check_throttle(keys)
     if not local_login_allowed(db):
-        raise HTTPException(403, "Password sign-in is disabled: use single sign-on")
+        raise HTTPException(403, msg("Password sign-in is disabled: use single sign-on"))
     user = authenticate(db, body.username, body.password)
     if user is None:
         record_failure(keys)
         audit.record(db, request, "login.failed", username=body.username.strip().lower()[:100])
         db.commit()
-        raise HTTPException(401, "Wrong username or password")
+        raise HTTPException(401, msg("Wrong username or password"))
     clear_failures(keys[:1])
     start_session(db, response, user, request, method="password")
     audit.record(db, request, "login", user=user, details={"method": "password"})
@@ -94,7 +95,7 @@ def set_language(body: LanguageIn, request: Request, response: Response, db: Ses
     from ..auth import principal_from_request
 
     if body.language is not None and i18n.valid(body.language) is None:
-        raise HTTPException(422, f"Unknown language: choose one of {', '.join(i18n.LANGUAGES)}")
+        raise HTTPException(422, msg("Unknown language: choose one of {languages}", languages=", ".join(i18n.LANGUAGES)))
     principal = principal_from_request(db, request)
     if principal is not None and principal.token is None:
         principal.user.language = body.language
@@ -114,7 +115,7 @@ def me(user: Principal = Depends(current_user)) -> Me:
 @router.post("/password", status_code=204)
 def change_password(body: PasswordChange, request: Request, user: Principal = Depends(browser_only), db: Session = Depends(get_db)) -> Response:
     if user.user.has_password and not verify_password(body.current_password, user.user.password_hash):
-        raise HTTPException(422, "The current password is wrong")
+        raise HTTPException(422, msg("The current password is wrong"))
     check_password_strength(body.new_password)
     user.user.password_hash = hash_password(body.new_password)
     end_all_sessions(db, user.id, keep_request=request)  # other browsers are signed out
@@ -134,7 +135,7 @@ def setup(body: SetupIn, request: Request, response: Response, db: Session = Dep
     from ..auth import principal_for
 
     if not setup_needed(db):
-        raise HTTPException(409, "Setup is already done: sign in")
+        raise HTTPException(409, msg("Setup is already done: sign in"))
     check_password_strength(body.password)
     admin_role = db.scalar(select(Role).where(Role.name == "Administrator"))
     ensure_default_group(db)
@@ -184,10 +185,10 @@ def my_sessions(request: Request, user: Principal = Depends(browser_only), db: S
 @router.delete("/sessions/{session_id}", status_code=204)
 def revoke_session(session_id: str, request: Request, user: Principal = Depends(browser_only), db: Session = Depends(get_db)) -> Response:
     if len(session_id) < 16:
-        raise HTTPException(404, "Session not found")
+        raise HTTPException(404, msg("Session not found"))
     s = db.scalar(select(AuthSession).where(AuthSession.user_id == user.id, AuthSession.token_hash.like(f"{session_id}%")))
     if s is None:
-        raise HTTPException(404, "Session not found")
+        raise HTTPException(404, msg("Session not found"))
     db.delete(s)
     audit.record(db, request, "session.revoked", target=f"user:{user.id}", details={"session": session_id})
     db.commit()

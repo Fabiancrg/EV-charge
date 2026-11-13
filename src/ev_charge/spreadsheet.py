@@ -30,6 +30,8 @@ from openpyxl.utils.escape import unescape
 from openpyxl.utils.exceptions import InvalidFileException
 from openpyxl.worksheet.worksheet import Worksheet
 
+from .i18n import msg
+
 MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_PART_BYTES = 200 * 1024 * 1024  # uncompressed size of one XML part (zip-bomb guard)
 MAX_ROWS = 5000
@@ -62,10 +64,10 @@ class Sheet:
 def read_spreadsheet(filename: str, content: bytes) -> list[Sheet]:
     """Read a workbook (.xlsx, .xlsm) or a .csv file into sheets of text rows."""
     if len(content) > MAX_FILE_BYTES:
-        raise SpreadsheetError(f"File too large (max {MAX_FILE_BYTES // (1024 * 1024)} MB)")
+        raise SpreadsheetError(msg("File too large (max {size} MB)", size=MAX_FILE_BYTES // (1024 * 1024)))
     ext = posixpath.splitext(filename.lower())[1]
     if ext in (".xls", ".xlsb", ".ods", ".numbers"):
-        raise SpreadsheetError(f"'{ext}' files are not supported: save the workbook as .xlsx (Excel Workbook) or .csv")
+        raise SpreadsheetError(msg("'{ext}' files are not supported: save the workbook as .xlsx (Excel Workbook) or .csv", ext=ext))
     if ext == ".csv" or (ext not in (".xlsx", ".xlsm") and not zipfile.is_zipfile(io.BytesIO(content))):
         return [_read_csv(posixpath.splitext(posixpath.basename(filename))[0] or "CSV", content)]
     return _read_xlsx(content)
@@ -82,7 +84,7 @@ def _read_csv(name: str, content: bytes) -> Sheet:
         except UnicodeDecodeError:
             continue
     else:  # pragma: no cover - cp1252 decodes almost anything
-        raise SpreadsheetError("Cannot decode the CSV file (use UTF-8)")
+        raise SpreadsheetError(msg("Cannot decode the CSV file (use UTF-8)"))
     sheet = Sheet(name=name)
     for row in csv.reader(io.StringIO(text, newline=""), delimiter=_csv_delimiter(text)):
         if len(sheet.rows) >= MAX_ROWS:
@@ -148,20 +150,20 @@ def _read_xlsx(content: bytes) -> list[Sheet]:
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as zf:
             if any(info.file_size > MAX_PART_BYTES for info in zf.infolist()):
-                raise SpreadsheetError("The workbook is too large once uncompressed")
+                raise SpreadsheetError(msg("The workbook is too large once uncompressed"))
     except zipfile.BadZipFile as exc:
-        raise SpreadsheetError("Not a valid .xlsx file") from exc
+        raise SpreadsheetError(msg("Not a valid .xlsx file")) from exc
     try:
         # Not read-only: merged cell ranges are only available on full worksheets
         wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True, keep_links=False)
     except (InvalidFileException, zipfile.BadZipFile, KeyError, OSError) as exc:
-        raise SpreadsheetError("Not a valid .xlsx file") from exc
+        raise SpreadsheetError(msg("Not a valid .xlsx file")) from exc
     try:
         sheets = [_read_worksheet(ws) for ws in wb.worksheets]
     finally:
         wb.close()
     if not sheets:
-        raise SpreadsheetError("The workbook has no worksheet")
+        raise SpreadsheetError(msg("The workbook has no worksheet"))
     return sheets
 
 

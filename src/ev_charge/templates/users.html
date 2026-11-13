@@ -1,65 +1,64 @@
 {% extends "base.html" %}
-{% block title %}Users · EV Charge{% endblock %}
+{% block title %}{{ t("Users") }} · EV Charge{% endblock %}
 {% block content %}
 <div class="content">
     <div class="page-head">
-        <h2>{{ 'Users &amp; car access'|safe if 'users:manage' in can else 'Members of your group' }}</h2>
+        <h2>{{ t("Users & car access") if 'users:manage' in can else t("Members of your group") }}</h2>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn" id="invite-btn" title="Send a link by e-mail: the person chooses their username and password">✉ Invite by e-mail</button>
-            <button class="btn btn-ghost" id="add-user">＋ Add a {{ 'user' if 'users:manage' in can else 'member' }}</button>
+            <button class="btn" id="invite-btn" title="{{ t("Send a link by e-mail: the person chooses their username and password") }}">✉ {{ t("Invite by e-mail") }}</button>
+            <button class="btn btn-ghost" id="add-user">＋ {{ t("Add a user") if 'users:manage' in can else t("Add a member") }}</button>
         </div>
     </div>
     {% if 'users:manage' in can %}
-    <p class="muted small" style="margin-bottom:12px">Each user belongs to a <b>group</b> (who shares cars and chargers, see <a href="/groups">Groups</a>), has a <b>global role</b> (app-wide permissions; a role marked <i>all cars</i>, like Administrator or Accountant, also applies to every car of every group)
-        and a <b>role on each car</b> they work with (e.g. Driver on one car, Viewer on another). A <b>group manager</b> has every right on the cars of the group and adds its cars, chargers and members. Roles and their permissions are edited on the <a href="/roles">Roles</a> page.</p>
+    <p class="muted small" style="margin-bottom:12px">{{ t("Each user belongs to a <b>group</b> (who shares cars and chargers, see <a href=\"/groups\">Groups</a>), has a <b>global role</b> (app-wide permissions; a role marked <i>all cars</i>, like Administrator or Accountant, also applies to every car of every group) and a <b>role on each car</b> they work with (e.g. Driver on one car, Viewer on another). A <b>group manager</b> has every right on the cars of the group and adds its cars, chargers and members. Roles and their permissions are edited on the <a href=\"/roles\">Roles</a> page.") }}</p>
     {% else %}
-    <p class="muted small" style="margin-bottom:12px" id="group-info">The members of your group. Give each one a <b>role on the cars</b> they use (e.g. Driver on one car, Viewer on another). As a group manager you have every right on the group's cars.</p>
+    <p class="muted small" style="margin-bottom:12px" id="group-info">{{ t("The members of your group. Give each one a <b>role on the cars</b> they use (e.g. Driver on one car, Viewer on another). As a group manager you have every right on the group's cars.") }}</p>
     {% endif %}
-    <div class="table-wrap" id="users-table"><p class="muted">Loading…</p></div>
+    <div class="table-wrap" id="users-table"><p class="muted">{{ t("Loading…") }}</p></div>
     <div id="invitations" style="margin-top:18px"></div>
 </div>
 
 <div class="modal" id="invite-modal">
     <div class="modal-box" style="max-width:620px">
-        <h3><span>✉ Invite by e-mail</span><button class="icon-btn" data-close title="Close">✕</button></h3>
+        <h3><span>✉ {{ t("Invite by e-mail") }}</span><button class="icon-btn" data-close title="{{ t("Close") }}">✕</button></h3>
         <div class="form-error"></div>
         <form id="invite-form" autocomplete="off">
-            <p class="muted small" style="margin-bottom:12px">The person receives a link (valid 7 days) to choose a username and a password, and joins the group. An invitation counts in the group's member limit.</p>
+            <p class="muted small" style="margin-bottom:12px">{{ t("The person receives a link (valid 7 days) to choose a username and a password, and joins the group. An invitation counts in the group's member limit.") }}</p>
             <div class="form-grid">
-                <div class="field span-2"><label>E-mail *</label><input type="email" name="email" required maxlength="200" autofocus></div>
-                <div class="field span-2"><label>Name</label><input type="text" name="full_name" maxlength="100"></div>
-                <div class="field span-all" data-admin-only><label>Group</label><select name="group_id"></select></div>
-                <div class="field span-all"><label>Role on each car</label>
-                    <div class="imp-grid" style="max-height:220px"><table><thead><tr><th>Car</th><th style="min-width:200px">Role</th></tr></thead><tbody id="if-cars"></tbody></table></div></div>
+                <div class="field span-2"><label>{{ t("E-mail") }} *</label><input type="email" name="email" required maxlength="200" autofocus></div>
+                <div class="field span-2"><label>{{ t("Name") }}</label><input type="text" name="full_name" maxlength="100"></div>
+                <div class="field span-all" data-admin-only><label>{{ t("Group") }}</label><select name="group_id"></select></div>
+                <div class="field span-all"><label>{{ t("Role on each car") }}</label>
+                    <div class="imp-grid" style="max-height:220px"><table><thead><tr><th>{{ t("Car") }}</th><th style="min-width:200px">{{ t("Role") }}</th></tr></thead><tbody id="if-cars"></tbody></table></div></div>
             </div>
-            <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn">✉ Send the invitation</button></div>
+            <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>{{ t("Cancel") }}</button><button type="submit" class="btn">✉ {{ t("Send the invitation") }}</button></div>
         </form>
     </div>
 </div>
 
 <div class="modal" id="user-modal">
     <div class="modal-box" style="max-width:720px">
-        <h3><span id="uf-title">User</span><button class="icon-btn" data-close title="Close">✕</button></h3>
+        <h3><span id="uf-title">{{ t("User") }}</span><button class="icon-btn" data-close title="{{ t("Close") }}">✕</button></h3>
         <div class="form-error"></div>
         <form id="user-form" autocomplete="off">
             <div class="form-grid">
-                <div class="field"><label>Username *</label><input type="text" name="username" required minlength="2" maxlength="50" pattern="[A-Za-z0-9._@\-]+" autocapitalize="none" autofocus></div>
-                <div class="field"><label>Full name</label><input type="text" name="full_name" maxlength="100"></div>
-                <div class="field span-2"><label>E-mail</label><input type="text" name="email" maxlength="200"><div class="hint">Also used to link the account at the first single sign-on</div></div>
-                <div class="field span-2"><label>Global role</label><select name="role_id"></select><div class="hint" id="uf-role-hint"></div></div>
-                <div class="field span-2" data-admin-only><label>Group</label><select name="group_id"></select><div class="hint">Who this user shares cars and chargers with</div></div>
-                <div class="field span-2" data-admin-only><label class="check" style="margin-top:22px"><input type="checkbox" name="group_manager"> Group manager</label><div class="hint">Every right on the group's cars; adds its cars, chargers and members</div></div>
-                <div class="field span-2"><label id="uf-pw-label">Password</label><input type="password" name="password" minlength="8" autocomplete="new-password"><div class="hint" id="uf-pw-hint"></div></div>
-                <div class="field span-all"><label>Role on each car</label>
-                    <div class="imp-grid" style="max-height:260px"><table><thead><tr><th>Car</th><th style="min-width:200px">Role</th></tr></thead><tbody id="uf-cars"></tbody></table></div>
+                <div class="field"><label>{{ t("Username") }} *</label><input type="text" name="username" required minlength="2" maxlength="50" pattern="[A-Za-z0-9._@\-]+" autocapitalize="none" autofocus></div>
+                <div class="field"><label>{{ t("Full name") }}</label><input type="text" name="full_name" maxlength="100"></div>
+                <div class="field span-2"><label>{{ t("E-mail") }}</label><input type="text" name="email" maxlength="200"><div class="hint">{{ t("Also used to link the account at the first single sign-on") }}</div></div>
+                <div class="field span-2"><label>{{ t("Global role") }}</label><select name="role_id"></select><div class="hint" id="uf-role-hint"></div></div>
+                <div class="field span-2" data-admin-only><label>{{ t("Group") }}</label><select name="group_id"></select><div class="hint">{{ t("Who this user shares cars and chargers with") }}</div></div>
+                <div class="field span-2" data-admin-only><label class="check" style="margin-top:22px"><input type="checkbox" name="group_manager"> {{ t("Group manager") }}</label><div class="hint">{{ t("Every right on the group's cars; adds its cars, chargers and members") }}</div></div>
+                <div class="field span-2"><label id="uf-pw-label">{{ t("Password") }}</label><input type="password" name="password" minlength="8" autocomplete="new-password"><div class="hint" id="uf-pw-hint"></div></div>
+                <div class="field span-all"><label>{{ t("Role on each car") }}</label>
+                    <div class="imp-grid" style="max-height:260px"><table><thead><tr><th>{{ t("Car") }}</th><th style="min-width:200px">{{ t("Role") }}</th></tr></thead><tbody id="uf-cars"></tbody></table></div>
                     <div class="hint" id="uf-cars-hint"></div></div>
-                <div class="field span-all"><label class="check"><input type="checkbox" name="active" checked> Active (can sign in)</label></div>
+                <div class="field span-all"><label class="check"><input type="checkbox" name="active" checked> {{ t("Active (can sign in)") }}</label></div>
             </div>
             <div class="modal-actions">
-                <button type="button" class="btn btn-danger left" id="uf-delete">🗑 Delete</button>
-                <button type="button" class="btn btn-ghost" id="uf-signout" title="End all this user's sign-ins">↪ Sign out everywhere</button>
-                <button type="button" class="btn btn-ghost" data-close>Cancel</button>
-                <button type="submit" class="btn">💾 Save</button>
+                <button type="button" class="btn btn-danger left" id="uf-delete">🗑 {{ t("Delete") }}</button>
+                <button type="button" class="btn btn-ghost" id="uf-signout" title="{{ t("End all this user's sign-ins") }}">↪ {{ t("Sign out everywhere") }}</button>
+                <button type="button" class="btn btn-ghost" data-close>{{ t("Cancel") }}</button>
+                <button type="submit" class="btn">💾 {{ t("Save") }}</button>
             </div>
         </form>
     </div>
@@ -76,29 +75,29 @@
     const privileged = (r) => r.all_cars || r.permissions.some(p => !/^(car|sessions|reimbursement):/.test(p));
     const groupCars = (groupId) => cars.filter(c => admin ? (groupId == null || c.group_id === groupId || (editing?.grants || []).some(g => g.car_id === c.id)) : c.group_id === EV.me.group_id);
     const carName = (id) => (cars.find(c => c.id === id) || {}).name || `#${id}`;
-    const when = (iso) => iso ? new Date(iso).toLocaleString(EV.locale, { dateStyle: 'medium', timeStyle: 'short' }) : 'never';
+    const when = (iso) => iso ? new Date(iso).toLocaleString(EV.locale, { dateStyle: 'medium', timeStyle: 'short' }) : EV.t('never');
 
     function roleHint() {
         const r = role(Number(form.role_id.value));
-        document.getElementById('uf-role-hint').textContent = !r ? 'No global role: only the cars below.'
-            : r.all_cars ? `${r.name} applies to every car — the roles below can add rights on specific cars.` : (r.description || '');
-        document.getElementById('uf-cars-hint').textContent = r && r.permissions.includes('*') ? 'Not needed: this global role already gives everything on every car.' : '';
+        document.getElementById('uf-role-hint').textContent = !r ? EV.t('No global role: only the cars below.')
+            : r.all_cars ? EV.t('{name} applies to every car — the roles below can add rights on specific cars.', { name: r.name }) : (r.description || '');
+        document.getElementById('uf-cars-hint').textContent = r && r.permissions.includes('*') ? EV.t('Not needed: this global role already gives everything on every car.') : '';
     }
 
     function open(u) {
         editing = u;
         form.reset();
-        document.getElementById('uf-title').textContent = u ? `Edit ${u.username}` : 'New user';
+        document.getElementById('uf-title').textContent = u ? EV.t('Edit {name}', { name: u.username }) : EV.t('New user');
         document.getElementById('uf-delete').style.display = u && u.id !== EV.me.id ? '' : 'none';
         document.getElementById('uf-signout').style.display = u ? '' : 'none';
-        document.getElementById('uf-pw-label').textContent = u && u.has_password ? 'New password' : 'Password';
+        document.getElementById('uf-pw-label').textContent = u && u.has_password ? EV.t('New password') : EV.t('Password');
         document.getElementById('uf-pw-hint').textContent = u
-            ? (u.has_password ? 'Leave empty to keep it. Changing it signs the user out.' : 'No password: signs in with single sign-on. Set one to allow password sign-in.')
-            : 'At least 8 characters. Leave empty for a user who signs in with single sign-on only.';
-        form.role_id.innerHTML = '<option value="">— none —</option>' + roles.filter(r => admin || !privileged(r) || r.id === u?.role_id)
-            .map(r => `<option value="${r.id}">${EV.esc(r.name)}${r.all_cars ? ' (all cars)' : ''}</option>`).join('');
+            ? (u.has_password ? EV.t('Leave empty to keep it. Changing it signs the user out.') : EV.t('No password: signs in with single sign-on. Set one to allow password sign-in.'))
+            : EV.t('At least 8 characters. Leave empty for a user who signs in with single sign-on only.');
+        form.role_id.innerHTML = `<option value="">— ${EV.t('none')} —</option>` + roles.filter(r => admin || !privileged(r) || r.id === u?.role_id)
+            .map(r => `<option value="${r.id}">${EV.esc(r.name)}${r.all_cars ? ' ' + EV.t('(all cars)') : ''}</option>`).join('');
         form.querySelectorAll('[data-admin-only]').forEach(el => { el.style.display = admin ? '' : 'none'; });
-        form.group_id.innerHTML = '<option value="">— none —</option>' + (EV.groups || []).map(g => `<option value="${g.id}">${EV.esc(g.name)} (${g.members}/${g.max_members})</option>`).join('');
+        form.group_id.innerHTML = `<option value="">— ${EV.t('none')} —</option>` + (EV.groups || []).map(g => `<option value="${g.id}">${EV.esc(g.name)} (${g.members}/${g.max_members})</option>`).join('');
         form.group_id.value = String(u ? (u.group_id ?? '') : (EV.me.group_id ?? ''));
         grants = Object.fromEntries((u?.grants || []).map(g => [g.car_id, g.role_id]));
         fillCars();
@@ -111,28 +110,28 @@
     /* The cars of the user's group (plus those the user already has a role on), with the roles chosen so far */
     function fillCars() {
         const list = groupCars(Number(form.group_id.value) || null);
-        document.getElementById('uf-cars').innerHTML = list.length ? list.map(c => `<tr><td>${EV.carDot(c.id)}${EV.esc(c.name)}${c.active ? '' : ' <span class="muted">(inactive)</span>'}</td>
-            <td><select data-car="${c.id}"><option value="">— no access —</option>${roles.map(r => `<option value="${r.id}" ${grants[c.id] === r.id ? 'selected' : ''}>${EV.esc(r.name)}</option>`).join('')}</select></td></tr>`).join('')
-            : '<tr><td colspan="2" class="muted">No car in this group yet.</td></tr>';
+        document.getElementById('uf-cars').innerHTML = list.length ? list.map(c => `<tr><td>${EV.carDot(c.id)}${EV.esc(c.name)}${c.active ? '' : ` <span class="muted">${EV.t('(inactive)')}</span>`}</td>
+            <td><select data-car="${c.id}"><option value="">— ${EV.t('no access')} —</option>${roles.map(r => `<option value="${r.id}" ${grants[c.id] === r.id ? 'selected' : ''}>${EV.esc(r.name)}</option>`).join('')}</select></td></tr>`).join('')
+            : `<tr><td colspan="2" class="muted">${EV.t('No car in this group yet.')}</td></tr>`;
     }
 
     function render() {
-        document.getElementById('users-table').innerHTML = `<table><thead><tr><th>Username</th><th>Name</th><th>Global role</th><th>Car access</th><th class="hide-sm">Last sign-in</th><th>Status</th><th></th></tr></thead><tbody>
+        document.getElementById('users-table').innerHTML = `<table><thead><tr><th>${EV.t('Username')}</th><th>${EV.t('Name')}</th><th>${EV.t('Global role')}</th><th>${EV.t('Car access')}</th><th class="hide-sm">${EV.t('Last sign-in')}</th><th>${EV.t('Status')}</th><th></th></tr></thead><tbody>
             ${users.map(u => {
                 const r = role(u.role_id);
-                const access = r && r.permissions.includes('*') ? '<span class="muted">every car (administrator)</span>'
-                    : [r && r.all_cars ? `<span class="muted">all cars as ${EV.esc(r.name)}</span>` : '', ...u.grants.map(g => `${EV.carDot(g.car_id)}${EV.esc(carName(g.car_id))}: ${EV.esc(role(g.role_id)?.name || '?')}`)].filter(Boolean).join('<br>')
-                    || '<span class="badge badge-warn">no car</span>';
+                const access = r && r.permissions.includes('*') ? `<span class="muted">${EV.t('every car (administrator)')}</span>`
+                    : [r && r.all_cars ? `<span class="muted">${EV.t('all cars as {role}', { role: EV.esc(r.name) })}</span>` : '', ...u.grants.map(g => `${EV.carDot(g.car_id)}${EV.esc(carName(g.car_id))}: ${EV.esc(role(g.role_id)?.name || '?')}`)].filter(Boolean).join('<br>')
+                    || `<span class="badge badge-warn">${EV.t('no car')}</span>`;
                 return `<tr>
-                <td><strong>${EV.esc(u.username)}</strong>${u.id === EV.me.id ? ' <span class="muted small">(you)</span>' : ''}
-                    ${admin && u.group_name && EV.groups.length > 1 ? `<br><span class="muted small">👥 ${EV.esc(u.group_name)}</span>` : ''}${u.group_manager ? ' <span class="badge badge-info" title="Manages the cars, chargers and members of the group">👥 Manager</span>' : ''}
-                    ${u.sso ? '<br><span class="badge badge-info" title="Linked to a single sign-on account">🔐 SSO</span>' : ''}${u.has_password ? '' : ' <span class="muted small">no password</span>'}</td>
+                <td><strong>${EV.esc(u.username)}</strong>${u.id === EV.me.id ? ` <span class="muted small">${EV.t('(you)')}</span>` : ''}
+                    ${admin && u.group_name && EV.groups.length > 1 ? `<br><span class="muted small">👥 ${EV.esc(u.group_name)}</span>` : ''}${u.group_manager ? ` <span class="badge badge-info" title="${EV.esc(EV.t('Manages the cars, chargers and members of the group'))}">👥 ${EV.t('Manager')}</span>` : ''}
+                    ${u.sso ? `<br><span class="badge badge-info" title="${EV.esc(EV.t('Linked to a single sign-on account'))}">🔐 SSO</span>` : ''}${u.has_password ? '' : ` <span class="muted small">${EV.t('no password')}</span>`}</td>
                 <td>${EV.esc(u.full_name || '')}${u.email ? `<br><span class="muted small">${EV.esc(u.email)}</span>` : ''}</td>
                 <td>${r ? `<span class="badge badge-info">${EV.esc(r.name)}</span>` : '<span class="muted">—</span>'}</td>
                 <td class="small">${access}</td>
                 <td class="hide-sm">${when(u.last_login)}</td>
-                <td>${u.active ? '<span class="badge badge-ok">Active</span>' : '<span class="badge badge-err">Disabled</span>'}</td>
-                <td><button class="btn btn-ghost btn-sm" data-edit="${u.id}">✏ Edit</button></td></tr>`;
+                <td>${u.active ? `<span class="badge badge-ok">${EV.t('Enabled')}</span>` : `<span class="badge badge-err">${EV.t('Disabled')}</span>`}</td>
+                <td><button class="btn btn-ghost btn-sm" data-edit="${u.id}">✏ ${EV.t('Edit')}</button></td></tr>`;
             }).join('')}</tbody></table>`;
     }
 
@@ -140,7 +139,7 @@
         try {
             [users, cars, roles] = await Promise.all([EV.api('GET', '/api/users'), EV.loadCars(), EV.api('GET', '/api/roles'), EV.loadGroups()]);
             const mine = EV.groups.find(g => g.id === EV.me.group_id), info = document.getElementById('group-info');
-            if (info && mine) info.insertAdjacentHTML('beforeend', ` <b>${EV.esc(mine.name)}</b>: ${mine.members} of ${mine.max_members} member(s) allowed (the limit is set by an administrator).`);
+            if (info && mine) info.insertAdjacentHTML('beforeend', ' ' + EV.t('<b>{group}</b>: {n} of {max} member(s) allowed (the limit is set by an administrator).', { group: EV.esc(mine.name), n: mine.members, max: mine.max_members }));
             render();
             loadInvitations();
         }
@@ -165,13 +164,13 @@
         } catch (err) { EV.formError('user-modal', err); }
     });
     document.getElementById('uf-delete').addEventListener('click', async () => {
-        if (!editing || !confirm(`Delete ${editing.username}? Their sessions are kept.`)) return;
-        try { await EV.api('DELETE', `/api/users/${editing.id}`); EV.toast('User deleted'); EV.closeModal('user-modal'); load(); }
+        if (!editing || !confirm(EV.t('Delete {name}? Their sessions are kept.', { name: editing.username }))) return;
+        try { await EV.api('DELETE', `/api/users/${editing.id}`); EV.toast(EV.t('User deleted')); EV.closeModal('user-modal'); load(); }
         catch (err) { EV.formError('user-modal', err); }
     });
     document.getElementById('uf-signout').addEventListener('click', async () => {
-        if (!editing || !confirm(`End all of ${editing.username}'s sign-ins?`)) return;
-        try { await EV.api('POST', `/api/users/${editing.id}/signout`); EV.toast(`${editing.username} signed out everywhere`); }
+        if (!editing || !confirm(EV.t("End all of {name}'s sign-ins?", { name: editing.username }))) return;
+        try { await EV.api('POST', `/api/users/${editing.id}/signout`); EV.toast(EV.t('{name} signed out everywhere', { name: editing.username })); }
         catch (err) { EV.formError('user-modal', err); }
     });
     document.getElementById('add-user').addEventListener('click', () => open(null));
@@ -184,17 +183,17 @@
         const list = cars.filter(c => c.group_id === group && c.active);
         const driver = (roles.find(r => r.name === 'Driver') || {}).id;
         document.getElementById('if-cars').innerHTML = list.length ? list.map(c => `<tr><td>${EV.carDot(c.id)}${EV.esc(c.name)}</td>
-            <td><select data-car="${c.id}"><option value="">— no access —</option>${roles.map(r => `<option value="${r.id}" ${r.id === driver ? 'selected' : ''}>${EV.esc(r.name)}</option>`).join('')}</select></td></tr>`).join('')
-            : '<tr><td colspan="2" class="muted">No car in this group yet: roles can be given later.</td></tr>';
+            <td><select data-car="${c.id}"><option value="">— ${EV.t('no access')} —</option>${roles.map(r => `<option value="${r.id}" ${r.id === driver ? 'selected' : ''}>${EV.esc(r.name)}</option>`).join('')}</select></td></tr>`).join('')
+            : `<tr><td colspan="2" class="muted">${EV.t('No car in this group yet: roles can be given later.')}</td></tr>`;
     }
     function renderInvitations() {
         const when = (iso) => new Date(iso).toLocaleDateString(EV.locale, { dateStyle: 'medium' });
-        document.getElementById('invitations').innerHTML = !invitations.length ? '' : `<h3 style="font-size:var(--font-md);margin-bottom:8px">Invitations waiting for an answer</h3>
-            <div class="table-wrap"><table><thead><tr><th>E-mail</th><th>Name</th>${admin ? '<th>Group</th>' : ''}<th>Sent by</th><th>Valid until</th><th></th></tr></thead><tbody>
-            ${invitations.map(i => `<tr><td>${EV.esc(i.email)}${i.new_group ? ' <span class="badge badge-info" title="The link sent after an approved sign-up request">new group</span>' : ''}</td><td>${EV.esc(i.full_name || '')}</td>
+        document.getElementById('invitations').innerHTML = !invitations.length ? '' : `<h3 style="font-size:var(--font-md);margin-bottom:8px">${EV.t('Invitations waiting for an answer')}</h3>
+            <div class="table-wrap"><table><thead><tr><th>${EV.t('E-mail')}</th><th>${EV.t('Name')}</th>${admin ? `<th>${EV.t('Group')}</th>` : ''}<th>${EV.t('Sent by')}</th><th>${EV.t('Valid until')}</th><th></th></tr></thead><tbody>
+            ${invitations.map(i => `<tr><td>${EV.esc(i.email)}${i.new_group ? ` <span class="badge badge-info" title="${EV.esc(EV.t('The link sent after an approved sign-up request'))}">${EV.t('new group')}</span>` : ''}</td><td>${EV.esc(i.full_name || '')}</td>
                 ${admin ? `<td>👥 ${EV.esc(i.group_name)}</td>` : ''}<td>${EV.esc(i.invited_by || '')}</td>
-                <td>${i.expired ? '<span class="badge badge-err">expired</span>' : when(i.expires_at)}</td>
-                <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" data-resend="${i.id}">↻ Send again</button> <button class="icon-btn" data-revoke="${i.id}" title="Withdraw the invitation">✕</button></td></tr>`).join('')}</tbody></table></div>`;
+                <td>${i.expired ? `<span class="badge badge-err">${EV.t('expired')}</span>` : when(i.expires_at)}</td>
+                <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" data-resend="${i.id}">↻ ${EV.t('Send again')}</button> <button class="icon-btn" data-revoke="${i.id}" title="${EV.esc(EV.t('Withdraw the invitation'))}">✕</button></td></tr>`).join('')}</tbody></table></div>`;
     }
     async function loadInvitations() {
         try { invitations = await EV.api('GET', '/api/invitations'); renderInvitations(); } catch (err) { /* e-mail not set up: no invitation */ }
@@ -212,15 +211,15 @@
         e.preventDefault();
         const body = { email: inviteForm.email.value, full_name: inviteForm.full_name.value || null, group_id: admin ? Number(inviteForm.group_id.value) || null : null,
             grants: [...document.querySelectorAll('#if-cars select')].filter(s => s.value).map(s => ({ car_id: Number(s.dataset.car), role_id: Number(s.value) })) };
-        try { await EV.api('POST', '/api/invitations', body); EV.closeModal('invite-modal'); EV.toast(`Invitation sent to ${body.email}`); loadInvitations(); }
+        try { await EV.api('POST', '/api/invitations', body); EV.closeModal('invite-modal'); EV.toast(EV.t('Invitation sent to {email}', { email: body.email })); loadInvitations(); }
         catch (err) { EV.formError('invite-modal', err); }
     });
     document.getElementById('invitations').addEventListener('click', async (e) => {
         const b = e.target.closest('button');
         if (!b) return;
         try {
-            if (b.dataset.resend) { await EV.api('POST', `/api/invitations/${b.dataset.resend}/resend`, {}); EV.toast('A new link was sent'); }
-            else if (b.dataset.revoke) { if (!confirm('Withdraw this invitation? Its link stops working.')) return; await EV.api('DELETE', `/api/invitations/${b.dataset.revoke}`); }
+            if (b.dataset.resend) { await EV.api('POST', `/api/invitations/${b.dataset.resend}/resend`, {}); EV.toast(EV.t('A new link was sent')); }
+            else if (b.dataset.revoke) { if (!confirm(EV.t('Withdraw this invitation? Its link stops working.'))) return; await EV.api('DELETE', `/api/invitations/${b.dataset.revoke}`); }
             loadInvitations();
         } catch (err) { EV.toast(err.message, true); }
     });

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from .. import audit
 from ..auth import Principal, browser_only, new_api_token
 from ..database import get_db
+from ..i18n import msg
 from ..models import ApiToken, Car, Role
 from ..permissions import valid_permission
 from ..schemas import TokenCreated, TokenIn, TokenOut, TokenUpdate
@@ -23,7 +24,7 @@ router = APIRouter(prefix="/api/tokens", tags=["tokens"])
 def manager(principal: Principal = Depends(browser_only)) -> Principal:
     """Tokens are managed from a browser sign-in (a token can't manage tokens)."""
     if not principal.has("tokens:manage"):
-        raise HTTPException(403, "Permission needed: tokens:manage")
+        raise HTTPException(403, msg("Permission needed: tokens:manage"))
     return principal
 
 
@@ -38,19 +39,19 @@ def token_out(t: ApiToken) -> TokenOut:
 def _apply(db: Session, t: ApiToken, body: TokenIn | TokenUpdate) -> None:
     if body.role_id is not None:
         if db.get(Role, body.role_id) is None:
-            raise HTTPException(422, "Unknown role")
+            raise HTTPException(422, msg("Unknown role"))
         perms: list[str] = []
     else:
         perms = sorted(set(body.permissions))
         bad = [p for p in perms if not valid_permission(p)]
         if bad:
-            raise HTTPException(422, f"Unknown permission(s): {', '.join(bad)}")
+            raise HTTPException(422, msg("Unknown permission(s): {bad}", bad=", ".join(bad)))
         if not perms:
-            raise HTTPException(422, "Give the token a role or at least one permission")
+            raise HTTPException(422, msg("Give the token a role or at least one permission"))
     if body.car_ids is not None:
         cars = set(body.car_ids)
         if len(db.scalars(select(Car.id).where(Car.id.in_(cars))).all()) != len(cars):
-            raise HTTPException(422, "Unknown car")
+            raise HTTPException(422, msg("Unknown car"))
     t.name = body.name.strip()
     t.description = body.description
     t.role_id = body.role_id
@@ -61,7 +62,7 @@ def _apply(db: Session, t: ApiToken, body: TokenIn | TokenUpdate) -> None:
 def _get(db: Session, token_id: int) -> ApiToken:
     t = db.get(ApiToken, token_id)
     if t is None:
-        raise HTTPException(404, "Token not found")
+        raise HTTPException(404, msg("Token not found"))
     return t
 
 

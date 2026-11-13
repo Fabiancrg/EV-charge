@@ -1,44 +1,43 @@
 {% extends "base.html" %}
-{% block title %}Single sign-on · EV Charge{% endblock %}
+{% block title %}{{ t("Single sign-on") }} · EV Charge{% endblock %}
 {% block content %}
 <div class="content">
-    <div class="page-head"><h2>Single sign-on (OpenID Connect)</h2></div>
-    <p class="muted small" style="margin-bottom:12px">Sign in with <b>Authelia</b> (or Keycloak, Entra ID, Google…): the sign-in page shows a button that sends users to the identity provider.
-        Users are found by their single sign-on account, else linked by username or e-mail, else created. Provider <b>groups</b> can set the global role.</p>
+    <div class="page-head"><h2>{{ t("Single sign-on (OpenID Connect)") }}</h2></div>
+    <p class="muted small" style="margin-bottom:12px">{{ t("Sign in with <b>Authelia</b> (or Keycloak, Entra ID, Google…): the sign-in page shows a button that sends users to the identity provider. Users are found by their single sign-on account, else linked by username or e-mail, else created. Provider <b>groups</b> can set the global role.") }}</p>
     <div class="form-error" id="sso-error"></div>
     <form id="sso-form" autocomplete="off">
-        <fieldset><legend>Provider</legend>
+        <fieldset><legend>{{ t("Provider") }}</legend>
             <div class="form-grid">
-                <div class="field span-all"><label class="check"><input type="checkbox" name="enabled"> Enable single sign-on</label></div>
-                <div class="field"><label>Button name</label><input type="text" name="name" maxlength="50" placeholder="Authelia"></div>
-                <div class="field span-2"><label>Issuer URL *</label><input type="text" name="issuer" maxlength="300" placeholder="https://auth.example.com"><div class="hint">Its /.well-known/openid-configuration is read</div></div>
-                <div class="field"><label>Client ID *</label><input type="text" name="client_id" maxlength="200" placeholder="ev-charge"></div>
-                <div class="field"><label>Client secret *</label><input type="password" name="client_secret" maxlength="500" autocomplete="new-password"><div class="hint" id="sso-secret-hint"></div></div>
-                <div class="field"><label>Client authentication</label><select name="auth_method"><option value="client_secret_basic">client_secret_basic</option><option value="client_secret_post">client_secret_post</option></select></div>
-                <div class="field span-2"><label>Scopes</label><input type="text" name="scopes" maxlength="300"></div>
-                <div class="field span-2"><label>Redirect URI</label><input type="text" name="redirect_uri" maxlength="300"><div class="hint" id="sso-callback-hint"></div></div>
-                <div class="field"><label>Username claim</label><input type="text" name="username_claim" maxlength="50"></div>
-                <div class="field"><label>Groups claim</label><input type="text" name="groups_claim" maxlength="50"></div>
-                <div class="field span-all"><button type="button" class="btn btn-ghost" id="sso-test">🔎 Test the provider</button> <span class="small" id="sso-test-out"></span></div>
+                <div class="field span-all"><label class="check"><input type="checkbox" name="enabled"> {{ t("Enable single sign-on") }}</label></div>
+                <div class="field"><label>{{ t("Button name") }}</label><input type="text" name="name" maxlength="50" placeholder="Authelia"></div>
+                <div class="field span-2"><label>{{ t("Issuer URL") }} *</label><input type="text" name="issuer" maxlength="300" placeholder="https://auth.example.com"><div class="hint">{{ t("Its /.well-known/openid-configuration is read") }}</div></div>
+                <div class="field"><label>{{ t("Client ID") }} *</label><input type="text" name="client_id" maxlength="200" placeholder="ev-charge"></div>
+                <div class="field"><label>{{ t("Client secret") }} *</label><input type="password" name="client_secret" maxlength="500" autocomplete="new-password"><div class="hint" id="sso-secret-hint"></div></div>
+                <div class="field"><label>{{ t("Client authentication") }}</label><select name="auth_method"><option value="client_secret_basic">client_secret_basic</option><option value="client_secret_post">client_secret_post</option></select></div>
+                <div class="field span-2"><label>{{ t("Scopes") }}</label><input type="text" name="scopes" maxlength="300"></div>
+                <div class="field span-2"><label>{{ t("Redirect URI") }}</label><input type="text" name="redirect_uri" maxlength="300"><div class="hint" id="sso-callback-hint"></div></div>
+                <div class="field"><label>{{ t("Username claim") }}</label><input type="text" name="username_claim" maxlength="50"></div>
+                <div class="field"><label>{{ t("Groups claim") }}</label><input type="text" name="groups_claim" maxlength="50"></div>
+                <div class="field span-all"><button type="button" class="btn btn-ghost" id="sso-test">🔎 {{ t("Test the provider") }}</button> <span class="small" id="sso-test-out"></span></div>
             </div>
         </fieldset>
-        <fieldset><legend>Accounts and roles</legend>
+        <fieldset><legend>{{ t("Accounts and roles") }}</legend>
             <div class="form-grid">
-                <div class="field span-all"><label class="check"><input type="checkbox" name="auto_create"> Create the EV Charge account at the first sign-in</label></div>
-                <div class="field span-2"><label>Global role of new users</label><select name="default_role_id"></select><div class="hint">Cars are then given on the Users page (or by a group below)</div></div>
-                <div class="field span-all"><label>Group → global role (applied at each sign-in, first match wins)</label>
+                <div class="field span-all"><label class="check"><input type="checkbox" name="auto_create"> {{ t("Create the EV Charge account at the first sign-in") }}</label></div>
+                <div class="field span-2"><label>{{ t("Global role of new users") }}</label><select name="default_role_id"></select><div class="hint">{{ t("Cars are then given on the Users page (or by a group below)") }}</div></div>
+                <div class="field span-all"><label>{{ t("Group → global role (applied at each sign-in, first match wins)") }}</label>
                     <div id="sso-groups"></div>
-                    <button type="button" class="btn btn-ghost btn-sm" id="sso-add-group">＋ Add a mapping</button></div>
-                <div class="field span-all"><label class="check"><input type="checkbox" name="local_login"> Also allow username / password sign-in</label>
-                    <div class="hint">Untick to make single sign-on the only way in. If you get locked out, set <code>"allow_local_login": true</code> in config.json (or ALLOW_LOCAL_LOGIN=1) and restart.<span id="sso-override"></span></div></div>
+                    <button type="button" class="btn btn-ghost btn-sm" id="sso-add-group">＋ {{ t("Add a mapping") }}</button></div>
+                <div class="field span-all"><label class="check"><input type="checkbox" name="local_login"> {{ t("Also allow username / password sign-in") }}</label>
+                    <div class="hint">{{ t("Untick to make single sign-on the only way in. If you get locked out, set <code>\"allow_local_login\": true</code> in config.json (or ALLOW_LOCAL_LOGIN=1) and restart.") }}<span id="sso-override"></span></div></div>
             </div>
         </fieldset>
-        <div class="modal-actions"><button type="submit" class="btn">💾 Save</button></div>
+        <div class="modal-actions"><button type="submit" class="btn">💾 {{ t("Save") }}</button></div>
     </form>
 </div>
 <div class="content">
-    <div class="page-head"><h2>Authelia configuration</h2></div>
-    <p class="muted small" style="margin-bottom:8px">Add EV Charge as an OpenID Connect client in Authelia's <code>configuration.yml</code> (generate the secret's digest with <code>authelia crypto hash generate pbkdf2</code>), then restart Authelia. The address under <code>redirect_uris</code> must be exactly the redirect URI above:</p>
+    <div class="page-head"><h2>{{ t("Authelia configuration") }}</h2></div>
+    <p class="muted small" style="margin-bottom:8px">{{ t("Add EV Charge as an OpenID Connect client in Authelia's <code>configuration.yml</code> (generate the secret's digest with <code>authelia crypto hash generate pbkdf2</code>), then restart Authelia. The address under <code>redirect_uris</code> must be exactly the redirect URI above:") }}</p>
     <pre id="authelia-yaml" style="background:var(--bg-surface-alt);padding:12px;border-radius:8px;overflow:auto;font-size:var(--font-sm)"></pre>
 </div>
 {% endblock %}
@@ -47,12 +46,12 @@
 (() => {
     const form = document.getElementById('sso-form');
     let roles = [], cfg = null;
-    const roleOptions = (sel) => '<option value="">— none —</option>' + roles.map(r => `<option value="${r.id}" ${r.id === sel ? 'selected' : ''}>${EV.esc(r.name)}</option>`).join('');
+    const roleOptions = (sel) => `<option value="">— ${EV.t('none')} —</option>` + roles.map(r => `<option value="${r.id}" ${r.id === sel ? 'selected' : ''}>${EV.esc(r.name)}</option>`).join('');
     function groupRow(g = {}) {
         const div = document.createElement('div');
         div.style.cssText = 'display:flex;gap:8px;margin-bottom:6px';
-        div.innerHTML = `<input type="text" data-group placeholder="Group, e.g. ev-admins" value="${EV.esc(g.group || '')}" style="flex:1">
-            <select data-group-role style="flex:1">${roleOptions(g.role_id)}</select><button type="button" class="icon-btn" title="Remove">✕</button>`;
+        div.innerHTML = `<input type="text" data-group placeholder="${EV.esc(EV.t('Group, e.g. ev-admins'))}" value="${EV.esc(g.group || '')}" style="flex:1">
+            <select data-group-role style="flex:1">${roleOptions(g.role_id)}</select><button type="button" class="icon-btn" title="${EV.esc(EV.t('Remove'))}">✕</button>`;
         div.querySelector('button').addEventListener('click', () => div.remove());
         document.getElementById('sso-groups').appendChild(div);
     }
@@ -62,15 +61,15 @@
     function callbackHint() {
         const hint = document.getElementById('sso-callback-hint');
         const value = form.redirect_uri.value.trim();
-        const use = ` <a href="#" id="sso-use-callback">Use ${EV.esc(publicCallback)}</a>`;
+        const use = ` <a href="#" id="sso-use-callback">${EV.t('Use {url}', { url: EV.esc(publicCallback) })}</a>`;
         if (!value) {
-            hint.innerHTML = cfg.default_callback_url === publicCallback ? `Empty: <code>${EV.esc(publicCallback)}</code> is used (the address of this site followed by /auth/sso/callback).`
-                : `⚠ Empty: this server would use <code>${EV.esc(cfg.default_callback_url)}</code>, which isn't the address you reach it at (reverse proxy).${use}`;
+            hint.innerHTML = cfg.default_callback_url === publicCallback ? EV.t('Empty: <code>{url}</code> is used (the address of this site followed by /auth/sso/callback).', { url: EV.esc(publicCallback) })
+                : '⚠ ' + EV.t("Empty: this server would use <code>{url}</code>, which isn't the address you reach it at (reverse proxy).", { url: EV.esc(cfg.default_callback_url) }) + use;
         } else if (!/^https?:\/\/[^/]+.*\/auth\/sso\/callback$/.test(value)) {
-            hint.innerHTML = `⚠ Must be the public address of EV Charge followed by <code>/auth/sso/callback</code>: any other path answers “Not Found” after the sign-in.${use}`;
+            hint.innerHTML = '⚠ ' + EV.t('Must be the public address of EV Charge followed by <code>/auth/sso/callback</code>: any other path answers “Not Found” after the sign-in.') + use;
         } else {
-            hint.innerHTML = value === publicCallback ? 'The address of this site: the same must be in the provider’s <code>redirect_uris</code> (see below).'
-                : `Not the address you are using now (<code>${EV.esc(publicCallback)}</code>): fine if users reach EV Charge at the address entered.${use}`;
+            hint.innerHTML = value === publicCallback ? EV.t('The address of this site: the same must be in the provider’s <code>redirect_uris</code> (see below).')
+                : EV.t('Not the address you are using now (<code>{url}</code>): fine if users reach EV Charge at the address entered.', { url: EV.esc(publicCallback) }) + use;
         }
     }
     function yaml() {
@@ -110,8 +109,8 @@
             form.default_role_id.value = cfg.default_role_id ?? '';
             document.getElementById('sso-groups').innerHTML = '';
             (cfg.group_roles || []).forEach(groupRow);
-            document.getElementById('sso-secret-hint').textContent = cfg.has_secret ? 'Stored (encrypted): leave empty to keep it' : 'Not set yet';
-            document.getElementById('sso-override').textContent = cfg.allow_local_login_override ? ' (allow_local_login is currently on in config.json)' : '';
+            document.getElementById('sso-secret-hint').textContent = cfg.has_secret ? EV.t('Stored (encrypted): leave empty to keep it') : EV.t('Not set yet');
+            document.getElementById('sso-override').textContent = cfg.allow_local_login_override ? ' ' + EV.t('(allow_local_login is currently on in config.json)') : '';
             yaml();
         } catch (err) { EV.toast(err.message, true); }
     }
@@ -125,17 +124,17 @@
     document.getElementById('sso-add-group').addEventListener('click', () => groupRow());
     document.getElementById('sso-test').addEventListener('click', async () => {
         const out = document.getElementById('sso-test-out');
-        out.textContent = 'Reading…';
+        out.textContent = EV.t('Reading…');
         try {
             const d = await EV.api('POST', '/api/settings/sso/test', body());
-            out.innerHTML = `<span class="badge badge-ok">✓ Found</span> issuer ${EV.esc(d.issuer)}${(d.scopes_supported || []).includes('groups') ? ' · supports groups' : ''}`;
+            out.innerHTML = `<span class="badge badge-ok">✓ ${EV.t('Found')}</span> ${EV.esc(d.issuer)}${(d.scopes_supported || []).includes('groups') ? ' · ' + EV.t('supports groups') : ''}`;
         } catch (err) { out.innerHTML = `<span class="badge badge-err">✖</span> ${EV.esc(err.message)}`; }
     });
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const box = document.getElementById('sso-error');
         box.style.display = 'none';
-        try { await EV.api('PUT', '/api/settings/sso', body()); EV.toast('Single sign-on settings saved'); load(); }
+        try { await EV.api('PUT', '/api/settings/sso', body()); EV.toast(EV.t('Single sign-on settings saved')); load(); }
         catch (err) { box.textContent = err.message; box.style.display = 'block'; }
     });
     load();

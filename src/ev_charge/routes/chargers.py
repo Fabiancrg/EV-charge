@@ -15,6 +15,7 @@ from .. import live
 from ..auth import Principal, car_scope, check_group_manager, current_user, target_group, visible_groups
 from ..connectors import CONNECTORS, ConnectorError
 from ..database import get_db
+from ..i18n import msg
 from ..models import Car, Charger, ChargeSession, ReimbursementDocument
 from ..schemas import ChargerConnection, ChargerIn, ChargerOut, HistoryApply
 from ..secretbox import SecretError, decrypt_json, encrypt_json
@@ -26,7 +27,7 @@ MAX_HISTORY_DAYS = 400
 def _get(db: Session, charger_id: int) -> Charger:
     c = db.get(Charger, charger_id)
     if c is None:
-        raise HTTPException(404, "Charger not found")
+        raise HTTPException(404, msg("Charger not found"))
     return c
 
 
@@ -35,7 +36,7 @@ def _managed(db: Session, charger_id: int, user: Principal) -> Charger:
     c = _get(db, charger_id)
     groups = visible_groups(user, db)
     if groups is not None and c.group_id not in groups:
-        raise HTTPException(404, "Charger not found")
+        raise HTTPException(404, msg("Charger not found"))
     check_group_manager(user, c.group_id, "chargers:manage")
     return c
 
@@ -45,7 +46,7 @@ def _save(db: Session, c: Charger) -> None:
     same_group = Charger.group_id == c.group_id if c.group_id is not None else Charger.group_id.is_(None)
     if db.scalar(select(Charger.id).where(same_group, func.lower(Charger.name) == c.name.lower(), Charger.id != (c.id or -1))):
         db.rollback()
-        raise HTTPException(409, f"A charger named '{c.name}' already exists")
+        raise HTTPException(409, msg("A charger named '{name}' already exists", name=c.name))
     db.commit()
 
 
@@ -55,9 +56,9 @@ def _check_car(db: Session, car_id: int | None, user: Principal, group_id: int |
         return
     car = db.get(Car, car_id)
     if car is None or not user.can("car:view", car_id):
-        raise HTTPException(422, "Unknown car")
+        raise HTTPException(422, msg("Unknown car"))
     if car.group_id != group_id:
-        raise HTTPException(422, f"The car '{car.name}' isn't in the group of this charger")
+        raise HTTPException(422, msg("The car '{name}' isn't in the group of this charger", name=car.name))
 
 
 def charger_out(c: Charger, user: Principal, usage: list[ChargeSession] | None = None) -> ChargerOut:
@@ -136,7 +137,7 @@ def update_charger(charger_id: int, body: ChargerIn, user: Principal = Depends(c
     c = _managed(db, charger_id, user)
     if body.group_id is not None and body.group_id != c.group_id:  # moving a charger to another group: administrators
         if not user.has("chargers:manage"):
-            raise HTTPException(403, "Only an administrator can move a charger to another group")
+            raise HTTPException(403, msg("Only an administrator can move a charger to another group"))
         c.group_id = target_group(db, user, body.group_id, "chargers:manage")
     _check_car(db, body.default_car_id, user, c.group_id)
     for k, v in body.model_dump(exclude={"group_id"}).items():
@@ -150,9 +151,9 @@ async def delete_charger(charger_id: int, user: Principal = Depends(current_user
     c = _managed(db, charger_id, user)
     count = db.scalar(select(func.count()).select_from(ChargeSession).where(ChargeSession.charger_id == charger_id)) or 0
     if count:
-        raise HTTPException(409, f"'{c.name}' was used for {count} session(s): mark it inactive instead")
+        raise HTTPException(409, msg("'{name}' was used for {count} session(s): mark it inactive instead", name=c.name, count=count))
     if db.scalar(select(func.count()).select_from(ReimbursementDocument).where(ReimbursementDocument.charger_id == charger_id)):
-        raise HTTPException(409, f"'{c.name}' has reimbursement documents: mark it inactive instead")
+        raise HTTPException(409, msg("'{name}' has reimbursement documents: mark it inactive instead", name=c.name))
     await live.forget_connector(c.id)
     db.delete(c)
     db.commit()
@@ -174,7 +175,7 @@ async def set_connection(charger_id: int, body: ChargerConnection, user: Princip
         return charger_out(c, user)
     cls = CONNECTORS.get(body.connector)
     if cls is None:
-        raise HTTPException(422, f"Unknown connector '{body.connector}'")
+        raise HTTPException(422, msg("Unknown connector '{connector}'", connector=body.connector))
     try:
         stored = decrypt_json(c.connector_secret) if c.connector == body.connector else {}
     except SecretError:
@@ -184,7 +185,7 @@ async def set_connection(charger_id: int, body: ChargerConnection, user: Princip
     config = {f["name"]: (body.credentials.get(f["name"]) or "").strip() or (stored.get(f["name"], "") if f["secret"] else "") for f in fields}
     missing = [f["label"] for f in fields if f["required"] and not config.get(f["name"])]
     if missing:
-        raise HTTPException(422, f"Missing: {', '.join(missing)}")
+        raise HTTPException(422, msg("Missing: {missing}", missing=", ".join(missing)))
     try:
         connector = cls(config)
     except ConnectorError as e:
@@ -213,9 +214,9 @@ async def poll_now(charger_id: int, user: Principal = Depends(current_user), db:
     """Read the charger now (also done in the background every few minutes)."""
     c = _get(db, charger_id)
     if not _visible(user, c):
-        raise HTTPException(403, "This charger is not linked to your car")
+        raise HTTPException(403, msg("This charger is not linked to your car"))
     if not c.connector:
-        raise HTTPException(422, "This charger has no connection")
+        raise HTTPException(422, msg("This charger has no connection"))
     await live.poll_charger(db, c)
     db.refresh(c)
     return charger_out(c, user)
@@ -226,11 +227,11 @@ async def poll_now(charger_id: int, user: Principal = Depends(current_user), db:
 
 async def _rebuilt(c: Charger, date_from: date, date_to: date) -> list[hist.Rebuilt]:
     if date_to < date_from:
-        raise HTTPException(422, "The period ends before it starts")
+        raise HTTPException(422, msg("The period ends before it starts"))
     if (date_to - date_from).days > MAX_HISTORY_DAYS:
-        raise HTTPException(422, f"Choose a period of at most {MAX_HISTORY_DAYS} days")
+        raise HTTPException(422, msg("Choose a period of at most {days} days", days=MAX_HISTORY_DAYS))
     if not c.connector:
-        raise HTTPException(422, "This charger has no connection")
+        raise HTTPException(422, msg("This charger has no connection"))
     start = datetime.combine(date_from, time.min)
     end = min(datetime.combine(date_to + timedelta(days=1), time.min), datetime.now())
     async with live.lock_for(c.id):

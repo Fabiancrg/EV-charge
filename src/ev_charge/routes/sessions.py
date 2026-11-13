@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..auth import Principal, car_scope, check_car_access, current_user, restrict_car_ids
 from ..database import get_db
+from ..i18n import msg
 from ..models import Car, Charger, ChargeSession
 from ..pricing import Pricing
 from ..schemas import ReimbursementStatus, SessionBulk, SessionIn, SessionOut, default_status
@@ -24,16 +25,16 @@ router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 def _get(db: Session, session_id: int, user: Principal, permission: str = "car:view") -> ChargeSession:
     s = db.get(ChargeSession, session_id)
     if s is None:
-        raise HTTPException(404, "Session not found")
+        raise HTTPException(404, msg("Session not found"))
     if not user.can("car:view", s.car_id):
-        raise HTTPException(404, "Session not found")
+        raise HTTPException(404, msg("Session not found"))
     check_car_access(user, s.car_id, permission)
     return s
 
 
 def _check_car(db: Session, car_id: int, user: Principal, permission: str) -> None:
     if db.get(Car, car_id) is None:
-        raise HTTPException(422, "Unknown car")
+        raise HTTPException(422, msg("Unknown car"))
     check_car_access(user, car_id, permission)
 
 
@@ -44,9 +45,9 @@ def _check_charger(db: Session, charger_id: int | None, car_id: int, previous: i
     c = db.get(Charger, charger_id)
     car = db.get(Car, car_id)
     if c is None or car is None or c.group_id != car.group_id:  # a charger of another group doesn't exist for this car
-        raise HTTPException(422, "Unknown charger")
+        raise HTTPException(422, msg("Unknown charger"))
     if not c.active:
-        raise HTTPException(422, f"The charger '{c.name}' is inactive")
+        raise HTTPException(422, msg("The charger '{name}' is inactive", name=c.name))
 
 
 @dataclass
@@ -203,9 +204,9 @@ def bulk_update(body: SessionBulk, user: Principal = Depends(current_user), db: 
     if body.charger_id is not None:
         charger = db.get(Charger, body.charger_id)
         if charger is None:
-            raise HTTPException(422, "Unknown charger")
+            raise HTTPException(422, msg("Unknown charger"))
         if not charger.active:
-            raise HTTPException(422, f"The charger '{charger.name}' is inactive")
+            raise HTTPException(422, msg("The charger '{name}' is inactive", name=charger.name))
     needs = []
     if body.to_reimburse is not None or body.reimbursement_status is not None:
         needs.append("reimbursement:manage")

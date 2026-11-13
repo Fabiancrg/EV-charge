@@ -14,8 +14,9 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import __version__
+from . import __version__, i18n
 from .config import CONFIG
 from .database import SessionLocal, init_db
 from .routes import audit as audit_routes
@@ -46,6 +47,13 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
 
 
 app = FastAPI(title="EV Charge", version=__version__, lifespan=lifespan)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def translated_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """Error messages in the person's language (their profile, else the sign-in page's choice, else their browser)."""
+    language = i18n.valid(getattr(request.state, "language", None)) or i18n.language_of(request)
+    return JSONResponse({"detail": i18n.localize(language, exc.detail)}, status_code=exc.status_code, headers=getattr(exc, "headers", None))
 
 
 class _StaticFiles(StaticFiles):

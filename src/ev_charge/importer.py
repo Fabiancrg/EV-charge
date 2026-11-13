@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .i18n import msg
 from .models import Car, Charger, ChargeSession
 from .schemas import ReimbursementStatus, default_status
 
@@ -273,7 +274,7 @@ def parse_rows(db: Session, req: ImportRequest, scope: set[int] | None = None, n
             try:
                 return fn(cell[name])
             except (ValueError, TypeError, OverflowError):
-                p.errors.append(f'{label}: cannot read "{cell[name]}"')
+                p.errors.append(msg('{label}: cannot read "{value}"', label=label, value=cell[name]))
                 return None
 
         # Car
@@ -282,11 +283,11 @@ def parse_rows(db: Session, req: ImportRequest, scope: set[int] | None = None, n
             car = cars.get(re.sub(r"[\s\-.]", "", norm(cell["car"])))
             p.car_name = car.name if car else cell["car"]
             if car is None and not req.create_missing_cars:
-                p.errors.append(f'unknown car "{cell["car"]}"' + (" (or not assigned to you)" if scope is not None else ""))
+                p.errors.append(msg('unknown car "{car}" (or not assigned to you)', car=cell["car"]) if scope is not None else msg('unknown car "{car}"', car=cell["car"]))
         elif fixed_car is not None:
             car, p.car_name = fixed_car, fixed_car.name
         else:
-            p.errors.append("no car")
+            p.errors.append(msg("no car"))
 
         # Date and times (a date column holding a date-time also gives the start time)
         charge_date, date_time = parse("charge_date", "date", lambda v: parse_datetime(v, order)) or (None, None)
@@ -299,22 +300,22 @@ def parse_rows(db: Session, req: ImportRequest, scope: set[int] | None = None, n
         charge_date = charge_date or start_date
         start_t = start_t or date_time
         if charge_date is None and not any("date" in e for e in p.errors):
-            p.errors.append("no date")
+            p.errors.append(msg("no date"))
         duration = parse("duration", "duration", parse_duration)
         if end_t is None and start_t is not None and duration:
             end_t = (datetime.combine(date.min, start_t) + timedelta(minutes=duration)).time()
 
         kwh = parse("kwh", "kWh", parse_number)
         if kwh is None and not any(e.startswith("kWh") for e in p.errors):
-            p.errors.append("no kWh")
+            p.errors.append(msg("no kWh"))
         elif kwh is not None and not 0 < kwh <= 1000:
-            p.errors.append(f"kWh out of range ({kwh:g})")
+            p.errors.append(msg("kWh out of range ({kwh})", kwh=f"{kwh:g}"))
         odometer = parse("odometer", "odometer", parse_number)
         if odometer is not None and odometer < 0:
-            p.errors.append("negative odometer")
+            p.errors.append(msg("negative odometer"))
         cost = parse("cost", "cost", parse_number)
         if cost is not None and cost < 0:
-            p.errors.append("negative cost")
+            p.errors.append(msg("negative cost"))
         reimb = parse("to_reimburse", "reimbursement", parse_bool)
         status = parse("reimbursement_status", "status", parse_status)
         charger: Charger | None = None
@@ -322,14 +323,14 @@ def parse_rows(db: Session, req: ImportRequest, scope: set[int] | None = None, n
         if cell.get("charger"):
             charger = next((c for c in chargers.get(re.sub(r"[\s\-.]", "", norm(cell["charger"])), []) if c.group_id == group), None)
             if charger is None:
-                p.errors.append(f'unknown charger "{cell["charger"]}" (add it on the Chargers page)')
+                p.errors.append(msg('unknown charger "{charger}" (add it on the Chargers page)', charger=cell["charger"]))
         elif fixed_charger is not None:
             if fixed_charger.group_id == group:
                 charger = fixed_charger
             else:
-                p.errors.append(f'the charger "{fixed_charger.name}" isn\'t in the group of this car')
+                p.errors.append(msg('the charger "{name}" isn\'t in the group of this car', name=fixed_charger.name))
         if charge_date and charge_date > date.today() + timedelta(days=1):
-            p.warnings.append("date in the future")
+            p.warnings.append(msg("date in the future"))
 
         p.values = {
             "car_id": car.id if car else None,
@@ -351,7 +352,7 @@ def parse_rows(db: Session, req: ImportRequest, scope: set[int] | None = None, n
         for key, limit in (("location", 200), ("provider", 200)):
             if p.values[key] and len(p.values[key]) > limit:
                 p.values[key] = p.values[key][:limit]
-                p.warnings.append(f"{key} shortened to {limit} characters")
+                p.warnings.append(msg("{key} shortened to {limit} characters", key=key, limit=limit))
 
         if p.errors:
             p.status = "error"
@@ -359,10 +360,10 @@ def parse_rows(db: Session, req: ImportRequest, scope: set[int] | None = None, n
             key = _dup_key(car.id if car else norm(p.car_name or ""), charge_date, kwh, p.values["odometer"])  # type: ignore[arg-type]
             if key in existing:
                 p.status = "duplicate"
-                p.warnings.append("already recorded (same car, date, kWh and odometer)")
+                p.warnings.append(msg("already recorded (same car, date, kWh and odometer)"))
             elif key in seen:
                 p.status = "duplicate"
-                p.warnings.append("same session earlier in the file")
+                p.warnings.append(msg("same session earlier in the file"))
             seen.add(key)
         out.append(p)
     return out

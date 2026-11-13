@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Reports · EV Charge{% endblock %}
+{% block title %}{{ t("Reports") }} · EV Charge{% endblock %}
 {% block head %}
 <style>
     .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 18px; }
@@ -13,22 +13,22 @@
 {% endblock %}
 {% block content %}
 <div class="content">
-    <div class="page-head"><h2>Reports</h2><a class="btn btn-ghost btn-sm" href="/reimbursement">💶 Reimbursement statement →</a></div>
+    <div class="page-head"><h2>{{ t("Reports") }}</h2><a class="btn btn-ghost btn-sm" href="/reimbursement">💶 {{ t("Reimbursement statement →") }}</a></div>
     {% with with_reimburse = false %}{% include "_filters.html" %}{% endwith %}
     <div id="report-note"></div>
     <div class="tiles" id="tiles"></div>
-    <div id="empty" class="empty-state" style="display:none"><h3>No charging session in this period</h3><p>Change the filters, or record sessions first.</p></div>
+    <div id="empty" class="empty-state" style="display:none"><h3>{{ t("No charging session in this period") }}</h3><p>{{ t("Change the filters, or record sessions first.") }}</p></div>
     <div class="charts" id="charts">
-        <div class="chart-card wide"><h3>Energy charged per month</h3><div class="sub">kWh, stacked by car</div><div class="chart-box"><canvas id="c-kwh"></canvas></div></div>
-        <div class="chart-card"><h3>Distance driven per month</h3><div class="sub">km between consecutive odometer readings</div><div class="chart-box"><canvas id="c-km"></canvas></div></div>
-        <div class="chart-card"><h3>To reimburse vs. not</h3><div class="sub">kWh per month</div><div class="chart-box"><canvas id="c-reimb"></canvas></div></div>
-        <div class="chart-card"><h3>Energy by provider</h3><div class="sub">kWh; top 7, the rest in “Other”</div><div class="chart-box"><canvas id="c-provider"></canvas></div></div>
-        <div class="chart-card"><h3>Energy by location</h3><div class="sub">kWh; top 7, the rest in “Other”</div><div class="chart-box"><canvas id="c-location"></canvas></div></div>
-        <div class="chart-card wide" id="lease-card" style="display:none"><h3>Lease mileage</h3><div class="sub" id="lease-sub">Odometer readings against the contract allowance</div><div class="chart-box"><canvas id="c-lease"></canvas></div></div>
+        <div class="chart-card wide"><h3>{{ t("Energy charged per month") }}</h3><div class="sub">{{ t("kWh, stacked by car") }}</div><div class="chart-box"><canvas id="c-kwh"></canvas></div></div>
+        <div class="chart-card"><h3>{{ t("Distance driven per month") }}</h3><div class="sub">{{ t("km between consecutive odometer readings") }}</div><div class="chart-box"><canvas id="c-km"></canvas></div></div>
+        <div class="chart-card"><h3>{{ t("To reimburse vs. not") }}</h3><div class="sub">{{ t("kWh per month") }}</div><div class="chart-box"><canvas id="c-reimb"></canvas></div></div>
+        <div class="chart-card"><h3>{{ t("Energy by provider") }}</h3><div class="sub">{{ t("kWh; top 7, the rest in “Other”") }}</div><div class="chart-box"><canvas id="c-provider"></canvas></div></div>
+        <div class="chart-card"><h3>{{ t("Energy by location") }}</h3><div class="sub">{{ t("kWh; top 7, the rest in “Other”") }}</div><div class="chart-box"><canvas id="c-location"></canvas></div></div>
+        <div class="chart-card wide" id="lease-card" style="display:none"><h3>{{ t("Lease mileage") }}</h3><div class="sub" id="lease-sub">{{ t("Odometer readings against the contract allowance") }}</div><div class="chart-box"><canvas id="c-lease"></canvas></div></div>
     </div>
 </div>
 <div class="content" id="table-card">
-    <div class="page-head"><h2>Monthly summary</h2></div>
+    <div class="page-head"><h2>{{ t("Monthly summary") }}</h2></div>
     <div class="table-wrap" id="monthly"></div>
 </div>
 {% endblock %}
@@ -94,18 +94,18 @@
         const t = data.totals;
         const tile = (label, value) => `<div class="tile"><div class="label">${label}</div><div class="value">${value}</div></div>`;
         document.getElementById('tiles').innerHTML = [
-            tile('Sessions', EV.num(t.sessions)),
-            tile('Energy charged', `${EV.num(t.kwh, t.kwh >= 100 ? 0 : 1)} <small>kWh</small>`),
-            tile('Distance', `${EV.num(t.km)} <small>km</small>`),
-            tile('Consumption', t.consumption_kwh_100km != null ? `${EV.num(t.consumption_kwh_100km, 1)} <small>kWh/100 km</small>` : '—'),
-            tile('Avg per session', t.avg_kwh_per_session != null ? `${EV.num(t.avg_kwh_per_session, 1)} <small>kWh</small>` : '—'),
-            tile('Cost', t.cost != null ? EV.money(t.cost) : '—'),
-            tile('Avg price', t.avg_price_per_kwh != null ? `${EV.money(t.avg_price_per_kwh, 3)} <small>/kWh</small>` : '—'),
-            tile('To reimburse', `${EV.num(t.kwh_to_reimburse, 1)} <small>kWh · ${EV.num(t.sessions_to_reimburse)} sess.</small>`),
+            tile(EV.t('Sessions'), EV.num(t.sessions)),
+            tile(EV.t('Energy charged'), `${EV.num(t.kwh, t.kwh >= 100 ? 0 : 1)} <small>kWh</small>`),
+            tile(EV.t('Distance'), `${EV.num(t.km)} <small>km</small>`),
+            tile(EV.t('Consumption'), t.consumption_kwh_100km != null ? `${EV.num(t.consumption_kwh_100km, 1)} <small>kWh/100 km</small>` : '—'),
+            tile(EV.t('Avg per session'), t.avg_kwh_per_session != null ? `${EV.num(t.avg_kwh_per_session, 1)} <small>kWh</small>` : '—'),
+            tile(EV.t('Cost'), t.cost != null ? EV.money(t.cost) : '—'),
+            tile(EV.t('Avg price'), t.avg_price_per_kwh != null ? `${EV.money(t.avg_price_per_kwh, 3)} <small>/kWh</small>` : '—'),
+            tile(EV.t('To reimburse'), `${EV.num(t.kwh_to_reimburse, 1)} <small>kWh · ${EV.t('{n} sess.', { n: EV.num(t.sessions_to_reimburse) })}</small>`),
         ].join('');
 
         document.getElementById('report-note').innerHTML = t.home_without_tariff
-            ? `<div class="note">⚠ ${EV.num(t.home_without_tariff)} session(s) made with a charger fall outside every tariff period: their cost is missing from the totals.${EV.can('tariffs:manage') ? ' <a href="/tariffs">Add the tariff →</a>' : ''}</div>` : '';
+            ? `<div class="note">⚠ ${EV.t('{n} session(s) made with a charger fall outside every tariff period: their cost is missing from the totals.', { n: EV.num(t.home_without_tariff) })}${EV.canAdd('tariffs:manage') ? ` <a href="/tariffs">${EV.t('Add the tariff →')}</a>` : ''}</div>` : '';
         const empty = !t.sessions;
         document.getElementById('empty').style.display = empty ? '' : 'none';
         document.getElementById('charts').style.display = empty ? 'none' : '';
@@ -121,8 +121,8 @@
         draw('c-reimb', {
             type: 'bar',
             data: { labels, datasets: [
-                { label: 'To reimburse', data: data.reimburse_by_month.to_reimburse, ...barStyle(c, EV.seriesColor(0), true) },
-                { label: 'Not to reimburse', data: data.reimburse_by_month.private, ...barStyle(c, EV.seriesColor(1), true) },
+                { label: EV.t('To reimburse'), data: data.reimburse_by_month.to_reimburse, ...barStyle(c, EV.seriesColor(0), true) },
+                { label: EV.t('Not to reimburse'), data: data.reimburse_by_month.private, ...barStyle(c, EV.seriesColor(1), true) },
             ] },
             options: baseOptions(c, { stacked: true, unit: 'kWh' }),
         });
@@ -130,9 +130,9 @@
             const opts = baseOptions(c, { horizontal: true, legend: false, unit: 'kWh' });
             opts.plugins.tooltip.callbacks.afterLabel = (ctx) => {
                 const r = rows[ctx.dataIndex];
-                return ` ${EV.num(r.sessions)} session(s)${r.cost ? ' · ' + EV.money(r.cost) : ''}`;
+                return ` ${EV.t('{n} session(s)', { n: EV.num(r.sessions) })}${r.cost ? ' · ' + EV.money(r.cost) : ''}`;
             };
-            draw(id, { type: 'bar', data: { labels: rows.map(r => r.name), datasets: [{ data: rows.map(r => r.kwh), ...barStyle(c, EV.seriesColor(0), false), borderSkipped: 'start' }] }, options: opts });
+            draw(id, { type: 'bar', data: { labels: rows.map(r => ({ Other: EV.t('Other'), '(not set)': EV.t('(not set)') })[r.name] || r.name), datasets: [{ data: rows.map(r => r.kwh), ...barStyle(c, EV.seriesColor(0), false), borderSkipped: 'start' }] }, options: opts });
         }
 
         // Lease mileage (one car selected, with lease dates)
@@ -143,13 +143,13 @@
             const ts = (d) => new Date(d + 'T00:00:00').getTime();
             const carColor = EV.seriesColor(data.cars[0].color_index);
             const sets = [{
-                label: 'Odometer', data: l.readings.map(r => ({ x: ts(r.date), y: r.odometer })),
+                label: EV.t('Odometer'), data: l.readings.map(r => ({ x: ts(r.date), y: r.odometer })),
                 borderColor: carColor, backgroundColor: carColor, borderWidth: 2, pointRadius: l.readings.length > 40 ? 0 : 4, pointHoverRadius: 6, pointHitRadius: 8,
                 pointBorderColor: c.surface, pointBorderWidth: 2, tension: 0, borderJoinStyle: 'round', borderCapStyle: 'round',
             }];
             if (l.allowed_end_odometer != null) {
                 sets.push({
-                    label: 'Allowance (pro rata)', data: [{ x: ts(l.start), y: l.start_odometer }, { x: ts(l.end), y: l.allowed_end_odometer }],
+                    label: EV.t('Allowance (pro rata)'), data: [{ x: ts(l.start), y: l.start_odometer }, { x: ts(l.end), y: l.allowed_end_odometer }],
                     borderColor: c.muted, backgroundColor: c.muted, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0,
                 });
             }
@@ -162,16 +162,16 @@
             opts.scales.y.beginAtZero = false;
             opts.plugins.tooltip.callbacks.title = (items) => items.length ? EV.date(new Date(items[0].parsed.x).toISOString().slice(0, 10)) : '';
             draw('c-lease', { type: 'line', data: { datasets: sets }, options: opts });
-            document.getElementById('lease-sub').textContent = `Odometer readings of ${data.cars[0].name} against the contract allowance (${EV.date(l.start)} → ${EV.date(l.end)})`;
+            document.getElementById('lease-sub').textContent = EV.t('Odometer readings of {car} against the contract allowance ({start} → {end})', { car: data.cars[0].name, start: EV.date(l.start), end: EV.date(l.end) });
         } else {
             leaseCard.style.display = 'none';
             charts['c-lease']?.destroy(); delete charts['c-lease'];
         }
 
         // Table view of the monthly numbers (also the accessible fallback for the charts)
-        document.getElementById('monthly').innerHTML = `<table><thead><tr><th>Month</th><th class="num">Sessions</th><th class="num">kWh</th><th class="num">km</th><th class="num">Cost</th><th class="num">kWh to reimburse</th><th class="num">Cost to reimburse</th></tr></thead><tbody>
+        document.getElementById('monthly').innerHTML = `<table><thead><tr><th>${EV.t('Month')}</th><th class="num">${EV.t('Sessions')}</th><th class="num">kWh</th><th class="num">km</th><th class="num">${EV.t('Cost')}</th><th class="num">${EV.t('kWh to reimburse')}</th><th class="num">${EV.t('Cost to reimburse')}</th></tr></thead><tbody>
             ${[...data.monthly].reverse().map(r => `<tr><td>${monthLabel(r.month)}</td><td class="num">${EV.num(r.sessions)}</td><td class="num">${EV.num(r.kwh, 1)}</td><td class="num">${EV.num(r.km)}</td><td class="num">${r.cost ? EV.money(r.cost) : '—'}</td><td class="num">${EV.num(r.kwh_to_reimburse, 1)}</td><td class="num">${r.cost_to_reimburse ? EV.money(r.cost_to_reimburse) : '—'}</td></tr>`).join('')}
-            </tbody><tfoot><tr><td>Total</td><td class="num">${EV.num(t.sessions)}</td><td class="num">${EV.num(t.kwh, 1)}</td><td class="num">${EV.num(t.km)}</td><td class="num">${t.cost != null ? EV.money(t.cost) : '—'}</td><td class="num">${EV.num(t.kwh_to_reimburse, 1)}</td><td class="num">${t.cost_to_reimburse ? EV.money(t.cost_to_reimburse) : '—'}</td></tr></tfoot></table>`;
+            </tbody><tfoot><tr><td>${EV.t('Total')}</td><td class="num">${EV.num(t.sessions)}</td><td class="num">${EV.num(t.kwh, 1)}</td><td class="num">${EV.num(t.km)}</td><td class="num">${t.cost != null ? EV.money(t.cost) : '—'}</td><td class="num">${EV.num(t.kwh_to_reimburse, 1)}</td><td class="num">${t.cost_to_reimburse ? EV.money(t.cost_to_reimburse) : '—'}</td></tr></tfoot></table>`;
     }
 
     async function load() {

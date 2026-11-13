@@ -8,13 +8,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ev_charge import i18n
+from ev_charge.connectors import CONNECTORS
 from ev_charge.main import app
 from ev_charge.permissions import ALL_PERMISSIONS
 
 SRC = Path(i18n.__file__).parent
 STRING = r"""("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')"""
-# t("…") in templates, EV.t('…') and T('…') in scripts, tr(language, "…") in Python
-CALLS = [re.compile(r"(?<![\w.])(?:EV\.t|T|t)\(\s*" + STRING), re.compile(r"\btr\(\s*[\w.]+\s*,\s*" + STRING)]
+# t("…") in templates, EV.t('…') and T('…') in scripts, tr(language, "…") and msg("…") in Python
+CALLS = [re.compile(r"(?<![\w.])(?:EV\.t|T|t|_?msg)\(\s*" + STRING), re.compile(r"\btr\(\s*[\w.]+\s*,\s*" + STRING)]
 
 
 def used_texts() -> dict[str, str]:
@@ -29,6 +30,11 @@ def used_texts() -> dict[str, str]:
                 found.setdefault(m.group(1)[1:-1].replace("\\'", "'").replace('\\"', '"'), path.name)
     for label, _group in ALL_PERMISSIONS.values():  # shown through EV.t(label)
         found.setdefault(label, "permissions.py")
+    for connector in CONNECTORS.values():  # the connection form of a charger: EV.t(label)
+        for label in (connector.label, *(field[1] for field in connector.fields)):
+            found.setdefault(label, "connectors")
+    for _label, group in ALL_PERMISSIONS.values():  # the titles of the lists of permissions: EV.t(group)
+        found.setdefault(group, "permissions.py")
     return found
 
 
@@ -89,6 +95,23 @@ def test_language_of_the_profile(client):
     other.put("/api/auth/language", json={"language": None})
     assert other.get("/api/auth/me").json()["language"] is None and "Dashboard" in other.get("/").text
     other.close()
+
+
+def test_messages_of_the_server_in_the_language_of_the_person(client, anon):
+    assert client.get("/api/cars/999").json() == {"detail": "Car not found"}  # English by default
+    assert client.get("/api/cars/999", headers={"Accept-Language": "nl"}).json() == {"detail": "Auto niet gevonden"}
+    assert anon.post("/api/auth/login", json={"username": "x", "password": "y"}, headers={"Accept-Language": "de"}).json() == {"detail": "Benutzername oder Passwort falsch"}
+    client.put("/api/auth/language", json={"language": "fr"})
+    assert client.get("/api/cars/999", headers={"Accept-Language": "nl"}).json() == {"detail": "Voiture introuvable"}  # the profile first
+    client.post("/api/cars", json={"name": "Ioniq 5"})
+    assert client.post("/api/cars", json={"name": "Ioniq 5"}).json() == {"detail": "Une voiture nommée 'Ioniq 5' existe déjà"}  # with its values
+    # A message raised deep in the code (reading a document) is translated when it is sent
+    upload = client.post("/api/reimbursement-documents/preview", files={"file": ("x.csv", b"", "text/csv")}, data={"charger_id": "1"})
+    assert upload.status_code == 422 and upload.json() == {"detail": "Le fichier est vide."}
+    # The rows of an import, and the exported statement
+    preview = client.post("/api/import/sessions/preview", json={"rows": [["2026-01-05", "abc"]], "mapping": {"charge_date": 0, "kwh": 1}, "car_id": 1}).json()
+    assert preview["rows"][0]["errors"] == ['kWh : impossible de lire "abc"']
+    assert client.get("/api/reports/reimbursement?fmt=csv").text.splitlines()[0].startswith("\ufeffDate;Voiture;Plaque;Compteur (km);Lieu;Chargeur;Remboursé par;")
 
 
 def test_emails_in_the_language_of_the_recipient(client, mailbox):

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from ..auth import Principal, car_scope, current_user, require, visible_groups
 from ..config import CONFIG
 from ..database import get_db
+from ..i18n import msg
 from ..models import Car, Charger, ChargeSession, ReimbursementDocument, ReimbursementLine
 from ..pricing import Pricing, get_setting, set_setting
 from ..reconcile import MAX_FILE_BYTES, DocumentError, ParsedDocument, kwh_close, main_charger, match_lines, parse_document
@@ -27,7 +28,7 @@ router = APIRouter(prefix="/api/reimbursement-documents", tags=["reimbursement d
 def manager(user: Principal = Depends(current_user)) -> Principal:
     """Reimbursement documents are for those who follow the reimbursements of at least one car."""
     if car_scope(user, "reimbursement:manage") == set():
-        raise HTTPException(403, "Permission needed: reimbursement:manage")
+        raise HTTPException(403, msg("Permission needed: reimbursement:manage"))
     return user
 
 
@@ -80,7 +81,7 @@ def _documents(db: Session, user: Principal) -> list[ReimbursementDocument]:
 def _get(db: Session, document_id: int, user: Principal) -> ReimbursementDocument:
     doc = next((d for d in _documents(db, user) if d.id == document_id), None)
     if doc is None:
-        raise HTTPException(404, "Document not found")
+        raise HTTPException(404, msg("Document not found"))
     return doc
 
 
@@ -186,7 +187,7 @@ def _charger(db: Session, user: Principal, charger_id: int) -> Charger:
     charger = db.get(Charger, charger_id)
     groups = visible_groups(user, db)
     if charger is None or (groups is not None and charger.group_id not in groups):
-        raise HTTPException(422, "Unknown charger")
+        raise HTTPException(422, msg("Unknown charger"))
     return charger
 
 
@@ -320,10 +321,10 @@ async def preview(file: UploadFile = File(...), charger_id: int | None = None, u
 async def create_document(file: UploadFile = File(...), charger_id: int | None = None, user: Principal = Depends(manager), db: Session = Depends(get_db)) -> dict[str, Any]:
     """Store the document of a charger; the sessions matched with its lines become "invoiced" and its amount a payment to receive."""
     if charger_id is None:
-        raise HTTPException(422, "Choose the charger this document is about")
+        raise HTTPException(422, msg("Choose the charger this document is about"))
     parsed = await _read(file)
     if _existing(db, parsed) is not None:
-        raise HTTPException(409, f"The document {parsed.number} was already imported")
+        raise HTTPException(409, msg("The document {number} was already imported", number=parsed.number))
     matches, _offset, charger, _sessions = _analyse(db, user, parsed, charger_id)
     doc = ReimbursementDocument(
         source=parsed.source, number=parsed.number, issuer=parsed.issuer, document_date=parsed.document_date, due_date=parsed.due_date, period=parsed.period,
@@ -366,7 +367,7 @@ def set_charger(document_id: int, body: ChargerIn, user: Principal = Depends(man
     charger = _charger(db, user, body.charger_id)
     others = sum(s.charger_id != charger.id for ln in doc.lines for s in ln.sessions)
     if others:
-        raise HTTPException(422, f"{others} session(s) linked to this document weren't made with '{charger.name}': unlink them first")
+        raise HTTPException(422, msg("{others} session(s) linked to this document weren't made with '{name}': unlink them first", others=others, name=charger.name))
     doc.charger_id = charger.id
     db.commit()
     return _detail(db, user, _get(db, document_id, user))
@@ -401,7 +402,7 @@ def link_line(document_id: int, line_id: int, body: LineSessions, user: Principa
     doc = _get(db, document_id, user)
     line = next((ln for ln in doc.lines if ln.id == line_id), None)
     if line is None:
-        raise HTTPException(404, "Line not found")
+        raise HTTPException(404, msg("Line not found"))
     wanted = set(body.session_ids)
     current = {s.id: s for s in line.sessions}
     new = wanted - set(current)
@@ -411,7 +412,7 @@ def link_line(document_id: int, line_id: int, body: LineSessions, user: Principa
         if not new <= set(free):
             raise HTTPException(
                 422,
-                "This session can't be linked: it must be one of the document's charger, to be reimbursed, not in progress, on no document yet, and on a car you manage",
+                msg("This session can't be linked: it must be one of the document's charger, to be reimbursed, not in progress, on no document yet, and on a car you manage"),
             )
         for sid in new:
             free[sid].reimbursement_line = line
@@ -430,17 +431,17 @@ def create_session_from_line(document_id: int, line_id: int, body: NewSession, u
     doc = _get(db, document_id, user)
     line = next((ln for ln in doc.lines if ln.id == line_id), None)
     if line is None:
-        raise HTTPException(404, "Line not found")
+        raise HTTPException(404, msg("Line not found"))
     if line.sessions:
-        raise HTTPException(409, "This line already has a session")
+        raise HTTPException(409, msg("This line already has a session"))
     if doc.charger is None:
-        raise HTTPException(422, "Choose the charger of the document first")
+        raise HTTPException(422, msg("Choose the charger of the document first"))
     car_id = body.car_id or _default_car(doc)
     car = db.get(Car, car_id) if car_id is not None else None
     if car is None or car.group_id != doc.charger.group_id:
-        raise HTTPException(422, "Choose the car of the session")
+        raise HTTPException(422, msg("Choose the car of the session"))
     if not (user.can("sessions:create", car_id) and user.can("reimbursement:manage", car_id)):
-        raise HTTPException(403, "Not allowed on this car (add sessions and manage their reimbursement)")
+        raise HTTPException(403, msg("Not allowed on this car (add sessions and manage their reimbursement)"))
     shift = _time_shift(doc)
     start = line.started_at + shift
     end = line.ended_at + shift if line.ended_at else None

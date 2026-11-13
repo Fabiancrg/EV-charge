@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from .. import audit, mail
 from ..auth import Principal, require
 from ..database import get_db
+from ..i18n import msg
 
 router = APIRouter(prefix="/api/settings/email", tags=["settings"])
 
@@ -44,9 +45,9 @@ def _out(db: Session) -> dict[str, Any]:
 
 def _validate(body: MailSettings) -> None:
     if body.enabled and not (body.host.strip() and body.from_address.strip()):
-        raise HTTPException(422, "To enable e-mail, fill in the SMTP server and the sender address")
+        raise HTTPException(422, msg("To enable e-mail, fill in the SMTP server and the sender address"))
     if body.from_address and "@" not in body.from_address:
-        raise HTTPException(422, "The sender address is not an e-mail address")
+        raise HTTPException(422, msg("The sender address is not an e-mail address"))
 
 
 @router.get("")

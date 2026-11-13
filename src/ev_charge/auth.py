@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from .config import CONFIG
 from .database import get_db
+from .i18n import msg
 from .models import ApiToken, AuthSession, Car, Group, User
 from .permissions import ALL_PERMISSIONS, CAR_PERMISSIONS, GLOBAL_PERMISSIONS, Grants, expand
 
@@ -55,7 +56,7 @@ def verify_password(password: str, stored: str) -> bool:
 
 def check_password_strength(password: str) -> None:
     if len(password) < MIN_PASSWORD_LENGTH:
-        raise HTTPException(422, f"The password must have at least {MIN_PASSWORD_LENGTH} characters")
+        raise HTTPException(422, msg("The password must have at least {n} characters", n=MIN_PASSWORD_LENGTH))
 
 
 _DUMMY_HASH = hash_password(secrets.token_hex(8))  # same work for unknown usernames (no user enumeration by timing)
@@ -77,7 +78,7 @@ def _recent(key: str) -> list[float]:
 
 def check_throttle(keys: Iterable[str]) -> None:
     if any(len(_recent(k)) >= _MAX_FAILS for k in keys):
-        raise HTTPException(429, "Too many failed sign-ins: try again in a few minutes")
+        raise HTTPException(429, msg("Too many failed sign-ins: try again in a few minutes"))
 
 
 def record_failure(keys: Iterable[str]) -> None:
@@ -191,7 +192,7 @@ def token_from_request(db: Session, request: Request) -> ApiToken | None:
     t = db.scalar(select(ApiToken).where(ApiToken.token_hash == _token_hash(raw)))
     now = datetime.now(UTC)
     if t is None or t.revoked or not t.user.active or (t.expires_at is not None and _aware(t.expires_at) < now):
-        raise HTTPException(401, "Invalid or expired API token")
+        raise HTTPException(401, msg("Invalid or expired API token"))
     if t.last_used_at is None or now - _aware(t.last_used_at) > timedelta(minutes=1):
         t.last_used_at = now
         db.commit()
@@ -300,8 +301,9 @@ def principal_from_request(db: Session, request: Request) -> Principal | None:
 def current_user(request: Request, db: Session = Depends(get_db)) -> Principal:
     p = principal_from_request(db, request)
     if p is None:
-        raise HTTPException(401, "Sign in first")
+        raise HTTPException(401, msg("Sign in first"))
     request.state.principal = p  # for the audit log
+    request.state.language = p.user.language  # for the error messages
     return p
 
 
@@ -310,7 +312,7 @@ def require(*permissions: str) -> Any:
 
     def checker(principal: Principal = Depends(current_user)) -> Principal:
         if not any(principal.has(p) for p in permissions):
-            raise HTTPException(403, f"Permission needed: {' or '.join(permissions)}")
+            raise HTTPException(403, msg("Permission needed: {permissions}", permissions=" or ".join(permissions)))
         return principal
 
     return checker
@@ -319,7 +321,7 @@ def require(*permissions: str) -> Any:
 def browser_only(principal: Principal = Depends(current_user)) -> Principal:
     """Account settings can't be changed with an API token."""
     if principal.token is not None:
-        raise HTTPException(403, "Not available with an API token")
+        raise HTTPException(403, msg("Not available with an API token"))
     return principal
 
 
@@ -340,20 +342,20 @@ def target_group(db: Session, principal: Principal, wanted: int | None, permissi
     if principal.has(permission):
         group_id = wanted if wanted is not None else principal.group_id
         if group_id is not None and db.get(Group, group_id) is None:
-            raise HTTPException(422, "Unknown group")
+            raise HTTPException(422, msg("Unknown group"))
         return group_id
     if principal.is_group_manager:
         if wanted not in (None, principal.group_id):
-            raise HTTPException(403, "You can only add to your own group")
+            raise HTTPException(403, msg("You can only add to your own group"))
         return principal.group_id
     label = ALL_PERMISSIONS.get(permission, (permission,))[0].lower()
-    raise HTTPException(403, f"Not allowed ({label}): ask an administrator, or a manager of your group")
+    raise HTTPException(403, msg("Not allowed ({label}): ask an administrator, or a manager of your group", label=label))
 
 
 def check_group_manager(principal: Principal, group_id: int | None, permission: str) -> None:
     if not principal.manages_group(group_id, permission):
         label = ALL_PERMISSIONS.get(permission, (permission,))[0].lower()
-        raise HTTPException(403, f"Not allowed ({label}): this isn't managed by you")
+        raise HTTPException(403, msg("Not allowed ({label}): this isn't managed by you", label=label))
 
 
 def car_scope(principal: Principal, permission: str = "car:view") -> set[int] | None:
@@ -364,7 +366,7 @@ def car_scope(principal: Principal, permission: str = "car:view") -> set[int] | 
 def check_car_access(principal: Principal, car_id: int, permission: str = "car:view") -> None:
     if not principal.can(permission, car_id):
         label = ALL_PERMISSIONS.get(permission, (permission,))[0].lower()
-        raise HTTPException(403, f"Not allowed on this car ({label})")
+        raise HTTPException(403, msg("Not allowed on this car ({label})", label=label))
 
 
 def restrict_car_ids(principal: Principal, requested: list[int] | None, permission: str = "car:view") -> list[int] | None:
