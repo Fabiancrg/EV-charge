@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from .. import __version__
+from .. import __version__, i18n
 from ..auth import principal_from_request
 from ..config import CONFIG
 from ..database import get_db
@@ -37,7 +37,28 @@ def _asset_version() -> str:
     return digest.hexdigest()[:12]
 
 
-templates.env.globals.update(app_version=__version__, asset_version=_asset_version(), currency=CONFIG.currency, poll_seconds=max(15, CONFIG.charger_poll_seconds))
+templates.env.globals.update(
+    languages=i18n.LANGUAGES,
+    i18n_version=i18n.VERSION,
+    app_version=__version__,
+    asset_version=_asset_version(),
+    currency=CONFIG.currency,
+    poll_seconds=max(15, CONFIG.charger_poll_seconds),
+)
+
+
+def _render(request: Request, template: str, context: dict, user: object = None) -> Response:
+    """Render a page in the person's language: the template gets `lang` and the translation function `t`."""
+    lang = i18n.language_of(request, user)
+    return templates.TemplateResponse(request, template, {**context, "lang": lang, "t": i18n.translator(lang)})
+
+
+@router.get("/i18n/{language}.js")
+def catalogue(language: str) -> Response:
+    """The translations for the pages' scripts; the address changes with them, so browsers can keep it for long."""
+    if i18n.valid(language) is None:
+        return Response(status_code=404)
+    return Response(i18n.catalogue_script(language), media_type="application/javascript; charset=utf-8", headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 def _page(request: Request, db: Session, template: str, active: str, permission: str | None = None, managers: bool = False) -> Response:
@@ -55,7 +76,7 @@ def _page(request: Request, db: Session, template: str, active: str, permission:
     can_reimburse = principal.cars_with("reimbursement:manage") != set()  # type: ignore[union-attr]
     if template == "payments.html" and not can_reimburse:
         return RedirectResponse("/", status_code=303)
-    return templates.TemplateResponse(request, template, {"active": active, "user": user, "me": me, "can": set(me["permissions"]), "can_reimburse": can_reimburse})
+    return _render(request, template, {"active": active, "user": user, "me": me, "can": set(me["permissions"]), "can_reimburse": can_reimburse}, user)
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -158,7 +179,7 @@ def login(request: Request, db: Session = Depends(get_db)) -> Response:
     from .onboarding import signup_enabled
 
     sso = {"enabled": sso_enabled(db), "name": get_config(db)["name"], "local_login": local_login_allowed(db)}
-    return templates.TemplateResponse(request, "login.html", {"mode": "login", "sso": sso, "error": request.query_params.get("error"), "signup": signup_enabled(db)})
+    return _render(request, "login.html", {"mode": "login", "sso": sso, "error": request.query_params.get("error"), "signup": signup_enabled(db)})
 
 
 # ── Public pages of the sign-up requests and invitations (no sign-in: the link's token is the key) ──
@@ -170,21 +191,21 @@ def signup(request: Request, db: Session = Depends(get_db)) -> Response:
 
     if setup_needed(db) or not signup_enabled(db):
         return RedirectResponse("/login", status_code=303)
-    return templates.TemplateResponse(request, "public.html", {"mode": "signup"})
+    return _render(request, "public.html", {"mode": "signup"})
 
 
 @router.get("/signup/verify", response_class=HTMLResponse)
 def signup_verify(request: Request) -> Response:
-    return templates.TemplateResponse(request, "public.html", {"mode": "verify"})
+    return _render(request, "public.html", {"mode": "verify"})
 
 
 @router.get("/invite", response_class=HTMLResponse)
 def invite(request: Request) -> Response:
-    return templates.TemplateResponse(request, "public.html", {"mode": "invite"})
+    return _render(request, "public.html", {"mode": "invite"})
 
 
 @router.get("/setup", response_class=HTMLResponse)
 def setup(request: Request, db: Session = Depends(get_db)) -> Response:
     if not setup_needed(db):
         return RedirectResponse("/login", status_code=303)
-    return templates.TemplateResponse(request, "login.html", {"mode": "setup", "sso": {"enabled": False, "local_login": True}, "error": None, "signup": False})
+    return _render(request, "login.html", {"mode": "setup", "sso": {"enabled": False, "local_login": True}, "error": None, "signup": False})

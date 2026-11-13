@@ -4,6 +4,19 @@ Record the charging sessions of your EV cars and report on them: energy, distanc
 
 Same stack and look as Flow Manager: FastAPI, SQLAlchemy + Alembic (SQLite), Jinja pages that load their data from a JSON API, and Chart.js for the charts (vendored, so it works offline).
 
+## Languages
+
+The interface exists in **English, French, Dutch and German**. Each person gets:
+1. the language of their profile (**My account → Language**), else
+2. the language chosen with the selector at the top right of the sign-in, request and invitation pages (remembered by the browser), else
+3. the first language of their browser that exists here, else English.
+
+- **E-mails** are in the recipient's language: a sign-up request's e-mails follow the language of the page it was made on, even when the administrator who approves works in another one; an invitation is written in the inviter's language, and the new member's account then takes the language they chose on the invitation page.
+- **Dates and numbers** follow the language, in the regional form of the browser when it is the same language (e.g. `fr-BE`).
+- **Translation is in progress.** Translated so far: the menu, the sign-in and set-up pages, the sign-up request and invitation pages with their e-mails and messages, and *My account*. The other pages and the API's error messages are still in English.
+
+For developers: texts are written in English in the code and passed to a translation function — `{{ t("Text") }}` in templates, `EV.t('Text', { n: 3 })` in page scripts (`T(…)` on the public pages), `tr(language, "Text", n=3)` in Python — with `{name}` placeholders for values. Each language has one catalogue, `src/ev_charge/locales/<language>.json`, mapping the English text to its translation; a text without a translation is shown in English. `tests/test_i18n.py` fails when a text used in the code is missing from a catalogue, when a catalogue keeps a text no longer used, or when a translation doesn't have the same placeholders and markup as its English text. To add a language: add it to `LANGUAGES` in `i18n.py` and create its catalogue.
+
 ## Groups: several households or teams on one installation
 
 A **group** is who shares cars and chargers: a household, a team of colleagues. Each group sees and manages **its own** cars, chargers, sessions, reports, reimbursement documents and members, and nothing of the other groups.
@@ -429,6 +442,7 @@ Every endpoint needs a signed-in user (session cookie) or an API token (`Authori
 | `GET /api/chargers/{id}/history?date_from=&date_to=&car_id=`, `POST /api/chargers/{id}/history/apply` | History import: preview, then add/link the chosen sessions (administrators) |
 | `PATCH /api/sessions/bulk` | `{"ids": [...], "reimbursement_status": "paid", "charger_id": 1, "clear_charger": false, "provider": "Engie", "clear_provider": false, "to_reimburse": true}`: only the fields given change |
 | `GET /api/tariffs/creg?region=`, `POST /api/tariffs/creg/upload`, `POST /api/tariffs/creg/apply` | CREG import: preview (from the website or a saved page), then apply the chosen quarters (administrators) |
+| `PUT /api/auth/language` | `{"language": "fr"}` (`en`, `fr`, `nl`, `de`, or `null` for the browser's): saved in the profile when signed in, and remembered by the browser |
 | `POST /api/auth/login\|logout\|password\|setup`, `GET /api/auth/me` | Sign-in and own account (`me` includes the permissions, global and per car) |
 | `GET /api/auth/sessions`, `DELETE /api/auth/sessions/{id}`, `POST /api/auth/sessions/revoke-others` | My sign-ins |
 | `GET/POST /api/tokens`, `PUT/DELETE /api/tokens/{id}`, `POST /api/tokens/{id}/revoke` | API tokens: role or permissions, cars (`tokens:manage`, browser sign-in) |

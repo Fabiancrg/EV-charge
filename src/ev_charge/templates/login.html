@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ lang }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ 'Set up' if mode == 'setup' else 'Sign in' }} · EV Charge</title>
+    <title>{{ t("Set up") if mode == "setup" else t("Sign in") }} · EV Charge</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <script>
         (() => { let t = null; try { t = localStorage.getItem('ev-theme'); } catch (e) {}
@@ -20,28 +20,29 @@
     </style>
 </head>
 <body>
+{% include "_language.html" %}
 <div class="content login-box">
     <h1>⚡ EV Charge</h1>
     {% if mode == 'setup' %}
-    <p class="muted" style="margin-bottom:18px">Welcome! Create the first <b>administrator</b> account. You can add drivers afterwards (Users page).</p>
+    <p class="muted" style="margin-bottom:18px">{{ t("Welcome! Create the first <b>administrator</b> account. You can add drivers afterwards (Users page).") }}</p>
     {% else %}
-    <p class="muted" style="margin-bottom:18px">Sign in to record and follow your charging sessions.</p>
+    <p class="muted" style="margin-bottom:18px">{{ t("Sign in to record and follow your charging sessions.") }}</p>
     {% endif %}
     <div class="form-error" id="err" {% if error %}style="display:block"{% endif %}>{{ error or '' }}</div>
     {% if sso.enabled %}
-    <a class="btn" id="sso-btn" href="/auth/sso/login" style="width:100%;justify-content:center;margin-bottom:14px">🔐 Sign in with {{ sso.name }}</a>
-    {% if sso.local_login %}<p class="muted small" style="text-align:center;margin-bottom:10px">or with your EV Charge password</p>{% endif %}
+    <a class="btn" id="sso-btn" href="/auth/sso/login" style="width:100%;justify-content:center;margin-bottom:14px">🔐 {{ t("Sign in with {name}", name=sso.name) }}</a>
+    {% if sso.local_login %}<p class="muted small" style="text-align:center;margin-bottom:10px">{{ t("or with your EV Charge password") }}</p>{% endif %}
     {% endif %}
     <form id="form" {% if not sso.local_login %}style="display:none"{% endif %}>
-        <div class="field"><label>Username</label><input type="text" name="username" required autofocus autocomplete="username" autocapitalize="none" spellcheck="false"></div>
+        <div class="field"><label>{{ t("Username") }}</label><input type="text" name="username" required autofocus autocomplete="username" autocapitalize="none" spellcheck="false"></div>
         {% if mode == 'setup' %}
-        <div class="field"><label>Full name</label><input type="text" name="full_name" autocomplete="name"></div>
+        <div class="field"><label>{{ t("Full name") }}</label><input type="text" name="full_name" autocomplete="name"></div>
         {% endif %}
-        <div class="field"><label>Password</label><input type="password" name="password" required autocomplete="{{ 'new-password' if mode == 'setup' else 'current-password' }}" {{ 'minlength=8' if mode == 'setup' }}>
-            {% if mode == 'setup' %}<div class="hint">At least 8 characters.</div>{% endif %}</div>
-        <button class="btn" type="submit">{{ 'Create administrator' if mode == 'setup' else 'Sign in' }}</button>
+        <div class="field"><label>{{ t("Password") }}</label><input type="password" name="password" required autocomplete="{{ 'new-password' if mode == 'setup' else 'current-password' }}" {{ 'minlength=8' if mode == 'setup' }}>
+            {% if mode == 'setup' %}<div class="hint">{{ t("At least 8 characters.") }}</div>{% endif %}</div>
+        <button class="btn" type="submit">{{ t("Create administrator") if mode == "setup" else t("Sign in") }}</button>
     </form>
-    {% if signup and mode != 'setup' %}<p class="muted small" style="text-align:center;margin-top:14px">No account yet? <a href="/signup">Request access</a></p>{% endif %}
+    {% if signup and mode != 'setup' %}<p class="muted small" style="text-align:center;margin-top:14px">{{ t("No account yet?") }} <a href="/signup">{{ t("Request access") }}</a></p>{% endif %}
 </div>
 <script>
 (() => {  // keep the page to come back to after single sign-on
@@ -61,7 +62,7 @@ document.getElementById('form').addEventListener('submit', async (e) => {
         return;
     }
     const data = await r.json().catch(() => ({}));
-    err.textContent = typeof data.detail === 'string' ? data.detail : (data.detail || []).map(d => d.msg).join('\n') || 'Sign-in failed';
+    err.textContent = typeof data.detail === 'string' ? data.detail : (data.detail || []).map(d => d.msg).join('\n') || T('Sign-in failed');
     err.style.display = 'block';
 });
 </script>

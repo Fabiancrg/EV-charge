@@ -25,7 +25,7 @@ def user_out(u: User) -> UserOut:
         id=u.id, username=u.username, full_name=u.full_name, email=u.email, role_id=u.role_id, role_name=u.role.name if u.role else None,
         active=u.active, grants=[CarGrantIO(car_id=g.car_id, role_id=g.role_id) for g in u.grants if g.role_id is not None],
         has_password=u.has_password, sso=bool(u.oidc_subject), created_at=u.created_at, last_login=u.last_login,
-        group_id=u.group_id, group_name=u.group.name if u.group else None, group_manager=u.group_manager,
+        group_id=u.group_id, group_name=u.group.name if u.group else None, group_manager=u.group_manager, language=u.language,
     )  # fmt: skip
 
 

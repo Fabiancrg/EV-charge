@@ -5,10 +5,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import audit
+from .. import audit, i18n
 from ..auth import (
     COOKIE_NAME,
     Principal,
@@ -80,6 +81,29 @@ def logout(request: Request, db: Session = Depends(get_db)) -> Response:
     response = Response(status_code=204)
     end_session(db, request, response)
     return response
+
+
+class LanguageIn(BaseModel):
+    language: str | None = None  # empty: follow the browser
+
+
+@router.put("/language")
+def set_language(body: LanguageIn, request: Request, response: Response, db: Session = Depends(get_db)) -> dict[str, str | None]:
+    """Choose the language of the interface: saved in the profile when signed in, and remembered by this browser
+    (so the sign-in page keeps it). Works without being signed in, for the public pages."""
+    from ..auth import principal_from_request
+
+    if body.language is not None and i18n.valid(body.language) is None:
+        raise HTTPException(422, f"Unknown language: choose one of {', '.join(i18n.LANGUAGES)}")
+    principal = principal_from_request(db, request)
+    if principal is not None and principal.token is None:
+        principal.user.language = body.language
+        db.commit()
+    if body.language:
+        response.set_cookie(i18n.COOKIE, body.language, max_age=365 * 86400, samesite="lax", path="/")
+    else:
+        response.delete_cookie(i18n.COOKIE, path="/")
+    return {"language": body.language}
 
 
 @router.get("/me", response_model=Me)

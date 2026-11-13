@@ -245,6 +245,7 @@ class User(Base):
     # and manages its cars, chargers and members
     group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id", ondelete="SET NULL"), index=True)
     group_manager: Mapped[bool] = mapped_column(Boolean, default=False)
+    language: Mapped[str | None] = mapped_column(String(5))  # of the interface and of their e-mails (i18n.LANGUAGES); empty: the browser's
 
     role: Mapped[Role | None] = relationship()
     group: Mapped[Group | None] = relationship(back_populates="members")
@@ -327,6 +328,7 @@ class SignupRequest(Base):
     status: Mapped[str] = mapped_column(String(20), default="unverified")  # unverified | pending | approved | rejected
     token_hash: Mapped[str | None] = mapped_column(String(64), index=True)  # of the e-mail verification link
     ip: Mapped[str | None] = mapped_column(String(64))
+    language: Mapped[str | None] = mapped_column(String(5))  # of the page the request was made on: its e-mails follow
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -348,6 +350,7 @@ class Invitation(Base):
     token_hash: Mapped[str] = mapped_column(String(64), index=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     invited_by: Mapped[str | None] = mapped_column(String(100))
+    language: Mapped[str | None] = mapped_column(String(5))  # of its e-mail: the inviter's, or the requester's
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

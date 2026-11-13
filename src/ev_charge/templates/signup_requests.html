@@ -30,7 +30,7 @@
 (() => {
     const $ = (id) => document.getElementById(id);
     let settings = null, requests = [], approving = null;
-    const when = (iso) => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '';
+    const when = (iso) => iso ? new Date(iso).toLocaleString(EV.locale, { dateStyle: 'medium', timeStyle: 'short' }) : '';
     const STATUS = { pending: ['To review', 'badge-warn', '📨'], unverified: ['Address not confirmed yet', 'badge', '⏳'], approved: ['Approved', 'badge-ok', '✓'], rejected: ['Rejected', 'badge-err', '✖'] };
 
     function renderSettings() {

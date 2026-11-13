@@ -49,7 +49,7 @@
 (() => {
     const form = document.getElementById('tk-form');
     let tokens = [], roles = [], cars = [], catalogue = { global: [], car: [] }, editing = null;
-    const when = (iso) => iso ? new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z').toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+    const when = (iso) => iso ? new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z').toLocaleString(EV.locale, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
     const label = (name) => name === '*' ? 'Everything' : ([...catalogue.global, ...catalogue.car].find(p => p.name === name)?.label || name);
     const expired = (t) => t.expires_at && new Date(t.expires_at.endsWith('Z') || t.expires_at.includes('+') ? t.expires_at : t.expires_at + 'Z') < Date.now();
 

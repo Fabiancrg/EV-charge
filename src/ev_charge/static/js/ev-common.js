@@ -3,6 +3,23 @@
     'use strict';
     const EV = window.EV = window.EV || {};
 
+    /* ── Language ────────────────────────────────────────────────────── */
+    // EV.t(text, { n: 3 }): the English text given, in the person's language (EV.T, loaded from /i18n/<language>.js),
+    // or as written when it has no translation; {name} takes the value given.
+    EV.T = EV.T || {};
+    EV.lang = EV.lang || 'en';
+    EV.t = (text, values) => {
+        let out = EV.T[text] ?? text;
+        if (values) for (const [k, v] of Object.entries(values)) out = out.split(`{${k}}`).join(v);
+        return out;
+    };
+    // Dates and numbers follow the language chosen, in the regional form of the browser when it is the same language (fr-BE…)
+    EV.locale = (navigator.language || '').toLowerCase().startsWith(EV.lang) ? navigator.language : EV.lang;
+    EV.setLanguage = async (language) => {
+        await fetch('/api/auth/language', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language: language || null }) });
+        location.reload();
+    };
+
     /* ── Theme ───────────────────────────────────────────────────────── */
     EV.theme = () => document.documentElement.getAttribute('data-theme') || 'light';
     EV.setTheme = (t) => {
@@ -35,7 +52,7 @@
             try {
                 await EV.api('POST', '/api/auth/password', EV.formData(e.target));
                 EV.closeModal('pw-modal');
-                EV.toast('Password changed');
+                EV.toast(EV.t('Password changed'));
             } catch (err) { EV.formError('pw-modal', err); }
         });
     }
@@ -133,17 +150,17 @@
 
     /* ── Formatting ──────────────────────────────────────────────────── */
     EV.esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    const nf = (d) => new Intl.NumberFormat(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+    const nf = (d) => new Intl.NumberFormat(EV.locale, { minimumFractionDigits: d, maximumFractionDigits: d });
     EV.num = (v, d = 0) => (v === null || v === undefined || v === '') ? '—' : nf(d).format(v);
     // Up to 3 decimals, without trailing zeros (12.5 kWh, 30.125 kWh)
-    EV.kwh = (v) => v == null ? '—' : `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(v)} kWh`;
+    EV.kwh = (v) => v == null ? '—' : `${new Intl.NumberFormat(EV.locale, { maximumFractionDigits: 3 }).format(v)} kWh`;
     EV.km = (v) => v == null ? '—' : `${EV.num(v)} km`;
     EV.money = (v, d = 2) => {
         if (v == null) return '—';
-        try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: EV.currency || 'EUR', minimumFractionDigits: d, maximumFractionDigits: d }).format(v); }
+        try { return new Intl.NumberFormat(EV.locale, { style: 'currency', currency: EV.currency || 'EUR', minimumFractionDigits: d, maximumFractionDigits: d }).format(v); }
         catch (e) { return `${EV.num(v, d)} ${EV.currency}`; }
     };
-    EV.date = (iso) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
+    EV.date = (iso) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString(EV.locale, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
     EV.time = (t) => t ? t.slice(0, 5) : '';
     EV.duration = (min) => min == null ? '—' : `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')}`;
     EV.today = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };

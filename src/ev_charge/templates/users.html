@@ -76,7 +76,7 @@
     const privileged = (r) => r.all_cars || r.permissions.some(p => !/^(car|sessions|reimbursement):/.test(p));
     const groupCars = (groupId) => cars.filter(c => admin ? (groupId == null || c.group_id === groupId || (editing?.grants || []).some(g => g.car_id === c.id)) : c.group_id === EV.me.group_id);
     const carName = (id) => (cars.find(c => c.id === id) || {}).name || `#${id}`;
-    const when = (iso) => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'never';
+    const when = (iso) => iso ? new Date(iso).toLocaleString(EV.locale, { dateStyle: 'medium', timeStyle: 'short' }) : 'never';
 
     function roleHint() {
         const r = role(Number(form.role_id.value));
@@ -188,7 +188,7 @@
             : '<tr><td colspan="2" class="muted">No car in this group yet: roles can be given later.</td></tr>';
     }
     function renderInvitations() {
-        const when = (iso) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
+        const when = (iso) => new Date(iso).toLocaleDateString(EV.locale, { dateStyle: 'medium' });
         document.getElementById('invitations').innerHTML = !invitations.length ? '' : `<h3 style="font-size:var(--font-md);margin-bottom:8px">Invitations waiting for an answer</h3>
             <div class="table-wrap"><table><thead><tr><th>E-mail</th><th>Name</th>${admin ? '<th>Group</th>' : ''}<th>Sent by</th><th>Valid until</th><th></th></tr></thead><tbody>
             ${invitations.map(i => `<tr><td>${EV.esc(i.email)}${i.new_group ? ' <span class="badge badge-info" title="The link sent after an approved sign-up request">new group</span>' : ''}</td><td>${EV.esc(i.full_name || '')}</td>

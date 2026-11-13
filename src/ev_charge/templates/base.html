@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ lang }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -19,38 +19,38 @@
     <header>
         <h1><a href="/">⚡ EV Charge</a></h1>
         <nav>
-            <a href="/" class="{{ 'active' if active == 'dashboard' }}">Dashboard</a>
-            <a href="/sessions" class="{{ 'active' if active == 'sessions' }}">Sessions</a>
-            <a href="/reports" class="{{ 'active' if active == 'reports' }}">Reports</a>
-            <a href="/reimbursement" class="{{ 'active' if active == 'reimbursement' }}">Reimbursement</a>
-            {% if can_reimburse %}<a href="/payments" class="{{ 'active' if active == 'payments' }}">Payments</a>{% endif %}
-            <a href="/cars" class="{{ 'active' if active == 'cars' }}">Cars</a>
-            {% if 'chargers:manage' in can or me.manages_group %}<a href="/chargers" class="{{ 'active' if active == 'chargers' }}">Chargers</a>{% endif %}
-            {% if me.manages_group and 'users:manage' not in can %}<a href="/users" class="{{ 'active' if active == 'users' }}">Members</a>{% endif %}
-            {% if 'tariffs:manage' in can or me.manages_group %}<a href="/tariffs" class="{{ 'active' if active == 'tariffs' }}">Tariffs</a>{% endif %}
+            <a href="/" class="{{ 'active' if active == 'dashboard' }}">{{ t("Dashboard") }}</a>
+            <a href="/sessions" class="{{ 'active' if active == 'sessions' }}">{{ t("Sessions") }}</a>
+            <a href="/reports" class="{{ 'active' if active == 'reports' }}">{{ t("Reports") }}</a>
+            <a href="/reimbursement" class="{{ 'active' if active == 'reimbursement' }}">{{ t("Reimbursement") }}</a>
+            {% if can_reimburse %}<a href="/payments" class="{{ 'active' if active == 'payments' }}">{{ t("Payments") }}</a>{% endif %}
+            <a href="/cars" class="{{ 'active' if active == 'cars' }}">{{ t("Cars") }}</a>
+            {% if 'chargers:manage' in can or me.manages_group %}<a href="/chargers" class="{{ 'active' if active == 'chargers' }}">{{ t("Chargers") }}</a>{% endif %}
+            {% if me.manages_group and 'users:manage' not in can %}<a href="/users" class="{{ 'active' if active == 'users' }}">{{ t("Members") }}</a>{% endif %}
+            {% if 'tariffs:manage' in can or me.manages_group %}<a href="/tariffs" class="{{ 'active' if active == 'tariffs' }}">{{ t("Tariffs") }}</a>{% endif %}
             {% if 'users:manage' in can or 'groups:manage' in can or 'roles:manage' in can or 'settings:manage' in can or 'audit:read' in can or 'tokens:manage' in can %}
             <div class="user-menu">
-                <button class="nav-btn {{ 'active' if active in ('users', 'groups', 'signup', 'roles', 'settings', 'email', 'tokens', 'audit') }}" id="admin-btn" aria-haspopup="true">⚙ Settings ▾</button>
+                <button class="nav-btn {{ 'active' if active in ('users', 'groups', 'signup', 'roles', 'settings', 'email', 'tokens', 'audit') }}" id="admin-btn" aria-haspopup="true">⚙ {{ t("Settings") }} ▾</button>
                 <div class="user-dropdown" id="admin-dropdown">
-                    {% if 'users:manage' in can %}<a href="/users">👤 Users &amp; car access</a>{% endif %}
-                    {% if 'groups:manage' in can %}<a href="/groups">👥 Groups</a>{% endif %}
-                    {% if 'users:manage' in can %}<a href="/signup-requests">📨 Sign-up requests</a>{% endif %}
-                    {% if 'roles:manage' in can %}<a href="/roles">🛡 Roles &amp; permissions</a>{% endif %}
-                    {% if 'settings:manage' in can %}<a href="/settings/sso">🔐 Single sign-on</a>
-                    <a href="/settings/email">📧 E-mail (SMTP)</a>{% endif %}
-                    {% if 'tokens:manage' in can %}<a href="/settings/tokens">🔑 API tokens</a>{% endif %}
-                    {% if 'audit:read' in can %}<a href="/audit">📜 Audit log</a>{% endif %}
+                    {% if 'users:manage' in can %}<a href="/users">👤 {{ t("Users & car access") }}</a>{% endif %}
+                    {% if 'groups:manage' in can %}<a href="/groups">👥 {{ t("Groups") }}</a>{% endif %}
+                    {% if 'users:manage' in can %}<a href="/signup-requests">📨 {{ t("Sign-up requests") }}</a>{% endif %}
+                    {% if 'roles:manage' in can %}<a href="/roles">🛡 {{ t("Roles & permissions") }}</a>{% endif %}
+                    {% if 'settings:manage' in can %}<a href="/settings/sso">🔐 {{ t("Single sign-on") }}</a>
+                    <a href="/settings/email">📧 {{ t("E-mail (SMTP)") }}</a>{% endif %}
+                    {% if 'tokens:manage' in can %}<a href="/settings/tokens">🔑 {{ t("API tokens") }}</a>{% endif %}
+                    {% if 'audit:read' in can %}<a href="/audit">📜 {{ t("Audit log") }}</a>{% endif %}
                 </div>
             </div>
             {% endif %}
-            <button class="nav-btn" id="theme-toggle" title="Light / dark theme">🌓</button>
+            <button class="nav-btn" id="theme-toggle" title="{{ t("Light / dark theme") }}">🌓</button>
             <div class="user-menu">
                 <button class="nav-btn" id="user-btn" aria-haspopup="true">👤 {{ me.display_name }} ▾</button>
                 <div class="user-dropdown" id="user-dropdown">
-                    <div class="muted small" style="padding:8px 14px">{{ me.username }}{% if me.role_name %} · {{ me.role_name }}{% endif %}{% if me.group_name %}<br>👥 {{ me.group_name }}{% if me.manages_group %} (manager){% endif %}{% endif %}</div>
-                    <a href="/account">👤 My account (sign-ins)</a>
-                    <button id="pw-btn">🔑 {{ 'Change password' if me.has_password else 'Set a password' }}</button>
-                    <button id="logout-btn">↪ Sign out</button>
+                    <div class="muted small" style="padding:8px 14px">{{ me.username }}{% if me.role_name %} · {{ me.role_name }}{% endif %}{% if me.group_name %}<br>👥 {{ me.group_name }}{% if me.manages_group %} ({{ t("manager") }}){% endif %}{% endif %}</div>
+                    <a href="/account">👤 {{ t("My account (sign-ins, language)") }}</a>
+                    <button id="pw-btn">🔑 {{ t("Change password") if me.has_password else t("Set a password") }}</button>
+                    <button id="logout-btn">↪ {{ t("Sign out") }}</button>
                 </div>
             </div>
         </nav>
@@ -61,17 +61,18 @@
 <div id="toast"></div>
 <div class="modal" id="pw-modal">
     <div class="modal-box" style="max-width:420px">
-        <h3><span>Change password</span><button class="icon-btn" data-close title="Close">✕</button></h3>
+        <h3><span>{{ t("Change password") }}</span><button class="icon-btn" data-close title="{{ t("Close") }}">✕</button></h3>
         <div class="form-error"></div>
         <form id="pw-form" autocomplete="off">
-            {% if me.has_password %}<div class="field" style="margin-bottom:12px"><label>Current password</label><input type="password" name="current_password" required autocomplete="current-password"></div>
-            {% else %}<input type="hidden" name="current_password" value=""><p class="muted small" style="margin-bottom:12px">You sign in with single sign-on; a password also lets you sign in directly (if allowed).</p>{% endif %}
-            <div class="field" style="margin-bottom:12px"><label>New password</label><input type="password" name="new_password" required minlength="8" autocomplete="new-password"><div class="hint">At least 8 characters. Your other browsers will be signed out.</div></div>
-            <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn">Save</button></div>
+            {% if me.has_password %}<div class="field" style="margin-bottom:12px"><label>{{ t("Current password") }}</label><input type="password" name="current_password" required autocomplete="current-password"></div>
+            {% else %}<input type="hidden" name="current_password" value=""><p class="muted small" style="margin-bottom:12px">{{ t("You sign in with single sign-on; a password also lets you sign in directly (if allowed).") }}</p>{% endif %}
+            <div class="field" style="margin-bottom:12px"><label>{{ t("New password") }}</label><input type="password" name="new_password" required minlength="8" autocomplete="new-password"><div class="hint">{{ t("At least 8 characters. Your other browsers will be signed out.") }}</div></div>
+            <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>{{ t("Cancel") }}</button><button type="submit" class="btn">{{ t("Save") }}</button></div>
         </form>
     </div>
 </div>
 <script>window.EV = Object.assign(window.EV || {}, { currency: {{ currency|tojson }}, me: {{ me|tojson }} });</script>
+<script src="/i18n/{{ lang }}.js?v={{ i18n_version }}"></script>
 <script src="/static/js/ev-common.js?v={{ asset_version }}"></script>
 {% block scripts %}{% endblock %}
 </body>
