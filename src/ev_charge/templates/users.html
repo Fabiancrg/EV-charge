@@ -4,7 +4,10 @@
 <div class="content">
     <div class="page-head">
         <h2>{{ 'Users &amp; car access'|safe if 'users:manage' in can else 'Members of your group' }}</h2>
-        <button class="btn" id="add-user">＋ Add a {{ 'user' if 'users:manage' in can else 'member' }}</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn" id="invite-btn" title="Send a link by e-mail: the person chooses their username and password">✉ Invite by e-mail</button>
+            <button class="btn btn-ghost" id="add-user">＋ Add a {{ 'user' if 'users:manage' in can else 'member' }}</button>
+        </div>
     </div>
     {% if 'users:manage' in can %}
     <p class="muted small" style="margin-bottom:12px">Each user belongs to a <b>group</b> (who shares cars and chargers, see <a href="/groups">Groups</a>), has a <b>global role</b> (app-wide permissions; a role marked <i>all cars</i>, like Administrator or Accountant, also applies to every car of every group)
@@ -13,6 +16,25 @@
     <p class="muted small" style="margin-bottom:12px" id="group-info">The members of your group. Give each one a <b>role on the cars</b> they use (e.g. Driver on one car, Viewer on another). As a group manager you have every right on the group's cars.</p>
     {% endif %}
     <div class="table-wrap" id="users-table"><p class="muted">Loading…</p></div>
+    <div id="invitations" style="margin-top:18px"></div>
+</div>
+
+<div class="modal" id="invite-modal">
+    <div class="modal-box" style="max-width:620px">
+        <h3><span>✉ Invite by e-mail</span><button class="icon-btn" data-close title="Close">✕</button></h3>
+        <div class="form-error"></div>
+        <form id="invite-form" autocomplete="off">
+            <p class="muted small" style="margin-bottom:12px">The person receives a link (valid 7 days) to choose a username and a password, and joins the group. An invitation counts in the group's member limit.</p>
+            <div class="form-grid">
+                <div class="field span-2"><label>E-mail *</label><input type="email" name="email" required maxlength="200" autofocus></div>
+                <div class="field span-2"><label>Name</label><input type="text" name="full_name" maxlength="100"></div>
+                <div class="field span-all" data-admin-only><label>Group</label><select name="group_id"></select></div>
+                <div class="field span-all"><label>Role on each car</label>
+                    <div class="imp-grid" style="max-height:220px"><table><thead><tr><th>Car</th><th style="min-width:200px">Role</th></tr></thead><tbody id="if-cars"></tbody></table></div></div>
+            </div>
+            <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn">✉ Send the invitation</button></div>
+        </form>
+    </div>
 </div>
 
 <div class="modal" id="user-modal">
@@ -120,6 +142,7 @@
             const mine = EV.groups.find(g => g.id === EV.me.group_id), info = document.getElementById('group-info');
             if (info && mine) info.insertAdjacentHTML('beforeend', ` <b>${EV.esc(mine.name)}</b>: ${mine.members} of ${mine.max_members} member(s) allowed (the limit is set by an administrator).`);
             render();
+            loadInvitations();
         }
         catch (err) { EV.toast(err.message, true); }
     }
@@ -152,6 +175,55 @@
         catch (err) { EV.formError('user-modal', err); }
     });
     document.getElementById('add-user').addEventListener('click', () => open(null));
+
+    /* ── Invitations by e-mail ─────────────────────────────────────────── */
+    const inviteForm = document.getElementById('invite-form');
+    let invitations = [];
+    function inviteCars() {
+        const group = admin ? Number(inviteForm.group_id.value) || null : EV.me.group_id;
+        const list = cars.filter(c => c.group_id === group && c.active);
+        const driver = (roles.find(r => r.name === 'Driver') || {}).id;
+        document.getElementById('if-cars').innerHTML = list.length ? list.map(c => `<tr><td>${EV.carDot(c.id)}${EV.esc(c.name)}</td>
+            <td><select data-car="${c.id}"><option value="">— no access —</option>${roles.map(r => `<option value="${r.id}" ${r.id === driver ? 'selected' : ''}>${EV.esc(r.name)}</option>`).join('')}</select></td></tr>`).join('')
+            : '<tr><td colspan="2" class="muted">No car in this group yet: roles can be given later.</td></tr>';
+    }
+    function renderInvitations() {
+        const when = (iso) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
+        document.getElementById('invitations').innerHTML = !invitations.length ? '' : `<h3 style="font-size:var(--font-md);margin-bottom:8px">Invitations waiting for an answer</h3>
+            <div class="table-wrap"><table><thead><tr><th>E-mail</th><th>Name</th>${admin ? '<th>Group</th>' : ''}<th>Sent by</th><th>Valid until</th><th></th></tr></thead><tbody>
+            ${invitations.map(i => `<tr><td>${EV.esc(i.email)}${i.new_group ? ' <span class="badge badge-info" title="The link sent after an approved sign-up request">new group</span>' : ''}</td><td>${EV.esc(i.full_name || '')}</td>
+                ${admin ? `<td>👥 ${EV.esc(i.group_name)}</td>` : ''}<td>${EV.esc(i.invited_by || '')}</td>
+                <td>${i.expired ? '<span class="badge badge-err">expired</span>' : when(i.expires_at)}</td>
+                <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" data-resend="${i.id}">↻ Send again</button> <button class="icon-btn" data-revoke="${i.id}" title="Withdraw the invitation">✕</button></td></tr>`).join('')}</tbody></table></div>`;
+    }
+    async function loadInvitations() {
+        try { invitations = await EV.api('GET', '/api/invitations'); renderInvitations(); } catch (err) { /* e-mail not set up: no invitation */ }
+    }
+    document.getElementById('invite-btn').addEventListener('click', () => {
+        inviteForm.reset();
+        inviteForm.querySelectorAll('[data-admin-only]').forEach(el => { el.style.display = admin && (EV.groups || []).length > 1 ? '' : 'none'; });
+        inviteForm.group_id.innerHTML = (EV.groups || []).map(g => `<option value="${g.id}">${EV.esc(g.name)} (${g.members}/${g.max_members})</option>`).join('');
+        inviteForm.group_id.value = String(EV.me.group_id ?? '');
+        inviteCars();
+        EV.openModal('invite-modal');
+    });
+    inviteForm.group_id.addEventListener('change', inviteCars);
+    inviteForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = { email: inviteForm.email.value, full_name: inviteForm.full_name.value || null, group_id: admin ? Number(inviteForm.group_id.value) || null : null,
+            grants: [...document.querySelectorAll('#if-cars select')].filter(s => s.value).map(s => ({ car_id: Number(s.dataset.car), role_id: Number(s.value) })) };
+        try { await EV.api('POST', '/api/invitations', body); EV.closeModal('invite-modal'); EV.toast(`Invitation sent to ${body.email}`); loadInvitations(); }
+        catch (err) { EV.formError('invite-modal', err); }
+    });
+    document.getElementById('invitations').addEventListener('click', async (e) => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        try {
+            if (b.dataset.resend) { await EV.api('POST', `/api/invitations/${b.dataset.resend}/resend`, {}); EV.toast('A new link was sent'); }
+            else if (b.dataset.revoke) { if (!confirm('Withdraw this invitation? Its link stops working.')) return; await EV.api('DELETE', `/api/invitations/${b.dataset.revoke}`); }
+            loadInvitations();
+        } catch (err) { EV.toast(err.message, true); }
+    });
     document.getElementById('users-table').addEventListener('click', (e) => {
         const b = e.target.closest('[data-edit]');
         if (b) open(users.find(u => u.id === Number(b.dataset.edit)));

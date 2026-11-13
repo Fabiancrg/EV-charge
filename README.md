@@ -23,6 +23,24 @@ A **group** is who shares cars and chargers: a household, a team of colleagues. 
 - **Tariffs:** a group uses the **default tariffs** (managed by administrators) or **its own**. A manager chooses on the **Tariffs** page; switching to its own tariffs can start from a copy of the default ones, and the CREG import then fills the group's tariffs for the group's region. Sessions made with a charger of the group are priced with the tariffs the group uses, so changing the choice reprices them. Going back to the default tariffs keeps the group's own for later. Administrators see and change the tariffs of any group (*Tariffs of* at the top of the page).
 - **Still common to every group:** the roles and the application settings (single sign-on, e-mail), managed by administrators.
 
+### Letting people in: sign-up requests and invitations
+
+Both work by e-mail, so they need the SMTP settings (*Settings → E-mail*).
+
+**Sign-up requests** (closed by default; opened on *Settings → Sign-up requests*):
+1. The sign-in page shows **Request access**. The person gives their name, e-mail, the name of their group and a message.
+2. They receive a link to **confirm their e-mail address** (valid 48 hours). Only then does the request reach you; administrators who have an e-mail address are told by e-mail.
+3. On *Settings → Sign-up requests* you **approve** — choosing the group's name, its member limit and the manager's username — or **reject**. Approving creates the group and its manager, who receives a link (valid 7 days) to choose a password and is then signed in.
+- A request from an address that already has an account, or that is already waiting, gets the same answer and sends nothing, so the form doesn't reveal who has an account.
+- At most 5 requests per client address per quarter of an hour; unconfirmed requests disappear after 48 hours.
+
+**Invitations** (group managers on *Members*, administrators on *Users*: **✉ Invite by e-mail**):
+- The manager gives an e-mail address and, if they wish, a role on each of the group's cars. The person receives a link (valid 7 days), chooses a username and a password, and joins the group with those roles.
+- **Member limit:** members and invitations waiting for an answer count together when inviting. If the group fills up before an invitation is used, the link answers that the group is full.
+- Waiting invitations are listed under the members: *Send again* makes a new link (the old one stops working), ✕ withdraws it.
+- **With single sign-on as the only way in**, no password is asked: the account is created and the person signs in with the identity provider (matched on the e-mail address).
+- Links in e-mails use the address of the page the action was made from, so they are right behind a reverse proxy.
+
 ## Users, roles and permissions
 
 On first start, every page leads to **/setup**, where you create the first administrator. Users are managed on **Settings → Users & car access**, roles on **Settings → Roles & permissions**.
@@ -258,7 +276,8 @@ The **Tariffs** page (administrators) holds the price per kWh of home charging, 
 | **Chargers** `/chargers` | Chargers whose sessions are reimbursed, and the company paying them back (administrators, see above). Inactive chargers are hidden; *Show inactive (N)* lists them. |
 | **Tariffs** `/tariffs` | Home charging price periods and the CREG import: the default tariffs (administrators), and for each group the choice between the default tariffs and its own (group managers, see above). |
 | **Members** `/users` (group managers) | The members of your group: add them, up to the group's limit, and give them a role on the group's cars. |
-| **Users**, **Groups**, **Roles**, **Single sign-on**, **E-mail (SMTP)**, **API tokens**, **Audit log** (⚙ Settings menu) | Accounts with their global role and role per car; roles and permissions; OpenID Connect; SMTP; API tokens; audit log (see above). |
+| **Request access** `/signup`, `/signup/verify`, `/invite` | Public pages: the sign-up request form (when open), the confirmation of the e-mail address, and the page of an invitation link. |
+| **Users**, **Groups**, **Sign-up requests**, **Roles**, **Single sign-on**, **E-mail (SMTP)**, **API tokens**, **Audit log** (⚙ Settings menu) | Accounts with their global role and role per car; roles and permissions; OpenID Connect; SMTP; API tokens; audit log (see above). |
 | **My account** `/account` | Where you are signed in, your permissions. |
 | **Cars** `/cars` | Add and edit cars: identity (name, make, model, year, plate, VIN, colour), specs (usable battery, max AC/DC power, WLTP range and consumption), leasing (company, contract, start/end, km per year, monthly cost, odometer at start), notes, active flag. A car with sessions can't be deleted; mark it inactive instead (a returned car, or one that isn't delivered yet): it leaves the dashboard, the session form and this list (*Show inactive (N)* lists it again), and moves under *Inactive* in the car filters. Nothing is lost: the car filter of Sessions, Reports and Reimbursement offers *All cars*, *Active cars*, *Inactive cars* or one car, active or not. An active car whose lease is over is flagged *Lease ended*. |
 
@@ -414,6 +433,10 @@ Every endpoint needs a signed-in user (session cookie) or an API token (`Authori
 | `GET /api/auth/sessions`, `DELETE /api/auth/sessions/{id}`, `POST /api/auth/sessions/revoke-others` | My sign-ins |
 | `GET/POST /api/tokens`, `PUT/DELETE /api/tokens/{id}`, `POST /api/tokens/{id}/revoke` | API tokens: role or permissions, cars (`tokens:manage`, browser sign-in) |
 | `GET/PUT /api/settings/email`, `POST /api/settings/email/test` | SMTP settings and test e-mail (`settings:manage`) |
+| `POST /api/signup`, `POST /api/signup/verify`, `GET /api/signup/state` | Public: ask for a group, confirm the e-mail address, whether requests are open |
+| `GET/PUT /api/signup/settings`, `GET /api/signup/requests`, `POST /api/signup/requests/{id}/approve\|reject`, `DELETE /api/signup/requests/{id}` | Sign-up requests (`users:manage`); approve with `{"username": "greg", "group_name": "Colleagues", "max_members": 3}` |
+| `GET/POST /api/invitations`, `POST /api/invitations/{id}/resend`, `DELETE /api/invitations/{id}` | Invitations to a group (its managers, administrators): `{"email": "…", "full_name": "…", "grants": [{"car_id": 1, "role_id": 2}]}` |
+| `GET /api/invitations/open?token=`, `POST /api/invitations/accept` | Public, with the link's token: what the invitation is, then `{"token": "…", "username": "mia", "password": "…"}` creates the account and signs in |
 | `GET/POST /api/groups`, `PUT/DELETE /api/groups/{id}` | Groups with their member limit and counts (`groups:manage`; others get their own group) |
 | `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`, `POST /api/users/{id}/signout` | Users, global role and role per car (`users:manage`) |
 | `GET/POST /api/roles`, `PUT/DELETE /api/roles/{id}`, `GET /api/roles/permissions` | Roles and the permission catalogue (`roles:manage`) |

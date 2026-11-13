@@ -41,6 +41,7 @@
             {% if mode == 'setup' %}<div class="hint">At least 8 characters.</div>{% endif %}</div>
         <button class="btn" type="submit">{{ 'Create administrator' if mode == 'setup' else 'Sign in' }}</button>
     </form>
+    {% if signup and mode != 'setup' %}<p class="muted small" style="text-align:center;margin-top:14px">No account yet? <a href="/signup">Request access</a></p>{% endif %}
 </div>
 <script>
 (() => {  // keep the page to come back to after single sign-on
