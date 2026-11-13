@@ -90,7 +90,7 @@ def payments(request: Request, db: Session = Depends(get_db)) -> Response:
 
 @router.get("/tariffs", response_class=HTMLResponse)
 def tariffs(request: Request, db: Session = Depends(get_db)) -> Response:
-    return _page(request, db, "tariffs.html", "tariffs", "tariffs:manage")
+    return _page(request, db, "tariffs.html", "tariffs", "tariffs:manage", managers=True)
 
 
 @router.get("/chargers", response_class=HTMLResponse)

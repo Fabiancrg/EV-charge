@@ -303,6 +303,7 @@ class TariffOut(TariffIn):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    group_id: int | None = None  # empty: a default tariff
     sessions: int = 0  # sessions priced with this tariff (made with a charger using the home tariff)
     kwh: float = 0
 
@@ -373,6 +374,11 @@ class CregApply(BaseModel):
     region: CregRegion
     items: list[CregItem] = Field(min_length=1, max_length=200)
     source: str | None = Field(default=None, max_length=500)
+
+
+class TariffMode(BaseModel):
+    own_tariffs: bool  # the group's own tariffs, or the default ones
+    copy_default: bool = False  # when switching to its own tariffs with none yet: start from a copy of the default ones
 
 
 class GroupIn(BaseModel):

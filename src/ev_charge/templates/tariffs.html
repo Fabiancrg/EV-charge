@@ -4,7 +4,7 @@
 <div class="content">
     <div class="page-head">
         <h2>Home charging tariffs</h2>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div style="display:flex;gap:8px;flex-wrap:wrap" id="tariff-actions">
             <button class="btn" id="creg-btn" title="Read the quarterly tariffs published by the CREG">⟳ Import from CREG</button>
             <button class="btn btn-ghost" id="add-quarter" title="New period for the quarter after the last one">＋ Next quarter</button>
             <button class="btn btn-ghost" id="add-tariff">＋ Add a period</button>
@@ -12,6 +12,7 @@
     </div>
     <p class="muted small" style="margin-bottom:12px"><b>⟳ Import from CREG</b> reads the official quarterly amounts for your region. Sessions made with a <a href="/chargers">charger</a> that uses the home tariff (wall box, mobile charger…) are priced at kWh × the tariff valid on the charge date, whatever cost was typed in.
         Other sessions keep the cost entered. Changing a tariff reprices those sessions in its period. Periods can't overlap; leave the end date empty for “until further notice”.</p>
+    <div id="scope" style="margin-bottom:12px"></div>
     <div id="gaps"></div>
     <div class="table-wrap" id="tariffs-table"><p class="muted">Loading…</p></div>
 </div>
@@ -106,7 +107,7 @@
         renderGaps();
         const today = iso(new Date());
         const box = document.getElementById('tariffs-table');
-        if (!tariffs.length) { box.innerHTML = '<div class="empty-state"><h3>No tariff period yet</h3><p>Use ＋ Next quarter or ＋ Add a period.</p></div>'; return; }
+        if (!tariffs.length) { box.innerHTML = `<div class="empty-state"><h3>No tariff period yet</h3><p>${mode.can_edit ? 'Use ⟳ Import from CREG, ＋ Next quarter or ＋ Add a period.' : 'Home sessions have no price until one is added.'}</p></div>`; return; }
         box.innerHTML = `<table><thead><tr><th>Period</th><th>Label</th><th class="num">Price / kWh</th><th class="num">Sessions</th><th class="num">kWh</th><th class="num hide-sm">Amount</th><th></th></tr></thead><tbody>
             ${tariffs.map(t => {
                 const current = t.valid_from <= today && (!t.valid_to || today <= t.valid_to);
@@ -116,13 +117,46 @@
                 <td class="num"><strong>${EV.money(t.price_per_kwh, 4)}</strong></td>
                 <td class="num">${EV.num(t.sessions)}</td><td class="num">${EV.num(t.kwh, 1)}</td>
                 <td class="num hide-sm">${EV.money(t.kwh * t.price_per_kwh)}</td>
-                <td><button class="btn btn-ghost btn-sm" data-edit="${t.id}">✏ Edit</button></td></tr>`;
+                <td>${mode.can_edit ? `<button class="btn btn-ghost btn-sm" data-edit="${t.id}">✏ Edit</button>` : ''}</td></tr>`;
             }).join('')}</tbody></table>`;
     }
 
+    /* Which tariffs: the default ones (administrators), or those of a group (its own, or the default ones it uses) */
+    const admin = EV.can('tariffs:manage');
+    let scope = admin ? null : EV.me.group_id, mode = { can_edit: false };
+    const q = (sep = '?') => scope ? `${sep}group_id=${scope}` : '';
+    function renderScope() {
+        const pick = admin && (EV.groups || []).length ? `<div class="field" style="max-width:340px"><label>Tariffs of</label><select id="scope-group"><option value="">The default tariffs</option>
+            ${EV.groups.map(g => `<option value="${g.id}" ${g.id === scope ? 'selected' : ''}>👥 ${EV.esc(g.name)}</option>`).join('')}</select></div>` : '';
+        let choice = '';
+        if (mode.group_id) {
+            const kept = !mode.own_tariffs && mode.own_count ? ` <span class="muted small">(${mode.own_count} of its own kept)</span>` : '';
+            choice = mode.can_switch ? `<div class="field"><label>👥 ${EV.esc(mode.group_name)} uses</label><div style="display:flex;gap:16px;flex-wrap:wrap;padding:6px 0">
+                    <label class="check"><input type="radio" name="tariff-mode" value="default" ${mode.own_tariffs ? '' : 'checked'}> the default tariffs</label>
+                    <label class="check"><input type="radio" name="tariff-mode" value="own" ${mode.own_tariffs ? 'checked' : ''}> its own tariffs${kept}</label></div></div>`
+                : `<p class="muted small">👥 ${EV.esc(mode.group_name)} uses <b>${mode.own_tariffs ? 'its own tariffs' : 'the default tariffs'}</b> (chosen by a manager of the group).</p>`;
+        }
+        const note = mode.can_edit ? '' : mode.group_id && !mode.own_tariffs
+            ? '<div class="note">ℹ These are the default tariffs, managed by the administrator. Choose <i>its own tariffs</i> to set other prices for this group.</div>'
+            : '<div class="note">ℹ Read-only: these tariffs are managed by a manager of the group.</div>';
+        document.getElementById('scope').innerHTML = `<div class="filters" style="align-items:end">${pick}${choice}</div>${note}`;
+        document.getElementById('tariff-actions').style.display = mode.can_edit ? 'flex' : 'none';
+    }
+    document.getElementById('scope').addEventListener('change', async (e) => {
+        if (e.target.id === 'scope-group') { scope = Number(e.target.value) || null; load(); return; }
+        if (e.target.name !== 'tariff-mode') return;
+        const own = e.target.value === 'own';
+        const copy = own && !mode.own_count && confirm('Start from a copy of the default tariffs?\n\nOK: copy them, then change the prices.\nCancel: start with no tariff.');
+        try { await EV.api('PUT', `/api/tariffs/mode${q()}`, { own_tariffs: own, copy_default: copy }); EV.toast(own ? 'The group now uses its own tariffs' : 'The group now uses the default tariffs'); }
+        catch (err) { EV.toast(err.message, true); }
+        load();
+    });
+
     async function load() {
         try {
-            tariffs = await EV.api('GET', '/api/tariffs');
+            if (admin && !EV.groups) await EV.loadGroups();
+            [mode, tariffs] = await Promise.all([EV.api('GET', `/api/tariffs/mode${q()}`), EV.api('GET', `/api/tariffs${q()}`)]);
+            renderScope();
             render();
         } catch (err) { EV.toast(err.message, true); }
     }
@@ -131,7 +165,7 @@
         e.preventDefault();
         try {
             if (editing) await EV.api('PUT', `/api/tariffs/${editing.id}`, EV.formData(form));
-            else await EV.api('POST', '/api/tariffs', EV.formData(form));
+            else await EV.api('POST', `/api/tariffs${q()}`, EV.formData(form));
             EV.toast('Tariff saved');
             EV.closeModal('tariff-modal');
             load();
@@ -192,13 +226,13 @@
     async function cregCheck() {
         cregBody().innerHTML = '<p class="muted">Reading the CREG website…</p>';
         document.getElementById('creg-apply').disabled = true;
-        try { creg = await EV.api('GET', `/api/tariffs/creg?region=${document.getElementById('creg-region').value}`); renderCreg(); }
+        try { creg = await EV.api('GET', `/api/tariffs/creg?region=${document.getElementById('creg-region').value}${q('&')}`); renderCreg(); }
         catch (err) { cregError(`${err.message}`); }
     }
     document.getElementById('creg-btn').addEventListener('click', async () => {
         EV.openModal('creg-modal');
         cregBody().innerHTML = '<p class="muted">Reading the CREG website…</p>';
-        try { creg = await EV.api('GET', '/api/tariffs/creg'); renderCreg(); }  // the server remembers the last region
+        try { creg = await EV.api('GET', `/api/tariffs/creg${q()}`); renderCreg(); }  // the server remembers the last region
         catch (err) { cregError(err.message); }
     });
     document.getElementById('creg-refresh').addEventListener('click', cregCheck);
@@ -214,7 +248,7 @@
         form.append('file', file);
         cregBody().innerHTML = '<p class="muted">Reading the file…</p>';
         try {
-            const r = await fetch('/api/tariffs/creg/upload', { method: 'POST', body: form });
+            const r = await fetch(`/api/tariffs/creg/upload${q()}`, { method: 'POST', body: form });
             const data = await r.json();
             if (!r.ok) throw new Error(data.detail || r.statusText);
             creg = data; renderCreg();
@@ -225,7 +259,7 @@
         const items = [...cregBody().querySelectorAll('input[data-n]:checked')].map(b => creg.items[Number(b.dataset.n)]);
         if (!items.length) return;
         try {
-            const r = await EV.api('POST', '/api/tariffs/creg/apply', { region: creg.region, source: creg.source, items });
+            const r = await EV.api('POST', `/api/tariffs/creg/apply${q()}`, { region: creg.region, source: creg.source, items });
             EV.toast(`${r.created} quarter(s) added, ${r.updated} updated${r.skipped.length ? `, ${r.skipped.length} skipped (overlap)` : ''}`);
             EV.closeModal('creg-modal');
             load();
