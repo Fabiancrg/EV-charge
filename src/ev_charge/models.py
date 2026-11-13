@@ -313,6 +313,48 @@ class ApiToken(Base):
             return []
 
 
+class SignupRequest(Base):
+    """Someone asking for a group of their own: they confirm their e-mail address, then an administrator
+    approves (the group and its first manager are created) or rejects."""
+
+    __tablename__ = "signup_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    full_name: Mapped[str] = mapped_column(String(100))
+    email: Mapped[str] = mapped_column(String(200), index=True)  # stored lower case
+    group_name: Mapped[str] = mapped_column(String(100))  # the name wished for the group
+    message: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="unverified")  # unverified | pending | approved | rejected
+    token_hash: Mapped[str | None] = mapped_column(String(64), index=True)  # of the e-mail verification link
+    ip: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[str | None] = mapped_column(String(100))
+    user_id: Mapped[int | None] = mapped_column(Integer)  # the account created on approval
+
+
+class Invitation(Base):
+    """A link sent by e-mail to join a group: to a new member (they choose a username and a password), or to
+    the account just created for an approved sign-up request (user_id: they only set a password)."""
+
+    __tablename__ = "invitations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), index=True)
+    email: Mapped[str] = mapped_column(String(200))
+    full_name: Mapped[str | None] = mapped_column(String(100))
+    grants: Mapped[str | None] = mapped_column(Text)  # JSON [{"car_id": 1, "role_id": 2}]: the member's roles on the group's cars
+    token_hash: Mapped[str] = mapped_column(String(64), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    invited_by: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    group: Mapped[Group] = relationship()
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_log"
 

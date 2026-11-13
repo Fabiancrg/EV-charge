@@ -57,6 +57,8 @@ _SKIP_PREFIXES = (
     "/api/auth",
     "/api/users",
     "/api/groups",
+    "/api/signup",
+    "/api/invitations",
     "/api/roles",
     "/api/settings",
     "/api/tokens",

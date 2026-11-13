@@ -83,3 +83,55 @@ def car(client):
     )
     assert r.status_code == 201, r.text
     return r.json()
+
+
+class Mailbox:
+    """The e-mails EV Charge sent (a local SMTP server), decoded."""
+
+    def __init__(self):
+        self.raw = []
+
+    async def handle_DATA(self, server, session, envelope):  # noqa: N802
+        self.raw.append((envelope.rcpt_tos, envelope.content))
+        return "250 OK"
+
+    @property
+    def messages(self):
+        """(recipient, subject, text) of each e-mail, oldest first."""
+        import email
+        from email import policy
+
+        out = []
+        for to, content in self.raw:
+            msg = email.message_from_bytes(content, policy=policy.default)
+            out.append((to[0], msg["Subject"], msg.get_body(preferencelist=("plain",)).get_content()))
+        return out
+
+    def link(self, to=None):
+        """The link of the last e-mail (sent to that address)."""
+        import re
+
+        to_, _subject, text = [m for m in self.messages if to is None or m[0] == to][-1]
+        return re.search(r"https?://\S+", text).group(0)
+
+    def token(self, to=None):
+        return self.link(to).split("token=")[1]
+
+
+@pytest.fixture()
+def mailbox(client):
+    """E-mail set up and enabled, towards a local SMTP server whose messages can be read."""
+    import socket
+
+    from aiosmtpd.controller import Controller
+
+    with socket.socket() as s:  # a free port (the controller can't wait on port 0)
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    box = Mailbox()
+    controller = Controller(box, hostname="127.0.0.1", port=port)
+    controller.start()
+    r = client.put("/api/settings/email", json={"enabled": True, "host": "127.0.0.1", "port": port, "security": "none", "from_address": "ev@example.com", "from_name": "EV Charge"})
+    assert r.status_code == 200, r.text
+    yield box
+    controller.stop()

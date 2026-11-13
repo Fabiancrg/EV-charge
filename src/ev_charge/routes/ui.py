@@ -103,6 +103,11 @@ def users(request: Request, db: Session = Depends(get_db)) -> Response:
     return _page(request, db, "users.html", "users", "users:manage", managers=True)
 
 
+@router.get("/signup-requests", response_class=HTMLResponse)
+def signup_requests(request: Request, db: Session = Depends(get_db)) -> Response:
+    return _page(request, db, "signup_requests.html", "signup", "users:manage")
+
+
 @router.get("/groups", response_class=HTMLResponse)
 def groups(request: Request, db: Session = Depends(get_db)) -> Response:
     return _page(request, db, "groups.html", "groups", "groups:manage")
@@ -150,13 +155,36 @@ def login(request: Request, db: Session = Depends(get_db)) -> Response:
     if principal_from_request(db, request):
         return RedirectResponse("/", status_code=303)
     from ..sso import get_config, local_login_allowed, sso_enabled
+    from .onboarding import signup_enabled
 
     sso = {"enabled": sso_enabled(db), "name": get_config(db)["name"], "local_login": local_login_allowed(db)}
-    return templates.TemplateResponse(request, "login.html", {"mode": "login", "sso": sso, "error": request.query_params.get("error")})
+    return templates.TemplateResponse(request, "login.html", {"mode": "login", "sso": sso, "error": request.query_params.get("error"), "signup": signup_enabled(db)})
+
+
+# ── Public pages of the sign-up requests and invitations (no sign-in: the link's token is the key) ──
+
+
+@router.get("/signup", response_class=HTMLResponse)
+def signup(request: Request, db: Session = Depends(get_db)) -> Response:
+    from .onboarding import signup_enabled
+
+    if setup_needed(db) or not signup_enabled(db):
+        return RedirectResponse("/login", status_code=303)
+    return templates.TemplateResponse(request, "public.html", {"mode": "signup"})
+
+
+@router.get("/signup/verify", response_class=HTMLResponse)
+def signup_verify(request: Request) -> Response:
+    return templates.TemplateResponse(request, "public.html", {"mode": "verify"})
+
+
+@router.get("/invite", response_class=HTMLResponse)
+def invite(request: Request) -> Response:
+    return templates.TemplateResponse(request, "public.html", {"mode": "invite"})
 
 
 @router.get("/setup", response_class=HTMLResponse)
 def setup(request: Request, db: Session = Depends(get_db)) -> Response:
     if not setup_needed(db):
         return RedirectResponse("/login", status_code=303)
-    return templates.TemplateResponse(request, "login.html", {"mode": "setup", "sso": {"enabled": False, "local_login": True}, "error": None})
+    return templates.TemplateResponse(request, "login.html", {"mode": "setup", "sso": {"enabled": False, "local_login": True}, "error": None, "signup": False})

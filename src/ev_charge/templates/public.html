@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ {'signup': 'Request access', 'verify': 'Confirm your address', 'invite': 'Join'}[mode] }} · EV Charge</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <script>
+        (() => { let t = null; try { t = localStorage.getItem('ev-theme'); } catch (e) {}
+          if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          document.documentElement.setAttribute('data-theme', t); })();
+    </script>
+    <link rel="stylesheet" href="/static/css/app.css?v={{ asset_version }}">
+    <style>
+        body { display: flex; align-items: center; justify-content: center; }
+        .login-box { width: 100%; max-width: 460px; }
+        .login-box h1 { font-size: var(--font-xl); margin-bottom: 4px; }
+        .login-box .field { margin-bottom: 14px; }
+        .login-box .btn { width: 100%; justify-content: center; margin-top: 6px; }
+        .done { display: none; }
+    </style>
+</head>
+<body>
+<div class="content login-box">
+    <h1>⚡ EV Charge</h1>
+    <div class="form-error" id="err"></div>
+
+    {% if mode == 'signup' %}
+    <div id="ask">
+        <p class="muted" style="margin-bottom:18px">Ask for a space of your own to record the charging sessions of your cars. You confirm your e-mail address, then an administrator reviews your request.</p>
+        <form id="form" autocomplete="on">
+            <div class="field"><label>Your name *</label><input type="text" name="full_name" required minlength="2" maxlength="100" autocomplete="name" autofocus></div>
+            <div class="field"><label>E-mail *</label><input type="email" name="email" required maxlength="200" autocomplete="email"></div>
+            <div class="field"><label>Name of your group *</label><input type="text" name="group_name" required minlength="2" maxlength="100" placeholder="e.g. Dupont family"><div class="hint">Who will share cars and chargers with you: your household, your team…</div></div>
+            <div class="field"><label>Message for the administrator</label><textarea name="message" rows="3" maxlength="1000" placeholder="Who you are, how many cars…"></textarea></div>
+            <button class="btn" type="submit">Send my request</button>
+        </form>
+    </div>
+    <div class="done" id="done"><div class="note">📧 Check your mailbox: we sent you a link to confirm your address. Your request reaches the administrator once you have clicked it.</div></div>
+    <p class="muted small" style="text-align:center;margin-top:14px"><a href="/login">Already have an account? Sign in</a></p>
+
+    {% elif mode == 'verify' %}
+    <p class="muted" id="wait">Confirming your address…</p>
+    <div class="done" id="done"><div class="note">✓ Your address is confirmed. An administrator will review your request; you will receive an e-mail with a link to choose your password.</div></div>
+    <p class="muted small" style="text-align:center;margin-top:14px"><a href="/login">Back to the sign-in page</a></p>
+
+    {% else %}
+    <p class="muted" id="wait">Reading the invitation…</p>
+    <div id="ask" style="display:none">
+        <p class="muted" style="margin-bottom:18px" id="intro"></p>
+        <form id="form" autocomplete="off">
+            <div class="field" id="f-username"><label>Username *</label><input type="text" name="username" minlength="2" maxlength="50" pattern="[A-Za-z0-9._@\-]+" autocapitalize="none" spellcheck="false" autocomplete="username"><div class="hint">Letters, digits, dot, dash, underscore</div></div>
+            <div class="field" id="f-name"><label>Your name</label><input type="text" name="full_name" maxlength="100" autocomplete="name"></div>
+            <div class="field" id="f-password"><label>Password *</label><input type="password" name="password" minlength="8" autocomplete="new-password"><div class="hint">At least 8 characters.</div></div>
+            <button class="btn" type="submit" id="go">Join</button>
+        </form>
+    </div>
+    <div class="done" id="done"><div class="note">✓ Your account is ready. <a href="/login">Sign in with single sign-on</a>.</div></div>
+    {% endif %}
+</div>
+<script>
+(() => {
+    const $ = (id) => document.getElementById(id);
+    const token = new URLSearchParams(location.search).get('token') || '';
+    const fail = (msg) => { $('err').textContent = msg; $('err').style.display = 'block'; const w = $('wait'); if (w) w.style.display = 'none'; };
+    async function call(method, url, body) {
+        const r = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : (data.detail || []).map(d => d.msg.replace(/^Value error, /, '')).join('\n') || `Error ${r.status}`);
+        return data;
+    }
+    const mode = {{ mode|tojson }};
+
+    if (mode === 'signup') {
+        $('form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            $('err').style.display = 'none';
+            try { await call('POST', '/api/signup', Object.fromEntries(new FormData(e.target))); $('ask').style.display = 'none'; $('done').style.display = 'block'; }
+            catch (err) { fail(err.message); }
+        });
+    } else if (mode === 'verify') {
+        call('POST', '/api/signup/verify', { token }).then(() => { $('wait').style.display = 'none'; $('done').style.display = 'block'; }).catch(err => fail(err.message));
+    } else {
+        let info = null;
+        call('GET', `/api/invitations/open?token=${encodeURIComponent(token)}`).then((d) => {
+            info = d;
+            $('wait').style.display = 'none';
+            $('ask').style.display = 'block';
+            const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+            $('intro').innerHTML = d.username
+                ? `Welcome! Your group <b>${esc(d.group_name)}</b> is ready. Your username is <b>${esc(d.username)}</b>${d.password_login ? ': choose your password.' : '.'}`
+                : `${esc(d.invited_by || 'A manager')} invites you to join the group <b>${esc(d.group_name)}</b> (${esc(d.email)}).`;
+            $('f-username').style.display = $('f-name').style.display = d.username ? 'none' : '';
+            $('f-password').style.display = d.password_login ? '' : 'none';
+            const f = $('form');
+            f.username.required = !d.username; f.password.required = d.password_login;
+            if (!d.username) f.full_name.value = d.full_name || '';
+            $('go').textContent = d.username ? 'Choose my password and sign in' : 'Join the group';
+            if (d.username && !d.password_login) $('go').textContent = 'Activate my account';
+        }).catch(err => fail(err.message));
+        $('form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            $('err').style.display = 'none';
+            const f = e.target;
+            try {
+                await call('POST', '/api/invitations/accept', { token, username: f.username.value || null, full_name: f.full_name.value || null, password: f.password.value || null });
+                if (info.password_login) location.href = '/'; else { $('ask').style.display = 'none'; $('done').style.display = 'block'; }
+            } catch (err) { fail(err.message); }
+        });
+    }
+})();
+</script>
+</body>
+</html>
