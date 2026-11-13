@@ -27,7 +27,7 @@
             <a href="/cars" class="{{ 'active' if active == 'cars' }}">Cars</a>
             {% if 'chargers:manage' in can or me.manages_group %}<a href="/chargers" class="{{ 'active' if active == 'chargers' }}">Chargers</a>{% endif %}
             {% if me.manages_group and 'users:manage' not in can %}<a href="/users" class="{{ 'active' if active == 'users' }}">Members</a>{% endif %}
-            {% if 'tariffs:manage' in can %}<a href="/tariffs" class="{{ 'active' if active == 'tariffs' }}">Tariffs</a>{% endif %}
+            {% if 'tariffs:manage' in can or me.manages_group %}<a href="/tariffs" class="{{ 'active' if active == 'tariffs' }}">Tariffs</a>{% endif %}
             {% if 'users:manage' in can or 'groups:manage' in can or 'roles:manage' in can or 'settings:manage' in can or 'audit:read' in can or 'tokens:manage' in can %}
             <div class="user-menu">
                 <button class="nav-btn {{ 'active' if active in ('users', 'groups', 'roles', 'settings', 'email', 'tokens', 'audit') }}" id="admin-btn" aria-haspopup="true">⚙ Settings ▾</button>

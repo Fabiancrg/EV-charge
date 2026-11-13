@@ -124,7 +124,7 @@
 
     async function tariffReminder() {
         // Tariff managers: remind when no home tariff covers today (a new CREG quarter is usually published)
-        if (!EV.can('tariffs:manage')) return;
+        if (!EV.canAdd('tariffs:manage')) return;
         try {
             const today = EV.today();
             const tariffs = await EV.api('GET', '/api/tariffs');

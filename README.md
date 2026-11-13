@@ -20,7 +20,8 @@ A **group** is who shares cars and chargers: a household, a team of colleagues. 
 - **A charger serves the cars of its group:** it can only be picked for a session of one of those cars, and its default car is one of them.
 - **What a group manager can't do:** give a global role with app-wide permissions or *all cars* (Administrator, Accountant…), name another manager, change the member limit, move anything to another group, or change an account that has such a role (an administrator who is a member of the group).
 - **The member limit** counts the active users of the group; disabling a member frees a place.
-- **Still common to every group for now:** the home charging tariffs, the roles, and the application settings (single sign-on, e-mail), all managed by administrators.
+- **Tariffs:** a group uses the **default tariffs** (managed by administrators) or **its own**. A manager chooses on the **Tariffs** page; switching to its own tariffs can start from a copy of the default ones, and the CREG import then fills the group's tariffs for the group's region. Sessions made with a charger of the group are priced with the tariffs the group uses, so changing the choice reprices them. Going back to the default tariffs keeps the group's own for later. Administrators see and change the tariffs of any group (*Tariffs of* at the top of the page).
+- **Still common to every group:** the roles and the application settings (single sign-on, e-mail), managed by administrators.
 
 ## Users, roles and permissions
 
@@ -255,7 +256,7 @@ The **Tariffs** page (administrators) holds the price per kWh of home charging, 
 | **Reimbursement** `/reimbursement` | A printable statement of the sessions flagged *to be reimbursed* in a period (default: last quarter) for a car. Each session is priced with the home tariff or the cost entered, and totals are split into home and other charging, with signature lines. *🖨 Print / PDF* uses the browser's print (save as PDF). *⬇ Excel* and *⬇ CSV* export the same rows. |
 | **Payments** `/payments` | Import the reimbursement documents (Eneco CSV, 50five / Last Mile Solutions PDF), reconcile them with the sessions (*Invoiced*), and follow the payments to receive (*Paid*), see above. |
 | **Chargers** `/chargers` | Chargers whose sessions are reimbursed, and the company paying them back (administrators, see above). Inactive chargers are hidden; *Show inactive (N)* lists them. |
-| **Tariffs** `/tariffs` | Home charging price periods and the CREG import (administrators, see above). |
+| **Tariffs** `/tariffs` | Home charging price periods and the CREG import: the default tariffs (administrators), and for each group the choice between the default tariffs and its own (group managers, see above). |
 | **Members** `/users` (group managers) | The members of your group: add them, up to the group's limit, and give them a role on the group's cars. |
 | **Users**, **Groups**, **Roles**, **Single sign-on**, **E-mail (SMTP)**, **API tokens**, **Audit log** (⚙ Settings menu) | Accounts with their global role and role per car; roles and permissions; OpenID Connect; SMTP; API tokens; audit log (see above). |
 | **My account** `/account` | Where you are signed in, your permissions. |
@@ -402,7 +403,8 @@ Every endpoint needs a signed-in user (session cookie) or an API token (`Authori
 | `PUT /api/reimbursement-documents/settings` | `{"ignore_below": 0.05}`: lines without a session below this amount are left aside (`settings:manage`) |
 | `POST /api/reimbursement-documents/{id}/lines/{line_id}/session` | Create the missing session of a line from the document, linked to it, with the note *Created from invoice …*; optional `{"car_id": 1}` |
 | `GET/DELETE /api/reimbursement-documents/{id}`, `PUT/DELETE /api/reimbursement-documents/{id}/payment`, `PUT /api/reimbursement-documents/{id}/lines/{line_id}`, `PUT /api/reimbursement-documents/{id}/charger` | A document with its lines; payment received `{"paid_date": "2026-11-20", "paid_amount": 51.92, "notes": "…"}` (sessions become *paid*) or cancelled; set the session(s) of a line `{"session_ids": [12, 13]}` (empty: unlink); set the charger of a document imported without one `{"charger_id": 1}` |
-| `GET/POST /api/tariffs`, `PUT/DELETE /api/tariffs/{id}` | Tariff periods (changes: administrators) |
+| `GET/POST /api/tariffs`, `PUT/DELETE /api/tariffs/{id}` | Tariff periods of one set: `?group_id=` for a group's, none for the default tariffs (administrators) or one's own group (everyone else). Changes: administrators for the default tariffs, the group's managers for its own |
+| `GET/PUT /api/tariffs/mode` | Which tariffs a group uses: `{"own_tariffs": true, "copy_default": true}` switches it to its own, starting from a copy of the default ones |
 | `GET/POST /api/chargers`, `PUT/DELETE /api/chargers/{id}` | Chargers, with their live state (changes: administrators) |
 | `GET /api/chargers/connectors`, `PUT /api/chargers/{id}/connection`, `POST /api/chargers/{id}/poll` | Charger APIs available, connect/disconnect a charger (tests the login), read it now |
 | `GET /api/chargers/{id}/history?date_from=&date_to=&car_id=`, `POST /api/chargers/{id}/history/apply` | History import: preview, then add/link the chosen sessions (administrators) |

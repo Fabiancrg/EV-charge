@@ -47,6 +47,9 @@ class Group(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True)
     max_members: Mapped[int] = mapped_column(Integer, default=5)  # set by an administrator
+    # Home charging tariffs: the default ones (False), or the group's own (Tariff.group_id)
+    own_tariffs: Mapped[bool] = mapped_column(Boolean, default=False)
+    creg_region: Mapped[str | None] = mapped_column(String(20))  # region of the group's last CREG import
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -324,11 +327,13 @@ class AuditEvent(Base):
 
 
 class Tariff(Base):
-    """Price per kWh of home charging over a period (usually a quarter)."""
+    """Price per kWh of home charging over a period (usually a quarter). The tariffs without a group are the
+    default ones; a group that chose its own tariffs (Group.own_tariffs) uses those with its group_id."""
 
     __tablename__ = "tariffs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), index=True)
     valid_from: Mapped[date] = mapped_column(Date, index=True)
     valid_to: Mapped[date | None] = mapped_column(Date)  # inclusive; empty: until further notice
     price_per_kwh: Mapped[float] = mapped_column(Float)
