@@ -2,8 +2,11 @@
 
 Home Assistant has an integration for most makes, and shows the car's mileage as a sensor. A car can be given
 that sensor (Home Assistant's address, an access token and the entity): its odometer is then written on the
-sessions recorded from a charger, when the charge starts and again when it ends if the first reading failed,
-and can be fetched in the session form. A reading is refused when it is lower than the car's last one.
+sessions recorded from a charger, and can be fetched in the session form.
+
+It is read when the charge ends, not when it starts: many cars refresh that figure rarely, and do it at the
+end of a charge. As the refresh may reach Home Assistant a little later, it is read again a few times in the
+following minutes (live.py) and the highest figure is kept. A reading lower than the car's last one is refused.
 """
 
 from __future__ import annotations
@@ -90,11 +93,12 @@ def last_reading(db: Session, car_id: int, but: int | None = None) -> int | None
     return max(rows, default=None)
 
 
-async def fill(db: Session, s: ChargeSession) -> bool:
-    """Write the car's odometer on a session that has none. The error, if any, is kept on the car. Returns True when written."""
+async def fill(db: Session, s: ChargeSession, written: int | None = None) -> bool:
+    """Write the car's odometer on a session that has none, or that has the figure we wrote before (`written`) when
+    Home Assistant now has a higher one. The error, if any, is kept on the car. Returns True when written."""
     car = db.get(Car, s.car_id)
     config = settings(car) if car else None
-    if car is None or config is None or s.odometer is not None:
+    if car is None or config is None or s.odometer != written:  # no source, or an odometer entered by hand
         return False
     try:
         km = await read(config)
@@ -105,6 +109,9 @@ async def fill(db: Session, s: ChargeSession) -> bool:
         car.odometer_error = i18n.store(str(exc))
         logger.info("Car %s: its odometer couldn't be read (%s)", car.name, exc)
         return False
-    s.odometer, car.odometer_error = km, None
+    car.odometer_error = None
+    if written is not None and km <= written:
+        return False
+    s.odometer = km
     logger.info("Car %s: odometer %s km written on its session of %s", car.name, km, s.charge_date)
     return True

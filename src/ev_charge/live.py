@@ -36,7 +36,7 @@ from . import i18n, odometer
 from .connectors import Connector, ConnectorError, LiveReading, make_connector
 from .connectors.base import CHARGING, FINISHED, OFFLINE, PAUSED, PENDING_APPROVAL, PLUGGED_IN, UNPLUGGED
 from .i18n import msg
-from .models import Charger, ChargeSession
+from .models import Car, Charger, ChargeSession
 from .secretbox import SecretError, decrypt_json
 
 logger = logging.getLogger(__name__)
@@ -63,12 +63,14 @@ def open_session(db: Session, c: Charger) -> ChargeSession | None:
 
 
 FINALIZE_AT = (1, 3, 6, 12, 30)  # polls after the session closed at which the charger's own record is looked up
+ODOMETER_AT = (0, 2, 5, 10)  # polls after the session closed at which the car's odometer is read (the highest figure is kept)
 FINALIZE_BEFORE = timedelta(hours=2)  # the charger's session may have started a little before ours
 
 
 def _close(c: Charger, state: dict[str, Any], s: ChargeSession) -> None:
     s.reimbursement_status = "recorded"
     state["finalize"] = {"id": s.id, "kwh": s.kwh, "polls": 0}  # see finalize_closed()
+    state["odometer"] = {"id": s.id, "km": s.odometer, "polls": 0}  # see odometer_after_charge()
     c.live_state = json.dumps(state)
 
 
@@ -112,6 +114,28 @@ async def finalize_closed(db: Session, c: Charger, conn: Connector) -> bool:
     return corrected
 
 
+async def odometer_after_charge(db: Session, c: Charger) -> None:
+    """Write the car's odometer (read from Home Assistant) on the session that was just closed.
+
+    Read when the charge ends and a few more times in the following minutes: cars refresh that figure at the end of
+    a charge, and it may reach Home Assistant a little later. The highest figure is kept. An odometer entered by
+    hand, before or meanwhile, is left alone."""
+    state = live_state(c)
+    todo = state.get("odometer")
+    if not isinstance(todo, dict):
+        return
+    polls = int(todo.get("polls") or 0)
+    todo["polls"] = polls + 1
+    s = db.get(ChargeSession, todo.get("id"))
+    car = db.get(Car, s.car_id) if s is not None else None
+    done = car is None or odometer.settings(car) is None or s.odometer != todo.get("km") or (polls == 0 and s.odometer is not None)
+    if not done and polls in ODOMETER_AT and await odometer.fill(db, s, todo.get("km")):
+        todo["km"] = s.odometer
+    if done or polls >= ODOMETER_AT[-1]:
+        state.pop("odometer", None)
+    c.live_state = json.dumps(state)
+
+
 def apply_reading(db: Session, c: Charger, r: LiveReading, now: datetime, source: str = PRIMARY, primary_error: str | None = None) -> str:
     """Update the charger's live state and its live session from one reading. Returns what happened.
 
@@ -127,8 +151,9 @@ def apply_reading(db: Session, c: Charger, r: LiveReading, now: datetime, source
         state["charging_since"] = previous.get("charging_since") if previous.get("status") in PLUGGED and previous.get("charging_since") else now.isoformat(timespec="seconds")
     elif r.status in PLUGGED:
         state["charging_since"] = previous.get("charging_since")
-    if previous.get("finalize"):
-        state["finalize"] = previous["finalize"]
+    for pending in ("finalize", "odometer"):
+        if previous.get(pending):
+            state[pending] = previous[pending]
     c.live_state = json.dumps(state)
     c.last_poll_at = datetime.now(UTC)
     c.last_poll_error = None
@@ -262,12 +287,8 @@ async def poll_charger(db: Session, c: Charger) -> str:
             return "error"
         action = apply_reading(db, c, reading, datetime.now(), source, i18n.store(error) if error else None)
         db.commit()
-        if action in ("created", "restarted", "closed"):  # the car's odometer, when it is read from Home Assistant
-            closed = db.get(ChargeSession, (live_state(c).get("finalize") or {}).get("id") or 0) if action != "created" else None
-            for s in (closed, open_session(db, c) if action != "closed" else None):
-                if s is not None:
-                    await odometer.fill(db, s)
-            db.commit()
+        await odometer_after_charge(db, c)
+        db.commit()
         if await finalize_closed(db, c, connector_for(c)):
             action = "corrected" if action in ("idle", "updated") else action
         db.commit()

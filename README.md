@@ -241,7 +241,7 @@ A charger can be connected to its cloud account, or read directly on your networ
 
 **Odometer from Home Assistant.** Home Assistant has an integration for most car makes and shows the car's mileage as a sensor. On the **Cars** page, 🔌 gives a car that sensor (a sensor in km or miles; the address and token of Home Assistant can be left empty when a charger of the group is already connected to it):
 
-- The odometer is then written by itself on the sessions **recorded from a charger**: when the charge starts, and again when it ends if the first reading failed (a sleeping car, Home Assistant restarting…). A session that already has an odometer is left alone.
+- The odometer is then written by itself on the sessions **recorded from a charger**. It is read **when the charge ends**, not when it starts: many cars refresh that figure rarely, and do it at the end of a charge. As the refresh may reach Home Assistant a little later, it is read again 2, 5 and 10 readings of the charger later (minutes, with the default interval) and the highest figure is kept. An odometer entered by hand is left alone.
 - A reading lower than the car's last one is not written; the Cars page shows why the last reading failed.
 - In the session form, ⟳ next to the odometer fetches it for a session entered by hand.
 - **Credentials:**

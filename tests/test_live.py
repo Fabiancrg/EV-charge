@@ -382,7 +382,7 @@ def test_odometer_is_written_when_a_charge_is_recorded(client, car, charger, fak
     db.get(Car, car["id"]).odometer_secret = encrypt_json({"url": "http://ha.local:8123", "token": "t", "entity": "sensor.odo"})
     db.commit()
     db.close()
-    readings = iter([odometer.OdometerError("Home Assistant is restarting"), 20500, 20500])
+    readings = iter([odometer.OdometerError("Home Assistant is restarting"), 20480, 20500, 20500, 20900])
 
     async def read(config):
         value = next(readings)
@@ -392,20 +392,36 @@ def test_odometer_is_written_when_a_charge_is_recorded(client, car, charger, fak
 
     monkeypatch.setattr(odometer, "read", read)
     poll = lambda: client.post(f"/api/chargers/{charger['id']}/poll")  # noqa: E731
-    # When the charge starts: the reading fails, the session is recorded all the same
+    session = lambda: client.get("/api/sessions").json()[0]  # noqa: E731
+    error = lambda: client.get(f"/api/cars/{car['id']}").json()["odometer_error"]  # noqa: E731
+    # Nothing is read when the charge starts nor while it goes on: cars refresh their odometer at the end of a charge
     fake.reading = LiveReading(status="charging", energy_wh=1000)
     poll()
-    assert client.get("/api/sessions").json()[0]["odometer"] is None and client.get(f"/api/cars/{car['id']}").json()["odometer_error"] == "Home Assistant is restarting"
     fake.reading = LiveReading(status="charging", energy_wh=3000)
-    poll()  # nothing is read while it charges
-    # When it ends: read again
+    poll()
+    assert session()["odometer"] is None and error() is None
+    # When it ends: read (it fails), then read again a few times in the following minutes; the highest figure is kept
     fake.reading = LiveReading(status="unplugged")
     poll()
-    s = client.get("/api/sessions").json()[0]
-    assert (s["odometer"], s["kwh"], s["reimbursement_status"]) == (20500, 3.0, "recorded") and client.get(f"/api/cars/{car['id']}").json()["odometer_error"] is None
-    # The next charge has it from its start, and it isn't read again at its end
+    assert session()["odometer"] is None and error() == "Home Assistant is restarting"
+    poll()  # 1 poll later: not read
+    poll()  # 2 polls later: the figure Home Assistant has, not refreshed yet
+    assert (session()["odometer"], session()["kwh"], session()["reimbursement_status"], error()) == (20480, 3.0, "recorded", None)
+    for _ in range(3):
+        poll()  # 5 polls later: refreshed
+    assert session()["odometer"] == 20500
+    for _ in range(5):
+        poll()  # 10 polls later: the same; then it is no longer read
+    assert session()["odometer"] == 20500
+    for _ in range(5):
+        poll()
+    assert session()["odometer"] == 20500 and next(readings) == 20900
+    # An odometer entered by hand is left alone
+    readings = iter([21000, 21000, 21000, 21000])
     fake.reading = LiveReading(status="charging", energy_wh=500)
     poll()
+    client.put(f"/api/sessions/{session()['id']}", json={**session(), "odometer": 20750})
     fake.reading = LiveReading(status="unplugged")
-    poll()
-    assert [x["odometer"] for x in client.get("/api/sessions").json()] == [20500, 20500]
+    for _ in range(12):
+        poll()
+    assert [x["odometer"] for x in client.get("/api/sessions").json()] == [20750, 20500] and next(readings) == 21000
