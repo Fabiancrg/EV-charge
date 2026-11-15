@@ -8,6 +8,7 @@ from datetime import date, datetime, time, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import i18n, odometer
 from .models import Car, ChargeSession
 from .pricing import Pricing
 from .schemas import CarIn, CarOut, LeaseStatus, SessionOut
@@ -117,7 +118,7 @@ def lease_status(car: Car, last_odometer: int | None, today: date | None = None)
     return status
 
 
-def car_out(db: Session, car: Car, today: date | None = None) -> CarOut:
+def car_out(db: Session, car: Car, today: date | None = None, language: str | None = None) -> CarOut:
     sessions = db.scalars(select(ChargeSession).where(ChargeSession.car_id == car.id)).all()
     with_odo = [s for s in sessions if s.odometer is not None]
     last = max(with_odo, key=session_sort_key) if with_odo else None
@@ -130,4 +131,7 @@ def car_out(db: Session, car: Car, today: date | None = None) -> CarOut:
     out.drivers = sorted(f"{g.user.full_name or g.user.username} ({g.role.name})" for g in car.grants if g.role is not None)
     out.color_index = sum(1 for cid in db.scalars(select(Car.id)) if cid < car.id)
     out.group_name = car.group.name if car.group else None
+    source = odometer.settings(car)
+    out.odometer_source = {"url": source["url"], "entity": source["entity"]} if source else None
+    out.odometer_error = i18n.stored(language, car.odometer_error)
     return out

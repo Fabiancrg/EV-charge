@@ -261,6 +261,7 @@
         fill('dl-locations', suggestions.locations);
         fill('dl-providers', suggestions.providers);
         const hint = document.getElementById('sf-odo-hint');
+        document.getElementById('sf-odo-fetch').style.display = suggestions.odometer_source ? '' : 'none';
         hint.textContent = suggestions.last_odometer != null ? EV.t('Last reading: {km} ({date})', { km: EV.km(suggestions.last_odometer), date: EV.date(suggestions.last_odometer_date) }) : '';
     }
 
@@ -351,6 +352,12 @@
             } catch (err) { EV.formError('session-modal', err); }
         });
         f.car_id.addEventListener('change', () => { refreshSuggestions(Number(f.car_id.value)); updateStatus(); });
+        document.getElementById('sf-odo-fetch').addEventListener('click', async (e) => {
+            e.target.disabled = true;
+            try { f.odometer.value = (await EV.api('GET', `/api/cars/${f.car_id.value}/odometer`)).odometer; }
+            catch (err) { EV.toast(err.message || String(err), true); }
+            finally { e.target.disabled = false; }
+        });
         f.start_time.addEventListener('input', updateDuration);
         f.end_time.addEventListener('input', updateDuration);
         f.kwh.addEventListener('input', () => { updateDuration(); updateHomeCost(); });

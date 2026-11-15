@@ -238,6 +238,12 @@ A charger can be connected to its cloud account, or read directly on your networ
 - The secondary source **continues the session in progress**: the two don't count from the same moment nor exactly the same, so the energy it reports is added from where the main source left the session, rather than starting a new one.
 - The main connection stays the preferred source: as soon as it answers again, the session in progress **takes its figures** (even if they are a little lower than what the secondary source counted), and the final figures still come from the charger's own list of sessions when its API has one.
 - *⇅ Make it the main one* swaps the two; removing the main connection makes the secondary one the main. The charging history is imported from the main connection.
+
+**Odometer from Home Assistant.** Home Assistant has an integration for most car makes and shows the car's mileage as a sensor. On the **Cars** page, 🔌 gives a car that sensor (a sensor in km or miles; the address and token of Home Assistant can be left empty when a charger of the group is already connected to it):
+
+- The odometer is then written by itself on the sessions **recorded from a charger**. It is read **when the charge ends**, not when it starts: many cars refresh that figure rarely, and do it at the end of a charge. As the refresh may reach Home Assistant a little later, it is read again 2, 5 and 10 readings of the charger later (minutes, with the default interval) and the highest figure is kept. An odometer entered by hand is left alone.
+- A reading lower than the car's last one is not written; the Cars page shows why the last reading failed.
+- In the session form, ⟳ next to the odometer fetches it for a session entered by hand.
 - **Credentials:**
   - They're checked when saved and stored **encrypted**, with a key in `{data_dir}/secret.key` or the `EV_CHARGE_SECRET_KEY` environment variable.
   - Losing the key only means entering the credentials again.

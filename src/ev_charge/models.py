@@ -99,6 +99,9 @@ class Car(Base):
     initial_odometer: Mapped[int | None] = mapped_column(Integer)  # km at delivery / lease start
     notes: Mapped[str | None] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Odometer read from Home Assistant (odometer.py): encrypted {url, token, entity}, and why the last reading failed
+    odometer_secret: Mapped[str | None] = mapped_column(Text)
+    odometer_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
