@@ -340,6 +340,9 @@ class ChargerOut(ChargerIn):
     connector: str | None = None
     connector_account: str | None = None  # e.g. the account e-mail (administrators only); never the password
     connector_settings: dict[str, str] | None = None  # the non-secret connection fields (administrators only)
+    connector2: str | None = None  # the secondary connection, read when the main one can't be
+    connector2_account: str | None = None
+    connector2_settings: dict[str, str] | None = None
     poll_enabled: bool = False
     external_id: str | None = None
     live: dict[str, Any] | None = None
@@ -351,6 +354,7 @@ class ChargerConnection(BaseModel):
     connector: str | None = Field(default=None, max_length=30)  # None: disconnect
     credentials: dict[str, str] = {}  # e.g. {"email": ..., "password": ...}; an empty value keeps the stored one
     poll_enabled: bool = True
+    secondary: bool = False  # the connection read when the main one can't be
 
 
 class HistoryApply(BaseModel):

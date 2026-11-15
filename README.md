@@ -231,6 +231,13 @@ A charger can be connected to its cloud account, or read directly on your networ
   - **End of a session:** a plug can't see the car being unplugged, so a session ends once the energy has stopped increasing for the idle time (60 minutes by default, so short pauses don't split it). The plug's standby use (a few W) is ignored.
   - **History:** the energy per hour from HA's long-term statistics (kept forever for sensors with a state class), else from the recorded history (about 10 days). Sessions are rebuilt as for Ohme.
   - To switch an existing Ohme charger, open its 🔌 connection and choose *Home Assistant*: its sessions and settings are kept.
+
+**Two connections for one charger.** A charger can have a **main** and a **secondary** connection (🔌 → *Secondary connection*), e.g. the Ohme account as the main one and the smart plug through Home Assistant as the secondary one:
+
+- The main connection is read first. The secondary one is read only when the main one fails or says the charger is offline; the chargers list and the dashboard then show *secondary in use*, with the reason.
+- The secondary source **continues the session in progress**: the two don't count from the same moment nor exactly the same, so the energy it reports is added from where the main source left the session, rather than starting a new one.
+- The main connection stays the preferred source: as soon as it answers again, the session in progress **takes its figures** (even if they are a little lower than what the secondary source counted), and the final figures still come from the charger's own list of sessions when its API has one.
+- *⇅ Make it the main one* swaps the two; removing the main connection makes the secondary one the main. The charging history is imported from the main connection.
 - **Credentials:**
   - They're checked when saved and stored **encrypted**, with a key in `{data_dir}/secret.key` or the `EV_CHARGE_SECRET_KEY` environment variable.
   - Losing the key only means entering the credentials again.

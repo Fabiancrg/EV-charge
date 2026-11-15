@@ -216,6 +216,8 @@ class Charger(Base):
     # Connection to the charger's cloud API (connectors/): kind ("ohme"), encrypted credentials, polling
     connector: Mapped[str | None] = mapped_column(String(30))
     connector_secret: Mapped[str | None] = mapped_column(Text)  # encrypted JSON (secretbox)
+    connector2: Mapped[str | None] = mapped_column(String(30))  # secondary connection: read when the main one can't be
+    connector2_secret: Mapped[str | None] = mapped_column(Text)
     poll_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     external_id: Mapped[str | None] = mapped_column(String(100))  # serial number reported by the API
     live_state: Mapped[str | None] = mapped_column(Text)  # JSON of the last reading
