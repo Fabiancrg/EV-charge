@@ -17,6 +17,7 @@ from typing import Any
 
 import aiohttp
 
+from ..i18n import msg
 from .base import CHARGING, OFFLINE, PLUGGED_IN, UNPLUGGED, ConnectorError, HourStat, LiveReading
 
 TIMEOUT = aiohttp.ClientTimeout(total=15)
@@ -42,7 +43,7 @@ class NrgkickConnector:
     def __init__(self, config: dict[str, Any]) -> None:
         host = (config.get("host") or "").strip().rstrip("/")
         if not host:
-            raise ConnectorError("Enter the address of the NRGkick on your network")
+            raise ConnectorError(msg("Enter the address of the NRGkick on your network"))
         self._base = host if host.startswith(("http://", "https://")) else f"http://{host}"
         user, password = (config.get("username") or "").strip(), config.get("password") or ""
         self._auth = aiohttp.BasicAuth(user, password) if user else None
@@ -57,26 +58,30 @@ class NrgkickConnector:
         try:
             async with self._http().get(self._base + path, params=params, auth=self._auth) as resp:
                 if resp.status in (401, 403):
-                    raise ConnectorError("NRGkick refused the user name or password of its JSON API")
+                    raise ConnectorError(msg("NRGkick refused the user name or password of its JSON API"))
                 body = await resp.json(content_type=None)
                 if isinstance(body, dict) and "API must be enabled" in str(body.get("Response", "")):
-                    raise ConnectorError("The JSON API of the NRGkick is off: enable it in the NRGkick app (Settings → JSON API)")
+                    raise ConnectorError(msg("The JSON API of the NRGkick is off: enable it in the NRGkick app (Settings → JSON API)"))
                 if resp.status != 200:
-                    raise ConnectorError(f"NRGkick: {path} answered HTTP {resp.status}")
+                    raise ConnectorError(msg("NRGkick: {path} answered HTTP {status}", path=path, status=resp.status))
         except (aiohttp.ClientError, TimeoutError) as exc:
             raise ConnectorError(
-                f"Cannot reach the NRGkick at {self._base} ({str(exc) or type(exc).__name__}): check its address and that this server is on the same network"
+                msg(
+                    "Cannot reach the NRGkick at {base} ({error}): check its address and that this server is on the same network",
+                    base=self._base,
+                    error=str(exc) or type(exc).__name__,
+                )
             ) from exc
         except ValueError as exc:
-            raise ConnectorError(f"The device at {self._base} didn't answer like an NRGkick (JSON API)") from exc
+            raise ConnectorError(msg("The device at {base} didn't answer like an NRGkick (JSON API)", base=self._base)) from exc
         if not isinstance(body, dict):
-            raise ConnectorError(f"The device at {self._base} didn't answer like an NRGkick (JSON API)")
+            raise ConnectorError(msg("The device at {base} didn't answer like an NRGkick (JSON API)", base=self._base))
         return body
 
     async def describe(self) -> dict[str, Any]:
         general = (await self._get("/info", {"general": "1", "versions": "1"})).get("general")
         if not isinstance(general, dict):
-            raise ConnectorError(f"The device at {self._base} didn't answer like an NRGkick (no device information)")
+            raise ConnectorError(msg("The device at {base} didn't answer like an NRGkick (no device information)", base=self._base))
         return {"serial": general.get("serial_number"), "model": general.get("model_type") or "NRGkick", "name": general.get("device_name")}
 
     async def live(self) -> LiveReading:
@@ -98,7 +103,7 @@ class NrgkickConnector:
         )
 
     async def history(self, start: datetime, end: datetime) -> list[HourStat]:
-        raise ConnectorError("The NRGkick has no charging history in its API: its sessions are recorded live, from now on")
+        raise ConnectorError(msg("The NRGkick has no charging history in its API: its sessions are recorded live, from now on"))
 
     async def close(self) -> None:
         if self._session is not None:

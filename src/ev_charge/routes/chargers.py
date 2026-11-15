@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import history as hist
-from .. import live
+from .. import i18n, live
 from ..auth import Principal, car_scope, check_group_manager, current_user, target_group, visible_groups
 from ..connectors import CONNECTORS, ConnectorError
 from ..database import get_db
@@ -74,7 +74,7 @@ def charger_out(c: Charger, user: Principal, usage: list[ChargeSession] | None =
     o.external_id = c.external_id
     o.live = live.live_state(c) or None
     o.last_poll_at = c.last_poll_at
-    o.last_poll_error = c.last_poll_error
+    o.last_poll_error = i18n.stored(user.language, c.last_poll_error)
     if o.manageable and c.connector and c.connector in CONNECTORS:
         try:
             config = decrypt_json(c.connector_secret)
@@ -185,7 +185,7 @@ async def set_connection(charger_id: int, body: ChargerConnection, user: Princip
     config = {f["name"]: (body.credentials.get(f["name"]) or "").strip() or (stored.get(f["name"], "") if f["secret"] else "") for f in fields}
     missing = [f["label"] for f in fields if f["required"] and not config.get(f["name"])]
     if missing:
-        raise HTTPException(422, msg("Missing: {missing}", missing=", ".join(missing)))
+        raise HTTPException(422, msg("Missing: {missing}", missing=[msg(label) for label in missing]))
     try:
         connector = cls(config)
     except ConnectorError as e:

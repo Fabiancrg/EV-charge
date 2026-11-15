@@ -19,6 +19,7 @@ from typing import Any
 
 import aiohttp
 
+from ..i18n import msg
 from .base import CHARGING, FINISHED, OFFLINE, PLUGGED_IN, UNPLUGGED, ConnectorError, HourStat, LiveReading
 
 TIMEOUT = aiohttp.ClientTimeout(total=15)
@@ -68,20 +69,20 @@ class _GoeBase:
                 if resp.status in (401, 403):
                     raise ConnectorError(self._unreachable(f"HTTP {resp.status}"))
                 if resp.status != 200:
-                    raise ConnectorError(f"{self.name}: the charger answered HTTP {resp.status}")
+                    raise ConnectorError(msg("{name}: the charger answered HTTP {status}", name=self.name, status=resp.status))
                 body = await resp.json(content_type=None)
         except (aiohttp.ClientError, TimeoutError) as exc:
             raise ConnectorError(self._unreachable(str(exc) or type(exc).__name__)) from exc
         except ValueError as exc:
-            raise ConnectorError(f"{self.name}: the answer isn't the API v2 status (is this a go-e charger?)") from exc
+            raise ConnectorError(msg("{name}: the answer isn't the API v2 status (is this a go-e charger?)", name=self.name)) from exc
         if not isinstance(body, dict) or "car" not in body:
-            raise ConnectorError(f"{self.name}: the answer isn't the API v2 status (is this a go-e charger, with the HTTP API v2 enabled?)")
+            raise ConnectorError(msg("{name}: the answer isn't the API v2 status (is this a go-e charger, with the HTTP API v2 enabled?)", name=self.name))
         return body
 
     async def describe(self) -> dict[str, Any]:
         s = await self._status()
         if s is None:
-            raise ConnectorError(f"{self.name}: the charger is offline (no data in the last 30 seconds)")
+            raise ConnectorError(msg("{name}: the charger is offline (no data in the last 30 seconds)", name=self.name))
         return {"serial": s.get("sse"), "model": s.get("typ") or "go-eCharger", "firmware": s.get("fwv"), "name": s.get("fna")}
 
     async def live(self) -> LiveReading:
@@ -101,7 +102,7 @@ class _GoeBase:
         )
 
     async def history(self, start: datetime, end: datetime) -> list[HourStat]:
-        raise ConnectorError("go-e chargers have no charging history in their API: their sessions are recorded live, from now on")
+        raise ConnectorError(msg("go-e chargers have no charging history in their API: their sessions are recorded live, from now on"))
 
     async def close(self) -> None:
         if self._session is not None:
@@ -118,15 +119,18 @@ class GoeLocalConnector(_GoeBase):
         super().__init__()
         host = (config.get("host") or "").strip().rstrip("/")
         if not host:
-            raise ConnectorError("Enter the address of the go-e charger on your network")
+            raise ConnectorError(msg("Enter the address of the go-e charger on your network"))
         self._base = host if host.startswith(("http://", "https://")) else f"http://{host}"
 
     def _url(self) -> str:
         return self._base
 
     def _unreachable(self, detail: str) -> str:
-        hint = "check its address, that this server is on the same network, and that 'local HTTP API v2' is allowed in the go-e app"
-        return f"Cannot read the go-e charger at {self._base} ({detail}): {hint}"
+        return msg(
+            "Cannot read the go-e charger at {base} ({detail}): check its address, that this server is on the same network, and that 'local HTTP API v2' is allowed in the go-e app",  # noqa: E501
+            base=self._base,
+            detail=detail,
+        )
 
 
 class GoeCloudConnector(_GoeBase):
@@ -139,9 +143,9 @@ class GoeCloudConnector(_GoeBase):
         super().__init__()
         serial, token = (config.get("serial") or "").strip(), (config.get("token") or "").strip()
         if not serial or not token:
-            raise ConnectorError("Enter the serial number of the go-e charger and its cloud API token")
+            raise ConnectorError(msg("Enter the serial number of the go-e charger and its cloud API token"))
         if not serial.isdigit():
-            raise ConnectorError("The serial number of a go-e charger is made of digits (see the go-e app or the label)")
+            raise ConnectorError(msg("The serial number of a go-e charger is made of digits (see the go-e app or the label)"))
         self._serial, self._token = serial.zfill(6), token
 
     def _url(self) -> str:
@@ -151,5 +155,7 @@ class GoeCloudConnector(_GoeBase):
         return {"Authorization": f"Bearer {self._token}"}
 
     def _unreachable(self, detail: str) -> str:
-        hint = "check the serial number and the token, that the Cloud API is enabled in the go-e app, and that the charger is online"
-        return f"go-e Cloud refused or can't be reached ({detail}): {hint}"
+        return msg(
+            "go-e Cloud refused or can't be reached ({detail}): check the serial number and the token, that the Cloud API is enabled in the go-e app, and that the charger is online",  # noqa: E501
+            detail=detail,
+        )

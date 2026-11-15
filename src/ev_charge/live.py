@@ -26,8 +26,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import i18n
 from .connectors import Connector, ConnectorError, LiveReading, make_connector
 from .connectors.base import CHARGING, FINISHED, OFFLINE, PAUSED, PENDING_APPROVAL, PLUGGED_IN, UNPLUGGED
+from .i18n import msg
 from .models import Charger, ChargeSession
 from .secretbox import SecretError, decrypt_json
 
@@ -143,7 +145,7 @@ def apply_reading(db: Session, c: Charger, r: LiveReading, now: datetime) -> str
 
     if r.status in PLUGGED and kwh > 0:
         if c.default_car_id is None:
-            state["warning"] = "No default car on this charger: the session can't be recorded automatically"
+            state["warning"] = msg("No default car on this charger: the session can't be recorded automatically")  # shown through EV.t
             c.live_state = json.dumps(state)
             return "no_car"
         since = state.get("charging_since") if action == "idle" else None  # after a restart the new session starts now
@@ -179,7 +181,7 @@ _locks: dict[int, asyncio.Lock] = {}
 
 def connector_for(c: Charger) -> Connector:
     if not c.connector:
-        raise ConnectorError("This charger has no connection")
+        raise ConnectorError(msg("This charger has no connection"))
     try:
         config = decrypt_json(c.connector_secret)
     except SecretError as exc:
@@ -212,7 +214,7 @@ async def poll_charger(db: Session, c: Charger) -> str:
             reading = await connector_for(c).live()
         except ConnectorError as exc:
             c.last_poll_at = datetime.now(UTC)
-            c.last_poll_error = str(exc)[:500]
+            c.last_poll_error = i18n.store(str(exc))
             db.commit()
             await forget_connector(c.id)  # log in again next time
             return "error"

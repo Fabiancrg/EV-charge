@@ -114,6 +114,26 @@ def test_messages_of_the_server_in_the_language_of_the_person(client, anon):
     assert client.get("/api/reports/reimbursement?fmt=csv").text.splitlines()[0].startswith("\ufeffDate;Voiture;Plaque;Compteur (km);Lieu;Chargeur;Remboursé par;")
 
 
+def test_messages_of_the_charger_connections(client):
+    from ev_charge.connectors.base import ConnectorError
+    from ev_charge.connectors.zaptec import ZaptecConnector
+
+    with pytest.raises(ConnectorError) as raised:
+        ZaptecConnector({})
+    message = str(raised.value)
+    assert message == "Enter the e-mail and password of the Zaptec account" and i18n.localize("nl", message) == "Voer het e-mailadres en wachtwoord van het Zaptec-account in"
+    # The last error of a charger is kept with what is needed to show it in the language of who reads it
+    kept = i18n.store(i18n.msg("Cannot reach Zaptec ({error})", error=i18n.msg("Zaptec login failed (HTTP {status})", status=503)))
+    assert i18n.stored(None, kept) == "Cannot reach Zaptec (Zaptec login failed (HTTP 503))"
+    assert i18n.stored("fr", kept) == "Impossible de joindre Zaptec (La connexion à Zaptec a échoué (HTTP 503))"
+    assert i18n.stored("de", "Ohme is down") == "Ohme is down" and i18n.stored("de", None) is None and i18n.store("plain " * 900) == ("plain " * 900)[:2000]
+    # Refused by the connector when connecting a charger: the answer is in the language of the profile
+    client.put("/api/auth/language", json={"language": "fr"})
+    charger = client.post("/api/chargers", json={"name": "Zaptec Go"}).json()
+    refused = client.put(f"/api/chargers/{charger['id']}/connection", json={"connector": "zaptec", "config": {}})
+    assert refused.status_code == 422 and refused.json()["detail"] == "Manquant : E-mail du compte Zaptec, Mot de passe du compte Zaptec"
+
+
 def test_emails_in_the_language_of_the_recipient(client, mailbox):
     client.put("/api/signup/settings", json={"enabled": True})
     visitor = TestClient(app, base_url="https://ev.example.com", headers={"Accept-Language": "fr-BE"})

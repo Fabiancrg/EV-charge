@@ -22,6 +22,7 @@ from urllib.parse import quote
 
 import aiohttp
 
+from ..i18n import msg as _msg
 from .base import CHARGING, OFFLINE, PAUSED, UNPLUGGED, ConnectorError, HourStat, LiveReading
 
 TIMEOUT = aiohttp.ClientTimeout(total=30)
@@ -122,12 +123,12 @@ class HomeAssistantConnector:
     def __init__(self, config: dict[str, Any]) -> None:
         missing = [label for name, label, _secret, required in self.fields if required and not str(config.get(name) or "").strip()]
         if missing:
-            raise ConnectorError(f"Enter: {', '.join(missing)}")
+            raise ConnectorError(_msg("Enter: {missing}", missing=[_msg(label) for label in missing]))
         url = str(config["url"]).strip().rstrip("/")
         if url.endswith("/api"):
             url = url[:-4]
         if not url.startswith(("http://", "https://")):
-            raise ConnectorError("The Home Assistant URL must start with http:// or https://")
+            raise ConnectorError(_msg("The Home Assistant URL must start with http:// or https://"))
         self._url = url
         self._token = str(config["token"]).strip()
         self._power = str(config["power_entity"]).strip()
@@ -136,9 +137,9 @@ class HomeAssistantConnector:
             self._threshold = float(str(config.get("threshold_w") or DEFAULT_THRESHOLD_W).replace(",", "."))
             self._idle = timedelta(minutes=float(str(config.get("idle_minutes") or DEFAULT_IDLE_MINUTES).replace(",", ".")))
         except ValueError as exc:
-            raise ConnectorError("The power threshold and the idle time must be numbers") from exc
+            raise ConnectorError(_msg("The power threshold and the idle time must be numbers")) from exc
         if self._idle <= timedelta(0):
-            raise ConnectorError("The idle time must be more than 0 minutes")
+            raise ConnectorError(_msg("The idle time must be more than 0 minutes"))
         self._session: aiohttp.ClientSession | None = None
         self._points: list[tuple[datetime, float]] = []  # energy readings (UTC, Wh) known so far
         self._points_until: datetime | None = None
@@ -154,16 +155,16 @@ class HomeAssistantConnector:
         try:
             async with self._http().get(f"{self._url}/api/{path}", params=params, headers=headers) as resp:
                 if resp.status == 401:
-                    raise ConnectorError("Home Assistant refused the access token")
+                    raise ConnectorError(_msg("Home Assistant refused the access token"))
                 if resp.status == 404 and path.startswith("states/"):
-                    raise ConnectorError(f"Home Assistant has no entity {path[7:]}")
+                    raise ConnectorError(_msg("Home Assistant has no entity {entity}", entity=path[7:]))
                 if resp.status != 200:
-                    raise ConnectorError(f"Home Assistant: /api/{path} answered HTTP {resp.status}")
+                    raise ConnectorError(_msg("Home Assistant: /api/{path} answered HTTP {status}", path=path, status=resp.status))
                 return await resp.json(content_type=None)
         except aiohttp.ClientError as exc:
-            raise ConnectorError(f"Cannot reach Home Assistant at {self._url} ({exc})") from exc
+            raise ConnectorError(_msg("Cannot reach Home Assistant at {url} ({error})", url=self._url, error=exc)) from exc
         except TimeoutError as exc:
-            raise ConnectorError(f"Home Assistant at {self._url} did not answer in time") from exc
+            raise ConnectorError(_msg("Home Assistant at {url} did not answer in time", url=self._url)) from exc
 
     async def _state(self, entity: str) -> dict[str, Any]:
         return await self._get(f"states/{quote(entity)}")  # type: ignore[no-any-return]
@@ -187,9 +188,9 @@ class HomeAssistantConnector:
         power, energy = await self._state(self._power), await self._state(self._energy)
         units = {"power": power.get("attributes", {}).get("unit_of_measurement"), "energy": energy.get("attributes", {}).get("unit_of_measurement")}
         if units["power"] not in (None, "W", "kW"):
-            raise ConnectorError(f"{self._power} is in {units['power']}, not a power (W or kW)")
+            raise ConnectorError(_msg("{entity} is in {unit}, not a power (W or kW)", entity=self._power, unit=units["power"]))
         if units["energy"] not in (None, "Wh", "kWh", "MWh"):
-            raise ConnectorError(f"{self._energy} is in {units['energy']}, not an energy (Wh or kWh)")
+            raise ConnectorError(_msg("{entity} is in {unit}, not an energy (Wh or kWh)", entity=self._energy, unit=units["energy"]))
         name = power.get("attributes", {}).get("friendly_name") or self._power
         return {"serial": self._power, "model": f"Home Assistant: {name}", "firmware": config.get("version") if isinstance(config, dict) else None}
 
@@ -247,7 +248,7 @@ class HomeAssistantConnector:
                 await ws.send_json({"type": "auth", "access_token": self._token})
                 auth = await ws.receive_json()
                 if auth.get("type") != "auth_ok":
-                    raise ConnectorError("Home Assistant refused the access token")
+                    raise ConnectorError(_msg("Home Assistant refused the access token"))
                 await ws.send_json({
                     "id": 1, "type": "recorder/statistics_during_period", "statistic_ids": [self._energy], "period": "hour",
                     "start_time": start.isoformat(), "end_time": end.isoformat(), "types": ["change"], "units": {"energy": "Wh"},
@@ -257,9 +258,9 @@ class HomeAssistantConnector:
                     if msg.get("id") == 1 and msg.get("type") == "result":
                         break
         except (aiohttp.ClientError, TimeoutError, TypeError, ValueError) as exc:
-            raise ConnectorError(f"Home Assistant: cannot read the statistics ({exc})") from exc
+            raise ConnectorError(_msg("Home Assistant: cannot read the statistics ({error})", error=exc)) from exc
         if not msg.get("success"):
-            raise ConnectorError(f"Home Assistant: cannot read the statistics ({(msg.get('error') or {}).get('message', 'refused')})")
+            raise ConnectorError(_msg("Home Assistant: cannot read the statistics ({error})", error=(msg.get("error") or {}).get("message", "refused")))
         rows = (msg.get("result") or {}).get(self._energy) or []
         if not rows:
             return None

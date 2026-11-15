@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..i18n import msg
 from .base import Connector, ConnectorError
 from .easee import EaseeConnector
 from .goe import GoeCloudConnector, GoeLocalConnector
@@ -27,5 +28,5 @@ CONNECTORS: dict[str, type] = {
 def make_connector(kind: str, config: dict[str, Any]) -> Connector:
     cls = CONNECTORS.get(kind)
     if cls is None:
-        raise ConnectorError(f"Unknown connector '{kind}'")
+        raise ConnectorError(msg("Unknown connector '{connector}'", connector=kind))
     return cls(config)  # type: ignore[no-any-return]
