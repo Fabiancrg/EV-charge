@@ -132,6 +132,6 @@ def car_out(db: Session, car: Car, today: date | None = None, language: str | No
     out.color_index = sum(1 for cid in db.scalars(select(Car.id)) if cid < car.id)
     out.group_name = car.group.name if car.group else None
     source = odometer.settings(car)
-    out.odometer_source = {"url": source["url"], "entity": source["entity"]} if source else None
+    out.odometer_source = {"url": source["url"], "entity": source.get("entity") or "", "battery_entity": source.get("battery_entity") or ""} if source else None
     out.odometer_error = i18n.stored(language, car.odometer_error)
     return out

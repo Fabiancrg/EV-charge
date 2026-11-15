@@ -84,7 +84,8 @@ class CarOut(CarIn):
 class OdometerSource(BaseModel):
     url: str = Field(default="", max_length=300)  # empty url and token: those of a charger of the group connected to Home Assistant
     token: str = Field(default="", max_length=2000)  # empty: keep the stored one
-    entity: str = Field(default="", max_length=200)
+    entity: str = Field(default="", max_length=200)  # the odometer sensor
+    battery_entity: str = Field(default="", max_length=200)  # the sensor of the battery level (%)
 
 
 ReimbursementStatus = Literal["in_progress", "not_recorded", "recorded", "invoiced", "paid"]

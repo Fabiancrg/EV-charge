@@ -244,6 +244,7 @@ A charger can be connected to its cloud account, or read directly on your networ
 - The odometer is then written by itself on the sessions **recorded from a charger**. It is read **when the charge ends**, not when it starts: many cars refresh that figure rarely, and do it at the end of a charge. As the refresh may reach Home Assistant a little later, it is read again 2, 5 and 10 readings of the charger later (minutes, with the default interval) and the highest figure is kept. An odometer entered by hand is left alone.
 - A reading lower than the car's last one is not written; the Cars page shows why the last reading failed.
 - In the session form, ⟳ next to the odometer fetches it for a session entered by hand.
+- The same 🔌 takes the sensor of the car's **battery level** (%): the dashboard then shows the battery of a charger's default car while it is plugged in, for the chargers whose own API doesn't know it (all but Ohme). Either sensor can be given alone.
 - **Credentials:**
   - They're checked when saved and stored **encrypted**, with a key in `{data_dir}/secret.key` or the `EV_CHARGE_SECRET_KEY` environment variable.
   - Losing the key only means entering the credentials again.

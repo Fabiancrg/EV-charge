@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, joinedload
 
+from .. import odometer
 from ..auth import Principal, car_scope, check_car_access, current_user, restrict_car_ids
 from ..database import get_db
 from ..i18n import msg
@@ -158,7 +159,7 @@ def suggestions(car_id: int | None = None, user: Principal = Depends(current_use
         "last_odometer": last_odo.odometer if last_odo else None,
         "last_odometer_date": last_odo.charge_date.isoformat() if last_odo else None,
         "last_used_car_id": last_car.car_id if last_car else None,
-        "odometer_source": bool(car_id and (car := db.get(Car, car_id)) and car.odometer_secret),  # the form can fetch the odometer
+        "odometer_source": bool(car_id and (car := db.get(Car, car_id)) and (odometer.settings(car) or {}).get("entity")),  # the form can fetch the odometer
     }
 
 

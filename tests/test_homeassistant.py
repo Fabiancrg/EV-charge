@@ -14,6 +14,7 @@ from ev_charge.connectors.homeassistant import HomeAssistantConnector, current_s
 POWER, ENERGY = "sensor.carplug2_relay_power", "sensor.ve_plug_2_energy_daily"
 TOKEN = "ha-token"
 ODOMETER = "sensor.ev6_odometer"
+BATTERY = "sensor.ev6_battery_level"
 
 
 def iso(dt):
@@ -25,6 +26,7 @@ class FakeHA:
         self.now = datetime.now(UTC).replace(microsecond=0)
         self.power = "2190"
         self.odometer, self.odometer_unit = "23456.4", "km"
+        self.battery = "64.6"
         # The plug's daily meter: standby 3 h ago, then charging for 40 min at ~2.4 kW, through a midnight reset
         self.energy_rows = [(self.now - timedelta(hours=5), 9.70), (self.now - timedelta(hours=3), 9.71)]
         value = 9.71
@@ -66,6 +68,8 @@ class FakeHA:
             return web.json_response({"entity_id": ENERGY, "state": str(v), "last_changed": iso(t), "attributes": {"unit_of_measurement": "kWh"}})
         if entity == ODOMETER:
             return web.json_response({"entity_id": ODOMETER, "state": self.odometer, "attributes": {"unit_of_measurement": self.odometer_unit}})
+        if entity == BATTERY:
+            return web.json_response({"entity_id": BATTERY, "state": self.battery, "attributes": {"unit_of_measurement": "%"}})
         return web.json_response({"message": "Entity not found."}, status=404)
 
     async def history(self, request):
@@ -255,7 +259,7 @@ def test_odometer_of_a_car_from_home_assistant(client, ha):
     saved = put({"entity": ODOMETER})
     assert saved.status_code == 200 and saved.json()["odometer"] == 23456
     shown = client.get(f"/api/cars/{car['id']}").json()
-    assert shown["odometer_source"] == {"url": ha.url, "entity": ODOMETER} and shown["odometer_error"] is None and TOKEN not in str(shown)
+    assert shown["odometer_source"] == {"url": ha.url, "entity": ODOMETER, "battery_entity": ""} and shown["odometer_error"] is None and TOKEN not in str(shown)
     assert client.get(f"/api/sessions/suggestions?car_id={car['id']}").json()["odometer_source"] is True
     # Changing the sensor keeps the stored token; miles are converted
     ha.odometer, ha.odometer_unit = "10000", "mi"
@@ -287,3 +291,26 @@ def test_odometer_of_a_car_from_home_assistant(client, ha):
 
     assert client.delete(f"/api/cars/{car['id']}/odometer-source").json()["odometer_source"] is None
     assert client.get(f"/api/cars/{car['id']}/odometer").status_code == 422
+
+
+def test_battery_level_of_a_car_from_home_assistant(client, ha):
+    car = client.post("/api/cars", json={"name": "EV6"}).json()
+    put = lambda body: client.put(f"/api/cars/{car['id']}/odometer-source", json={"url": ha.url, "token": TOKEN, **body})  # noqa: E731
+    assert put({}).status_code == 422  # at least one sensor
+    assert "not a battery level" in put({"battery_entity": ODOMETER}).json()["detail"]
+    saved = put({"battery_entity": BATTERY}).json()  # the battery alone: no odometer is read
+    assert (saved["odometer"], saved["battery_pct"]) == (None, 65) and saved["car"]["odometer_source"]["entity"] == ""
+    assert client.get(f"/api/cars/{car['id']}/odometer").status_code == 422
+    assert client.get(f"/api/sessions/suggestions?car_id={car['id']}").json()["odometer_source"] is False
+    saved = put({"entity": ODOMETER, "battery_entity": BATTERY}).json()
+    assert (saved["odometer"], saved["battery_pct"]) == (23456, 65)
+
+    # On the dashboard: the battery of the default car of a charger whose API doesn't know it, while it is plugged in
+    charger = client.post("/api/chargers", json={"name": "Plug", "default_car_id": car["id"]}).json()
+    assert client.put(f"/api/chargers/{charger['id']}/connection", json={"connector": "homeassistant", "credentials": config(ha)}).status_code == 200
+    poll = lambda: client.post(f"/api/chargers/{charger['id']}/poll").json()["live"]  # noqa: E731
+    assert poll()["status"] == "charging" and poll()["battery_pct"] == 65
+    ha.battery = "unavailable"  # nothing to show, and nothing breaks
+    assert poll()["battery_pct"] is None
+    ha.battery = "80"
+    assert poll()["battery_pct"] == 80
