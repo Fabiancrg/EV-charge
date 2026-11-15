@@ -286,6 +286,10 @@ async def poll_charger(db: Session, c: Charger) -> str:
             db.commit()
             return "error"
         action = apply_reading(db, c, reading, datetime.now(), source, i18n.store(error) if error else None)
+        if reading.battery_pct is None and reading.status in PLUGGED and c.default_car_id:  # the charger doesn't know the car's battery level
+            battery = await odometer.battery_of(db.get(Car, c.default_car_id))
+            if battery is not None:
+                c.live_state = json.dumps({**live_state(c), "battery_pct": battery})
         db.commit()
         await odometer_after_charge(db, c)
         db.commit()

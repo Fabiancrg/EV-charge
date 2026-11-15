@@ -120,7 +120,7 @@ def _home_assistant_of_group(db: Session, group_id: int | None) -> dict[str, str
 
 @router.put("/{car_id}/odometer-source")
 async def set_odometer_source(car_id: int, body: OdometerSource, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-    """Read the car's odometer from a Home Assistant sensor: tested now, the token is stored encrypted.
+    """Read the car's odometer and/or its battery level from Home Assistant sensors: tested now, the token is stored encrypted.
 
     Without address and token, those of a charger of the group connected to Home Assistant are used."""
     car = _get(db, car_id)
@@ -133,13 +133,14 @@ async def set_odometer_source(car_id: int, body: OdometerSource, user: Principal
             raise HTTPException(422, msg("Enter the address of Home Assistant and an access token (no charger of the group is connected to Home Assistant)"))
         url, token = shared["url"], shared["token"]
     try:
-        config = odometer.clean(url or stored.get("url", ""), token or stored.get("token", ""), body.entity)
-        km = await odometer.read(config)
+        config = odometer.clean(url or stored.get("url", ""), token or stored.get("token", ""), body.entity, body.battery_entity)
+        km = await odometer.read(config) if config["entity"] else None
+        battery = await odometer.read_battery(config) if config["battery_entity"] else None
     except odometer.OdometerError as e:
         raise HTTPException(422, str(e)) from None
     car.odometer_secret, car.odometer_error = encrypt_json(config), None
     db.commit()
-    return {"odometer": km, "car": _out(db, car, user)}
+    return {"odometer": km, "battery_pct": battery, "car": _out(db, car, user)}
 
 
 @router.delete("/{car_id}/odometer-source", response_model=CarOut)
@@ -157,7 +158,7 @@ async def read_odometer(car_id: int, user: Principal = Depends(current_user), db
     car = _get(db, car_id)
     check_car_access(user, car_id)
     config = odometer.settings(car)
-    if config is None:
+    if config is None or not config.get("entity"):
         raise HTTPException(422, msg("The odometer of this car isn't read from Home Assistant"))
     try:
         return {"odometer": await odometer.read(config)}

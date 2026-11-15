@@ -1,4 +1,4 @@
-"""The odometer of a car, read from Home Assistant.
+"""The odometer and the battery level of a car, read from Home Assistant.
 
 Home Assistant has an integration for most makes, and shows the car's mileage as a sensor. A car can be given
 that sensor (Home Assistant's address, an access token and the entity): its odometer is then written on the
@@ -7,6 +7,9 @@ sessions recorded from a charger, and can be fetched in the session form.
 It is read when the charge ends, not when it starts: many cars refresh that figure rarely, and do it at the
 end of a charge. As the refresh may reach Home Assistant a little later, it is read again a few times in the
 following minutes (live.py) and the highest figure is kept. A reading lower than the car's last one is refused.
+
+The car can also be given the sensor of its battery level (%): it is shown on the dashboard while the car is
+plugged in to a charger whose own API doesn't know it.
 """
 
 from __future__ import annotations
@@ -43,20 +46,20 @@ def settings(car: Car) -> dict[str, Any] | None:
         return None
 
 
-def clean(url: str, token: str, entity: str) -> dict[str, str]:
-    url, token, entity = url.strip().rstrip("/"), token.strip(), entity.strip()
+def clean(url: str, token: str, entity: str, battery_entity: str = "") -> dict[str, str]:
+    url, token, entity, battery_entity = url.strip().rstrip("/"), token.strip(), entity.strip(), battery_entity.strip()
     if url.endswith("/api"):
         url = url[:-4]
     if not url.startswith(("http://", "https://")):
         raise OdometerError(msg("The Home Assistant URL must start with http:// or https://"))
-    if not token or not entity:
-        raise OdometerError(msg("Enter the access token and the odometer sensor"))
-    return {"url": url, "token": token, "entity": entity}
+    if not token or not (entity or battery_entity):
+        raise OdometerError(msg("Enter the access token and at least one sensor"))
+    return {"url": url, "token": token, "entity": entity, "battery_entity": battery_entity}
 
 
-async def read(config: dict[str, Any]) -> int:
-    """The odometer in km, as Home Assistant has it now."""
-    url, entity = config["url"], config["entity"]
+async def _number(config: dict[str, Any], entity: str) -> tuple[float, str | None, str]:
+    """The value of a sensor of Home Assistant, with its unit and its raw state."""
+    url = config["url"]
     headers = {"Authorization": f"Bearer {config['token']}", "Accept": "application/json"}
     try:
         async with aiohttp.ClientSession(timeout=TIMEOUT, trust_env=True) as http, http.get(f"{url}/api/states/{quote(entity)}", headers=headers) as resp:
@@ -78,13 +81,44 @@ async def read(config: dict[str, Any]) -> int:
         value = float(str(state).replace(",", "."))
     except ValueError:
         raise OdometerError(msg("{entity} has no value for now ({state})", entity=entity, state=str(state))) from None
-    unit = (body.get("attributes") or {}).get("unit_of_measurement")
+    return value, (body.get("attributes") or {}).get("unit_of_measurement"), str(state)
+
+
+async def read(config: dict[str, Any]) -> int:
+    """The odometer in km, as Home Assistant has it now."""
+    entity = config.get("entity") or ""
+    if not entity:
+        raise OdometerError(msg("The odometer of this car isn't read from Home Assistant"))
+    value, unit, state = await _number(config, entity)
     if unit not in (None, "km", "mi"):
         raise OdometerError(msg("{entity} is in {unit}, not a distance (km or mi)", entity=entity, unit=str(unit)))
     km = round(value * KM_PER_MILE) if unit == "mi" else round(value)
     if km < 0:
-        raise OdometerError(msg("{entity} has no value for now ({state})", entity=entity, state=str(state)))
+        raise OdometerError(msg("{entity} has no value for now ({state})", entity=entity, state=state))
     return km
+
+
+async def read_battery(config: dict[str, Any]) -> int:
+    """The battery level of the car in %, as Home Assistant has it now."""
+    entity = config.get("battery_entity") or ""
+    value, unit, state = await _number(config, entity)
+    if unit not in (None, "%"):
+        raise OdometerError(msg("{entity} is in {unit}, not a battery level (%)", entity=entity, unit=str(unit)))
+    if not 0 <= value <= 100:
+        raise OdometerError(msg("{entity} has no value for now ({state})", entity=entity, state=state))
+    return round(value)
+
+
+async def battery_of(car: Car | None) -> int | None:
+    """The battery level of a car that has a sensor for it; None when it has none, or when it can't be read now."""
+    config = settings(car) if car else None
+    if not config or not config.get("battery_entity"):
+        return None
+    try:
+        return await read_battery(config)
+    except OdometerError as exc:
+        logger.info("Car %s: its battery level couldn't be read (%s)", car.name, exc)  # type: ignore[union-attr]
+        return None
 
 
 def last_reading(db: Session, car_id: int, but: int | None = None) -> int | None:
@@ -98,7 +132,7 @@ async def fill(db: Session, s: ChargeSession, written: int | None = None) -> boo
     Home Assistant now has a higher one. The error, if any, is kept on the car. Returns True when written."""
     car = db.get(Car, s.car_id)
     config = settings(car) if car else None
-    if car is None or config is None or s.odometer != written:  # no source, or an odometer entered by hand
+    if car is None or config is None or not config.get("entity") or s.odometer != written:  # no source, or an odometer entered by hand
         return False
     try:
         km = await read(config)
