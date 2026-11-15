@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import history as hist
-from .. import live
+from .. import i18n, live
 from ..auth import Principal, car_scope, check_group_manager, current_user, target_group, visible_groups
 from ..connectors import CONNECTORS, ConnectorError
 from ..database import get_db
@@ -73,17 +73,27 @@ def charger_out(c: Charger, user: Principal, usage: list[ChargeSession] | None =
     o.poll_enabled = c.poll_enabled
     o.external_id = c.external_id
     o.live = live.live_state(c) or None
+    if o.live and o.live.get("primary_error"):
+        o.live["primary_error"] = i18n.stored(user.language, o.live["primary_error"])
+    o.connector2 = c.connector2
     o.last_poll_at = c.last_poll_at
-    o.last_poll_error = c.last_poll_error
-    if o.manageable and c.connector and c.connector in CONNECTORS:
-        try:
-            config = decrypt_json(c.connector_secret)
-        except SecretError:
-            config = {}
-        plain = [f["name"] for f in map(_field, CONNECTORS[c.connector].fields) if not f["secret"]]
-        o.connector_settings = {k: config[k] for k in plain if config.get(k)}
-        o.connector_account = config.get("email") or config.get("url")
+    o.last_poll_error = i18n.stored(user.language, c.last_poll_error)
+    if o.manageable:
+        o.connector_settings, o.connector_account = _shown(c.connector, c.connector_secret)
+        o.connector2_settings, o.connector2_account = _shown(c.connector2, c.connector2_secret)
     return o
+
+
+def _shown(kind: str | None, secret: str | None) -> tuple[dict[str, str] | None, str | None]:
+    """What the people managing a charger see of one of its connections: the fields that aren't secret, and the account."""
+    if not kind or kind not in CONNECTORS:
+        return None, None
+    try:
+        config = decrypt_json(secret)
+    except SecretError:
+        config = {}
+    plain = [f["name"] for f in map(_field, CONNECTORS[kind].fields) if not f["secret"]]
+    return {k: config[k] for k in plain if config.get(k)}, config.get("email") or config.get("url") or config.get("host")
 
 
 def _visible(user: Principal, c: Charger) -> bool:
@@ -165,19 +175,30 @@ async def delete_charger(charger_id: int, user: Principal = Depends(current_user
 
 @router.put("/{charger_id}/connection", response_model=ChargerOut)
 async def set_connection(charger_id: int, body: ChargerConnection, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> ChargerOut:
-    """Store (encrypted) or remove the credentials of the charger's cloud account, and test them."""
+    """Store (encrypted) or remove the credentials of one of the charger's connections, and test them.
+
+    secondary: the connection read when the main one can't be. Removing the main one makes the secondary one the main."""
     c = _managed(db, charger_id, user)
     await live.forget_connector(c.id)
+    if body.secondary and not c.connector:
+        raise HTTPException(422, msg("Set the main connection first"))
     if body.connector is None:
-        c.connector = c.connector_secret = c.external_id = c.live_state = c.last_poll_error = None
-        c.poll_enabled = False
+        if body.secondary or c.connector2:
+            if not body.secondary:  # the secondary connection takes the place of the main one
+                c.connector, c.connector_secret, c.external_id = c.connector2, c.connector2_secret, None
+            c.connector2 = c.connector2_secret = None
+            c.last_poll_error = None
+        else:
+            c.connector = c.connector_secret = c.external_id = c.live_state = c.last_poll_error = None
+            c.poll_enabled = False
         db.commit()
         return charger_out(c, user)
     cls = CONNECTORS.get(body.connector)
     if cls is None:
         raise HTTPException(422, msg("Unknown connector '{connector}'", connector=body.connector))
     try:
-        stored = decrypt_json(c.connector_secret) if c.connector == body.connector else {}
+        current = (c.connector2, c.connector2_secret) if body.secondary else (c.connector, c.connector_secret)
+        stored = decrypt_json(current[1]) if current[0] == body.connector else {}
     except SecretError:
         stored = {}
     fields = [_field(f) for f in cls.fields]
@@ -185,7 +206,7 @@ async def set_connection(charger_id: int, body: ChargerConnection, user: Princip
     config = {f["name"]: (body.credentials.get(f["name"]) or "").strip() or (stored.get(f["name"], "") if f["secret"] else "") for f in fields}
     missing = [f["label"] for f in fields if f["required"] and not config.get(f["name"])]
     if missing:
-        raise HTTPException(422, msg("Missing: {missing}", missing=", ".join(missing)))
+        raise HTTPException(422, msg("Missing: {missing}", missing=[msg(label) for label in missing]))
     try:
         connector = cls(config)
     except ConnectorError as e:
@@ -196,15 +217,32 @@ async def set_connection(charger_id: int, body: ChargerConnection, user: Princip
         raise HTTPException(422, str(e)) from None
     finally:
         await connector.close()
+    c.poll_enabled = body.poll_enabled
+    if body.secondary:
+        c.connector2, c.connector2_secret = body.connector, encrypt_json(config)
+        db.commit()
+        return charger_out(c, user)
     c.connector = body.connector
     c.connector_secret = encrypt_json(config)
-    c.poll_enabled = body.poll_enabled
     c.external_id = info.get("serial") or c.external_id
     if not c.serial_number and info.get("serial"):
         c.serial_number = info["serial"]
     if not c.model and info.get("model"):
         c.model = info["model"]
     c.last_poll_error = None
+    db.commit()
+    return charger_out(c, user)
+
+
+@router.post("/{charger_id}/connection/swap", response_model=ChargerOut)
+async def swap_connections(charger_id: int, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> ChargerOut:
+    """Make the secondary connection the main one, and the main one the secondary."""
+    c = _managed(db, charger_id, user)
+    if not c.connector or not c.connector2:
+        raise HTTPException(422, msg("This charger doesn't have two connections"))
+    await live.forget_connector(c.id)
+    c.connector, c.connector_secret, c.connector2, c.connector2_secret = c.connector2, c.connector2_secret, c.connector, c.connector_secret
+    c.external_id = c.last_poll_error = None
     db.commit()
     return charger_out(c, user)
 

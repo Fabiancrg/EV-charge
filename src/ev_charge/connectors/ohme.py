@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
+from ..i18n import msg
 from .base import CHARGING, FINISHED, OFFLINE, PAUSED, PENDING_APPROVAL, PLUGGED_IN, UNPLUGGED, ConnectorError, HourStat, LiveReading
 
 _STATUS = {
@@ -29,7 +30,7 @@ class OhmeConnector:
 
     def __init__(self, config: dict[str, Any]) -> None:
         if not config.get("email") or not config.get("password"):
-            raise ConnectorError("Enter the e-mail and password of the Ohme app account")
+            raise ConnectorError(msg("Enter the e-mail and password of the Ohme app account"))
         self._config = config
         self._client: Any = None
 
@@ -37,19 +38,19 @@ class OhmeConnector:
         try:
             from ohme import OhmeApiClient
         except ImportError as exc:  # pragma: no cover - dependency missing
-            raise ConnectorError("The 'ohme' Python package is not installed") from exc
+            raise ConnectorError(msg("The 'ohme' Python package is not installed")) from exc
         if self._client is None:
             client = OhmeApiClient(self._config["email"], self._config["password"])
             try:
                 if not await client.async_login():
-                    raise ConnectorError("Ohme refused the login: check the e-mail and password")
+                    raise ConnectorError(msg("Ohme refused the login: check the e-mail and password"))
                 await client.async_update_device_info()
             except ConnectorError:
                 await client.close()
                 raise
             except Exception as exc:
                 await client.close()
-                raise ConnectorError(f"Ohme login failed: {exc}") from exc
+                raise ConnectorError(msg("Ohme login failed: {error}", error=exc)) from exc
             self._client = client
         return self._client
 
@@ -63,7 +64,7 @@ class OhmeConnector:
         try:
             await api.async_get_charge_session()
         except Exception as exc:
-            raise ConnectorError(f"Ohme: cannot read the charge session ({exc})") from exc
+            raise ConnectorError(msg("Ohme: cannot read the charge session ({error})", error=exc)) from exc
         if not api.available:
             return LiveReading(status=OFFLINE, online=False)
         status = _STATUS.get(getattr(api.status, "value", str(api.status)), PLUGGED_IN)
@@ -102,7 +103,7 @@ class OhmeConnector:
             try:
                 summary = await api.async_get_charge_summary(int(cursor.timestamp() * 1000), int(chunk_end.timestamp() * 1000), SummaryGranularity.HOUR)
             except Exception as exc:
-                raise ConnectorError(f"Ohme: cannot read the charging history ({exc})") from exc
+                raise ConnectorError(msg("Ohme: cannot read the charging history ({error})", error=exc)) from exc
             for s in summary.get("stats") or []:
                 wh = float(s.get("energyChargedTotalWh") or 0)
                 if wh <= 0:

@@ -10,6 +10,12 @@ Each poll gives a reading (status, power, energy delivered in the current sessio
   steps), so once closed, the session takes its final energy and end time from the charger's own list of
   sessions, when its API has one (Zaptec, Easee)
 
+A charger can have a secondary connection (e.g. the smart plug it is on, through Home Assistant): it is read
+when the main one fails or says the charger is offline. The main connection stays the preferred source: as
+soon as it answers again, the session in progress takes its figures. While the secondary one is read, the
+energy it reports continues the session from where the main one left it (the two don't count from the same
+moment, nor exactly the same).
+
 Sessions created here carry external_ref "live:<charger id>:<start>", so they are recognised later.
 """
 
@@ -26,13 +32,16 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import i18n
 from .connectors import Connector, ConnectorError, LiveReading, make_connector
 from .connectors.base import CHARGING, FINISHED, OFFLINE, PAUSED, PENDING_APPROVAL, PLUGGED_IN, UNPLUGGED
+from .i18n import msg
 from .models import Charger, ChargeSession
 from .secretbox import SecretError, decrypt_json
 
 logger = logging.getLogger(__name__)
 
+PRIMARY, SECONDARY = "primary", "secondary"  # the connections of a charger: the main one, and the one read when it can't be
 PLUGGED = {CHARGING, PAUSED, PLUGGED_IN, FINISHED}  # a session can be open
 CLOSING = {UNPLUGGED, PENDING_APPROVAL}  # the car left: close the session
 RESET_TOLERANCE_KWH = 0.05  # the energy counter going down by more than this = a new session
@@ -103,12 +112,16 @@ async def finalize_closed(db: Session, c: Charger, conn: Connector) -> bool:
     return corrected
 
 
-def apply_reading(db: Session, c: Charger, r: LiveReading, now: datetime) -> str:
+def apply_reading(db: Session, c: Charger, r: LiveReading, now: datetime, source: str = PRIMARY, primary_error: str | None = None) -> str:
     """Update the charger's live state and its live session from one reading. Returns what happened.
 
-    now: local time of the reading (sessions use local dates and times)."""
+    now: local time of the reading (sessions use local dates and times).
+    source: the connection the reading comes from; primary_error: why the main one wasn't read (secondary source)."""
     previous = live_state(c)
-    state = {**asdict(r), "updated_at": now.isoformat(timespec="seconds")}
+    state = {**asdict(r), "updated_at": now.isoformat(timespec="seconds"), "source": source}
+    if source == SECONDARY:
+        state["primary_error"] = primary_error  # None: the main connection answered, but the charger is offline for it
+    switched = previous.get("source", PRIMARY) != source
     # When charging starts, remember it: the session starts then, even if no energy is reported yet
     if r.status == CHARGING:
         state["charging_since"] = previous.get("charging_since") if previous.get("status") in PLUGGED and previous.get("charging_since") else now.isoformat(timespec="seconds")
@@ -129,12 +142,30 @@ def apply_reading(db: Session, c: Charger, r: LiveReading, now: datetime) -> str
         if r.status in CLOSING:
             _close(c, state, current)
             return "closed"
+        # After a change of source, the figures of the two can't be compared: remembered until a reading has energy
+        resync = source == PRIMARY and bool(switched or previous.get("resync"))
+        offset = previous.get("offset") if source == SECONDARY and not switched else None
         if kwh <= 0:  # no energy figure in this reading (Ohme sends 0 while it recalculates): keep the session as it is
+            state.update({k: v for k, v in (("resync", resync or None), ("offset", offset)) if v is not None})
+            c.live_state = json.dumps(state)
+            return "updated"
+        if source == SECONDARY:
+            # The secondary source continues the session: what it misses of it (it counts from another moment) is added
+            state["offset"] = offset = max(0.0, round(current.kwh - kwh, 3)) if offset is None else float(offset)
+            c.live_state = json.dumps(state)
+            kwh = round(kwh + offset, 3)
+        elif resync:  # the main source is back: its figure is the one of the session
+            if kwh != current.kwh:
+                current.kwh = kwh
+                current.end_time = now.time().replace(second=0, microsecond=0)
             return "updated"
         if kwh < current.kwh - RESET_TOLERANCE_KWH:  # the counter restarted: a new session (unplug/replug not seen)
             _close(c, state, current)
             current = None
             action = "closed"
+            if state.pop("offset", None):  # the new session starts from the source's own figure
+                kwh = round(r.energy_wh / 1000, 3)
+                c.live_state = json.dumps(state)
         else:
             if kwh > current.kwh:
                 current.kwh = kwh
@@ -143,7 +174,7 @@ def apply_reading(db: Session, c: Charger, r: LiveReading, now: datetime) -> str
 
     if r.status in PLUGGED and kwh > 0:
         if c.default_car_id is None:
-            state["warning"] = "No default car on this charger: the session can't be recorded automatically"
+            state["warning"] = msg("No default car on this charger: the session can't be recorded automatically")  # shown through EV.t
             c.live_state = json.dumps(state)
             return "no_car"
         since = state.get("charging_since") if action == "idle" else None  # after a restart the new session starts now
@@ -173,25 +204,26 @@ def apply_reading(db: Session, c: Charger, r: LiveReading, now: datetime) -> str
 
 # ── Connectors (one per charger, kept between polls to reuse the login) ───────
 
-_connectors: dict[int, tuple[str, Connector]] = {}
+_connectors: dict[tuple[int, str], tuple[str, Connector]] = {}
 _locks: dict[int, asyncio.Lock] = {}
 
 
-def connector_for(c: Charger) -> Connector:
-    if not c.connector:
-        raise ConnectorError("This charger has no connection")
+def connector_for(c: Charger, source: str = PRIMARY) -> Connector:
+    kind, secret = (c.connector, c.connector_secret) if source == PRIMARY else (c.connector2, c.connector2_secret)
+    if not kind:
+        raise ConnectorError(msg("This charger has no connection"))
     try:
-        config = decrypt_json(c.connector_secret)
+        config = decrypt_json(secret)
     except SecretError as exc:
         raise ConnectorError(str(exc)) from exc
-    fingerprint = hashlib.sha256(f"{c.connector}:{c.connector_secret}".encode()).hexdigest()
-    cached = _connectors.get(c.id)
+    fingerprint = hashlib.sha256(f"{kind}:{secret}".encode()).hexdigest()
+    cached = _connectors.get((c.id, source))
     if cached and cached[0] == fingerprint:
         return cached[1]
     if cached:
         asyncio.ensure_future(cached[1].close())
-    conn = make_connector(c.connector, config)
-    _connectors[c.id] = (fingerprint, conn)
+    conn = make_connector(kind, config)
+    _connectors[(c.id, source)] = (fingerprint, conn)
     return conn
 
 
@@ -199,24 +231,36 @@ def lock_for(charger_id: int) -> asyncio.Lock:
     return _locks.setdefault(charger_id, asyncio.Lock())
 
 
-async def forget_connector(charger_id: int) -> None:
-    cached = _connectors.pop(charger_id, None)
-    if cached:
-        await cached[1].close()
+async def forget_connector(charger_id: int, source: str | None = None) -> None:
+    """Close the connection(s) of a charger: the next reading logs in again."""
+    for key in [k for k in _connectors if k[0] == charger_id and source in (None, k[1])]:
+        await _connectors.pop(key)[1].close()
 
 
 async def poll_charger(db: Session, c: Charger) -> str:
     """Read the charger once and apply the reading (commits)."""
     async with lock_for(c.id):
+        reading, source, error = None, PRIMARY, None
         try:
             reading = await connector_for(c).live()
         except ConnectorError as exc:
+            error = str(exc)
+            await forget_connector(c.id, PRIMARY)  # log in again next time
+        if c.connector2 and (reading is None or reading.status == OFFLINE):  # the main source can't tell: ask the secondary one
+            try:
+                other = await connector_for(c, SECONDARY).live()
+            except ConnectorError as exc:
+                other = None
+                logger.info("Charger %s: its secondary connection can't be read either (%s)", c.name, exc)
+                await forget_connector(c.id, SECONDARY)
+            if other is not None and (other.status != OFFLINE or reading is None):
+                reading, source = other, SECONDARY
+        if reading is None:
             c.last_poll_at = datetime.now(UTC)
-            c.last_poll_error = str(exc)[:500]
+            c.last_poll_error = i18n.store(error or "")
             db.commit()
-            await forget_connector(c.id)  # log in again next time
             return "error"
-        action = apply_reading(db, c, reading, datetime.now())
+        action = apply_reading(db, c, reading, datetime.now(), source, i18n.store(error) if error else None)
         db.commit()
         if await finalize_closed(db, c, connector_for(c)):
             action = "corrected" if action in ("idle", "updated") else action

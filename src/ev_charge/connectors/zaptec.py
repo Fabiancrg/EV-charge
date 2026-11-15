@@ -16,6 +16,7 @@ from typing import Any
 
 import aiohttp
 
+from ..i18n import msg
 from .base import CHARGING, FINISHED, OFFLINE, PLUGGED_IN, UNPLUGGED, ConnectorError, HourStat, LiveReading
 
 TOKEN_URL = "https://api.zaptec.com/oauth/token"
@@ -62,7 +63,7 @@ class ZaptecConnector:
 
     def __init__(self, config: dict[str, Any]) -> None:
         if not config.get("email") or not config.get("password"):
-            raise ConnectorError("Enter the e-mail and password of the Zaptec account")
+            raise ConnectorError(msg("Enter the e-mail and password of the Zaptec account"))
         self._config = config
         self._session: aiohttp.ClientSession | None = None
         self._token: str | None = None
@@ -83,11 +84,15 @@ class ZaptecConnector:
             async with self._http().post(self.token_url, data=data) as resp:
                 body = await resp.json(content_type=None)
                 if resp.status == 400:
-                    raise ConnectorError(f"Zaptec refused the login: {body.get('error_description') or 'check the e-mail and password'}")
+                    raise ConnectorError(
+                        msg("Zaptec refused the login: {error}", error=body["error_description"])
+                        if body.get("error_description")
+                        else msg("Zaptec refused the login: check the e-mail and password")
+                    )
                 if resp.status != 200 or not body.get("access_token"):
-                    raise ConnectorError(f"Zaptec login failed (HTTP {resp.status})")
+                    raise ConnectorError(msg("Zaptec login failed (HTTP {status})", status=resp.status))
         except aiohttp.ClientError as exc:
-            raise ConnectorError(f"Cannot reach Zaptec ({exc})") from exc
+            raise ConnectorError(msg("Cannot reach Zaptec ({error})", error=exc)) from exc
         self._token = body["access_token"]
         self._token_until = datetime.now(UTC) + timedelta(seconds=int(body.get("expires_in") or 3600) - 300)
 
@@ -100,12 +105,12 @@ class ZaptecConnector:
                     self._token = None
                     return await self._get(path, params, retry=False)
                 if resp.status == 403:
-                    raise ConnectorError("Zaptec: this account may not read this charger")
+                    raise ConnectorError(msg("Zaptec: this account may not read this charger"))
                 if resp.status != 200:
-                    raise ConnectorError(f"Zaptec: {path} answered HTTP {resp.status}")
+                    raise ConnectorError(msg("Zaptec: {path} answered HTTP {status}", path=path, status=resp.status))
                 return await resp.json(content_type=None)
         except aiohttp.ClientError as exc:
-            raise ConnectorError(f"Cannot reach Zaptec ({exc})") from exc
+            raise ConnectorError(msg("Cannot reach Zaptec ({error})", error=exc)) from exc
 
     # ── Charger and constants ─────────────────────────────────────────────
     async def _find_charger(self) -> dict[str, Any]:
@@ -113,15 +118,17 @@ class ZaptecConnector:
             body = await self._get("chargers")
             chargers = body.get("Data", body) if isinstance(body, dict) else body
             if not chargers:
-                raise ConnectorError("No charger on this Zaptec account")
+                raise ConnectorError(msg("No charger on this Zaptec account"))
             serial = (self._config.get("serial") or "").strip().upper()
             if serial:
                 found = [c for c in chargers if serial in (str(c.get("DeviceId", "")).upper(), str(c.get("Name", "")).upper())]
                 if not found:
-                    raise ConnectorError(f"No charger {serial} on this Zaptec account (found: {', '.join(str(c.get('DeviceId')) for c in chargers)})")
+                    raise ConnectorError(msg("No charger {serial} on this Zaptec account (found: {ids})", serial=serial, ids=", ".join(str(c.get("DeviceId")) for c in chargers)))
                 self._charger = found[0]
             elif len(chargers) > 1:
-                raise ConnectorError(f"This Zaptec account has {len(chargers)} chargers: enter the serial number of one ({', '.join(str(c.get('DeviceId')) for c in chargers)})")
+                raise ConnectorError(
+                    msg("This Zaptec account has {n} chargers: enter the serial number of one ({ids})", n=len(chargers), ids=", ".join(str(c.get("DeviceId")) for c in chargers))
+                )
             else:
                 self._charger = chargers[0]
         return self._charger

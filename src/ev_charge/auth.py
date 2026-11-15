@@ -21,6 +21,7 @@ from fastapi import Depends, HTTPException, Request, Response
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from . import i18n
 from .config import CONFIG
 from .database import get_db
 from .i18n import msg
@@ -226,6 +227,7 @@ class Principal:
     grants: Grants
     token: ApiToken | None = None
     session: AuthSession | None = None
+    language: str | None = None  # of the person asking: their profile, else their browser
 
     # Shortcuts used by the routes
     @property
@@ -303,7 +305,7 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> Principal:
     if p is None:
         raise HTTPException(401, msg("Sign in first"))
     request.state.principal = p  # for the audit log
-    request.state.language = p.user.language  # for the error messages
+    p.language = request.state.language = i18n.language_of(request, p.user)  # for the messages
     return p
 
 

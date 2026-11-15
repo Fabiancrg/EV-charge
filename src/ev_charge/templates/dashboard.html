@@ -95,7 +95,8 @@
             <h3><span>🔌 ${EV.esc(c.name)}</span><button class="btn btn-ghost btn-sm" data-poll="${c.id}" title="${EV.esc(EV.t('Read the charger now'))}">⟳</button></h3>
             <div class="sub">${EV.liveBadge(lv)} <span class="muted">${EV.ago(lv.updated_at)}</span>${car ? ` · ${EV.carDot(car.id)}${EV.esc(car.name)}` : ''}</div>
             ${c.last_poll_error ? `<div class="note small" style="margin-bottom:8px">⚠ ${EV.esc(c.last_poll_error)}</div>` : ''}
-            ${lv.warning ? `<div class="note small" style="margin-bottom:8px">⚠ ${EV.esc(lv.warning)}</div>` : ''}
+            ${lv.source === 'secondary' && !c.last_poll_error ? `<div class="note small" style="margin-bottom:8px">⚠ ${EV.t('Read from the secondary connection: the main one is unavailable.')}${lv.primary_error ? ` <span class="muted">${EV.esc(lv.primary_error)}</span>` : ''}</div>` : ''}
+            ${lv.warning ? `<div class="note small" style="margin-bottom:8px">⚠ ${EV.esc(EV.t(lv.warning))}</div>` : ''}
             <dl class="kv">
                 <dt>${EV.t('Power')}</dt><dd>${lv.status === 'charging' ? `${EV.num((lv.power_w || 0) / 1000, 1)} kW` : '—'}</dd>
                 <dt>${EV.t('This session')}</dt><dd>${plugged && lv.energy_wh ? EV.kwh(lv.energy_wh / 1000) : '—'}</dd>

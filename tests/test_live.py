@@ -295,3 +295,80 @@ def test_a_new_charge_after_an_unseen_unplug_is_a_new_session(client, charger):
     rows = sorted(client.get("/api/sessions").json(), key=lambda r: r["id"])
     assert [(r["kwh"], r["reimbursement_status"]) for r in rows] == [(18.4, "recorded"), (1.25, "in_progress")]
     assert rows[1]["start_time"] == "08:00:00" and rows[1]["charge_date"] == "2026-11-03"
+
+
+class FakePlug(FakeCharger):
+    """A second source for the same charger (e.g. the smart plug it is on)."""
+
+    label = "Fake plug"
+    reading = LiveReading(status="unplugged")
+    fail: str | None = None
+
+    async def describe(self):
+        return {}
+
+    async def live(self):
+        if FakePlug.fail:
+            raise ConnectorError(FakePlug.fail)
+        return FakePlug.reading
+
+
+def test_secondary_connection_takes_over_and_gives_back(client, car, charger, fake, monkeypatch):
+    monkeypatch.setitem(CONNECTORS, "plug", FakePlug)
+    FakePlug.reading, FakePlug.fail = LiveReading(status="unplugged"), None
+    cid = charger["id"]
+    credentials = {"email": "me@example.com", "password": "secret"}
+    poll = lambda: client.post(f"/api/chargers/{cid}/poll").json()  # noqa: E731
+    session = lambda: client.get("/api/sessions").json()  # noqa: E731
+
+    # A secondary connection needs a main one, and is tested like it
+    other = client.post("/api/chargers", json={"name": "Other"}).json()
+    assert client.put(f"/api/chargers/{other['id']}/connection", json={"connector": "plug", "credentials": credentials, "secondary": True}).status_code == 422
+    assert client.put(f"/api/chargers/{cid}/connection", json={"connector": "plug", "credentials": {"password": "nope"}, "secondary": True}).status_code == 422
+    r = client.put(f"/api/chargers/{cid}/connection", json={"connector": "plug", "credentials": credentials, "secondary": True}).json()
+    assert (r["connector"], r["connector2"], r["connector2_account"], r["external_id"]) == ("fake", "plug", "me@example.com", "OHME-123")
+
+    # The main connection answers: the secondary one isn't used
+    fake.reading, FakePlug.reading = LiveReading(status="charging", energy_wh=5000), LiveReading(status="charging", energy_wh=9000)
+    r = poll()
+    assert r["live"]["source"] == "primary" and session()[0]["kwh"] == 5.0
+
+    # It fails: the secondary one continues the session from where it was (it counts 4.8 kWh so far: 0.2 are added)
+    fake.fail, FakePlug.reading = "Ohme is down", LiveReading(status="charging", energy_wh=4800)
+    r = poll()
+    assert r["live"]["source"] == "secondary" and r["live"]["primary_error"] == "Ohme is down" and r["last_poll_error"] is None
+    assert [s["kwh"] for s in session()] == [5.0]
+    FakePlug.reading = LiveReading(status="charging", energy_wh=0)  # no figure in this reading: nothing changes, nothing is forgotten
+    poll()
+    FakePlug.reading = LiveReading(status="charging", energy_wh=6300)
+    poll()
+    assert [(s["kwh"], s["reimbursement_status"]) for s in session()] == [(6.5, "in_progress")]
+
+    # The main one is back, with less than the plug counted: its figure is the one of the session, not a new session
+    fake.fail, fake.reading = None, LiveReading(status="charging", energy_wh=0)
+    assert poll()["live"]["source"] == "primary" and session()[0]["kwh"] == 6.5  # no figure yet
+    fake.reading = LiveReading(status="charging", energy_wh=6100)
+    r = poll()
+    assert "primary_error" not in r["live"] and [(s["kwh"], s["reimbursement_status"]) for s in session()] == [(6.1, "in_progress")]
+    fake.reading = LiveReading(status="charging", energy_wh=7000)
+    poll()
+
+    # The charger is offline for the main one (not an error): the secondary one is asked too, and closes the session
+    fake.reading, FakePlug.reading = LiveReading(status="offline", online=False), LiveReading(status="unplugged")
+    r = poll()
+    assert r["live"]["source"] == "secondary" and r["live"]["primary_error"] is None
+    assert [(s["kwh"], s["reimbursement_status"]) for s in session()] == [(7.0, "recorded")]
+
+    # Both fail: the error of the main one is reported
+    fake.fail, FakePlug.fail = "Ohme is down", "Plug unreachable"
+    assert poll()["last_poll_error"] == "Ohme is down"
+    fake.fail = FakePlug.fail = None
+
+    # Swapping them, then removing the main one: the other takes its place
+    r = client.post(f"/api/chargers/{cid}/connection/swap").json()
+    assert (r["connector"], r["connector2"]) == ("plug", "fake")
+    r = client.put(f"/api/chargers/{cid}/connection", json={"connector": None}).json()
+    assert (r["connector"], r["connector2"], r["poll_enabled"]) == ("fake", None, True)
+    assert client.post(f"/api/chargers/{cid}/connection/swap").status_code == 422
+    r = client.put(f"/api/chargers/{cid}/connection", json={"connector": None}).json()
+    assert (r["connector"], r["poll_enabled"], r["live"]) == (None, False, None)

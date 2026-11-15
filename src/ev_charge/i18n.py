@@ -80,7 +80,9 @@ class Message(str):
     values: dict[str, Any]
 
     def __new__(cls, text: str, **values: Any) -> Message:
-        self = super().__new__(cls, translate(None, text, **values))
+        # A list is shown as "a, b"; str(exception) may be a message itself
+        values = {k: v if isinstance(v, (str, int, float)) else [str(i) for i in v] if isinstance(v, list) else str(v) for k, v in values.items()}
+        self = super().__new__(cls, translate(None, text, **{k: ", ".join(v) if isinstance(v, list) else v for k, v in values.items()}))
         self.key, self.values = text, values
         return self
 
@@ -94,12 +96,42 @@ msg = Message
 def localize(language: str | None, value: Any) -> Any:
     """The messages of a value (a message, or the lists and dicts of a response that hold some) in a language."""
     if isinstance(value, Message):
-        return translate(language, value.key, **{k: localize(language, v) for k, v in value.values.items()})
+        values = {k: localize(language, v) for k, v in value.values.items()}
+        return translate(language, value.key, **{k: ", ".join(v) if isinstance(v, list) else v for k, v in values.items()})
     if isinstance(value, list):
         return [localize(language, v) for v in value]
     if isinstance(value, dict):
         return {k: localize(language, v) for k, v in value.items()}
     return value
+
+
+_STORED = "\x1ei18n:"  # in front of a message kept in the database with what is needed to translate it later
+
+
+def store(message: str, limit: int = 2000) -> str:
+    """A message to keep (the last error of a charger…): read back with stored(), in the language of who reads it."""
+
+    def pack(value: Any) -> Any:
+        if isinstance(value, list):
+            return [pack(v) for v in value]
+        return {"k": value.key, "v": {k: pack(v) for k, v in value.values.items()}} if isinstance(value, Message) else value
+
+    packed = _STORED + json.dumps(pack(message), ensure_ascii=False)
+    return packed if isinstance(message, Message) and len(packed) <= limit else str.__str__(message)[:limit]
+
+
+def stored(language: str | None, text: str | None) -> str | None:
+    def unpack(value: Any) -> Any:
+        if isinstance(value, list):
+            return [unpack(v) for v in value]
+        return Message(value["k"], **{k: unpack(v) for k, v in value["v"].items()}) if isinstance(value, dict) else value
+
+    if not text or not text.startswith(_STORED):
+        return text
+    try:
+        return localize(language, unpack(json.loads(text[len(_STORED) :])))
+    except (ValueError, KeyError, TypeError):
+        return text[len(_STORED) :]
 
 
 def catalogue_script(language: str) -> str:

@@ -19,6 +19,11 @@
         <div class="form-error"></div>
         <p class="muted small" style="margin-bottom:12px">{{ t("EV Charge reads the charger (its cloud account, or the charger itself on your network) to follow the <b>live session</b> (a session is created when charging starts, ⏳ <i>In progress</i> while plugged in, ✓ <i>Recorded</i> once unplugged) and to import its <b>charging history</b>. The credentials are stored encrypted and checked now. <b>Zaptec</b>: official API, with the Zaptec Portal account; its history lists the exact sessions. <b>Ohme</b>: no official API, the connection uses the same unofficial API as the Ohme app and Home Assistant; its history is hourly. <b>Easee</b>: official cloud API, with the Easee app account; its history lists the exact sessions. <b>go-e</b>: official API, either on your <i>local network</i> (allow “local HTTP API v2” in the go-e app; this server must be on the same network) or through the <i>go-e Cloud</i> (serial number and Cloud API token from the app); no history. <b>NRGkick</b> (Gen2): its local JSON API only (enable it in the NRGkick app; same network); no history. <b>Home Assistant</b>: when the charger is on a smart plug, its power and energy sensors (long-lived access token from your HA profile); its history is hourly.") }}</p>
         <form id="conn-form" autocomplete="off">
+            <div id="cn-slots" style="display:flex;gap:6px;margin-bottom:6px">
+                <button type="button" class="btn btn-sm" data-slot="primary">{{ t("Main connection") }}</button>
+                <button type="button" class="btn btn-sm btn-ghost" data-slot="secondary">{{ t("Secondary connection") }}</button>
+            </div>
+            <p class="muted small" id="cn-slot-hint" style="margin-bottom:12px"></p>
             <div class="form-grid">
                 <div class="field span-all"><label>{{ t("Charger API") }}</label><select name="connector"></select></div>
                 <div id="cn-fields" class="form-grid span-all" style="grid-template-columns:1fr 1fr"></div>
@@ -26,6 +31,7 @@
             </div>
             <div class="modal-actions">
                 <button type="button" class="btn btn-danger left" id="cn-remove">{{ t("Disconnect") }}</button>
+                <button type="button" class="btn btn-ghost left" id="cn-swap" title="{{ t("The secondary connection becomes the main one, and the main one the secondary") }}">⇅ {{ t("Make it the main one") }}</button>
                 <button type="button" class="btn btn-ghost" data-close>{{ t("Cancel") }}</button>
                 <button type="submit" class="btn">🔌 {{ t("Test & save") }}</button>
             </div>
@@ -118,6 +124,8 @@
         const kind = EV.t((connectors.find(k => k.id === c.connector) || {}).label || c.connector);
         const lv = c.live;
         const parts = [`${EV.esc(kind)}${c.connector_account ? `<br><span class="muted">${EV.esc(c.connector_account)}</span>` : ''}`];
+        if (c.connector2) parts.push(`<span class="muted" title="${EV.esc(EV.t('Read when the main connection can\'t be'))}">↳ ${EV.esc(EV.t((connectors.find(k => k.id === c.connector2) || {}).label || c.connector2))}</span>`);
+        if (lv && lv.source === 'secondary' && !c.last_poll_error) parts.push(`<span class="badge badge-warn" title="${EV.esc(lv.primary_error || EV.t('The charger is offline for the main connection'))}">⚠ ${EV.t('secondary in use')}</span>`);
         if (c.last_poll_error) parts.push(`<span class="badge badge-err" title="${EV.esc(c.last_poll_error)}">⚠ ${EV.t('error')}</span>`);
         else if (lv) parts.push(`${EV.liveBadge(lv)} <span class="muted">${EV.ago(lv.updated_at)}</span>`);
         if (!c.poll_enabled) parts.push(`<span class="muted">${EV.t('not followed')}</span>`);
@@ -183,26 +191,45 @@
 
     // ── Connection to the charger's API ───────────────────────────────
     const connForm = document.getElementById('conn-form');
-    let connFor = null;
+    let connFor = null, connSlot = 'primary';
+    const slotKind = () => connSlot === 'secondary' ? connFor.connector2 : connFor.connector;
     function connFields() {
         const kind = connectors.find(k => k.id === connForm.connector.value);
-        const sameKind = connFor && connFor.connector === connForm.connector.value;
-        const stored = (sameKind && connFor.connector_settings) || {};
+        const sameKind = connFor && slotKind() === connForm.connector.value;
+        const stored = (sameKind && (connSlot === 'secondary' ? connFor.connector2_settings : connFor.connector_settings)) || {};
         document.getElementById('cn-fields').innerHTML = kind ? kind.fields.map(f => `<div class="field ${f.required ? '' : 'span-all'}"><label>${EV.esc(EV.t(f.label))}${f.required ? ' *' : ''}</label>
             <input type="${f.secret ? 'password' : 'text'}" data-cred="${f.name}" autocomplete="off" ${f.secret && sameKind ? `placeholder="${EV.esc(EV.t('unchanged'))}"` : ''}
                 value="${!f.secret ? EV.esc(stored[f.name] || '') : ''}"></div>`).join('') : '';
     }
+    function showSlot(slot) {
+        connSlot = slot;
+        const c = connFor;
+        connForm.reset();
+        document.querySelector('#conn-modal .form-error').textContent = '';
+        document.getElementById('cn-slots').style.display = c.connector ? 'flex' : 'none';  // a secondary connection needs a main one
+        document.querySelectorAll('#cn-slots [data-slot]').forEach(b => b.classList.toggle('btn-ghost', b.dataset.slot !== slot));
+        document.getElementById('cn-slot-hint').textContent = !c.connector ? ''
+            : slot === 'secondary' ? EV.t('Read when the main connection fails or says the charger is offline, e.g. the smart plug of the charger through Home Assistant. It continues the session in progress.')
+            : EV.t('The preferred source: read first, and when it answers again after a failure, the session in progress takes its figures.');
+        document.getElementById('cn-slot-hint').style.display = c.connector ? '' : 'none';
+        connForm.connector.innerHTML = connectors.map(k => `<option value="${k.id}">${EV.esc(EV.t(k.label))}</option>`).join('');
+        if (slotKind()) connForm.connector.value = slotKind();
+        connForm.poll_enabled.checked = c.connector ? c.poll_enabled : true;
+        document.getElementById('cn-remove').style.display = slotKind() ? '' : 'none';
+        document.getElementById('cn-swap').style.display = slot === 'secondary' && c.connector2 ? '' : 'none';
+        connFields();
+    }
     function openConn(c) {
         connFor = c;
-        connForm.reset();
         document.getElementById('cn-title').textContent = EV.t('Connect {name}', { name: c.name });
-        connForm.connector.innerHTML = connectors.map(k => `<option value="${k.id}">${EV.esc(EV.t(k.label))}</option>`).join('');
-        if (c.connector) connForm.connector.value = c.connector;
-        connForm.poll_enabled.checked = c.connector ? c.poll_enabled : true;
-        document.getElementById('cn-remove').style.display = c.connector ? '' : 'none';
-        connFields();
+        showSlot('primary');
         EV.openModal('conn-modal');
     }
+    document.getElementById('cn-slots').addEventListener('click', (e) => { const b = e.target.closest('[data-slot]'); if (b) showSlot(b.dataset.slot); });
+    document.getElementById('cn-swap').addEventListener('click', async () => {
+        try { await EV.api('POST', `/api/chargers/${connFor.id}/connection/swap`); EV.closeModal('conn-modal'); EV.toast(EV.t('The secondary connection is now the main one')); load(); }
+        catch (err) { EV.formError('conn-modal', err); }
+    });
     connForm.connector.addEventListener('change', connFields);
     connForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -211,7 +238,7 @@
         const btn = connForm.querySelector('button[type=submit]');
         btn.disabled = true; btn.textContent = EV.t('Connecting…');
         try {
-            const c = await EV.api('PUT', `/api/chargers/${connFor.id}/connection`, { connector: connForm.connector.value, credentials, poll_enabled: connForm.poll_enabled.checked });
+            const c = await EV.api('PUT', `/api/chargers/${connFor.id}/connection`, { connector: connForm.connector.value, credentials, poll_enabled: connForm.poll_enabled.checked, secondary: connSlot === 'secondary' });
             EV.closeModal('conn-modal');
             EV.toast(EV.t('{name} connected', { name: c.name }) + (c.external_id ? ` (${EV.t('serial {serial}', { serial: c.external_id })})` : ''));
             if (c.poll_enabled) await EV.api('POST', `/api/chargers/${c.id}/poll`).catch(() => {});
@@ -220,8 +247,11 @@
         finally { btn.disabled = false; btn.textContent = `🔌 ${EV.t('Test & save')}`; }
     });
     document.getElementById('cn-remove').addEventListener('click', async () => {
-        if (!confirm(EV.t('Disconnect {name}? The stored credentials are deleted; recorded sessions are kept.', { name: connFor.name }))) return;
-        try { await EV.api('PUT', `/api/chargers/${connFor.id}/connection`, { connector: null }); EV.closeModal('conn-modal'); EV.toast(EV.t('Disconnected')); load(); }
+        const question = connSlot === 'secondary' ? EV.t('Remove the secondary connection of {name}?', { name: connFor.name })
+            : connFor.connector2 ? EV.t('Remove the main connection of {name}? Its secondary connection becomes the main one.', { name: connFor.name })
+            : EV.t('Disconnect {name}? The stored credentials are deleted; recorded sessions are kept.', { name: connFor.name });
+        if (!confirm(question)) return;
+        try { await EV.api('PUT', `/api/chargers/${connFor.id}/connection`, { connector: null, secondary: connSlot === 'secondary' }); EV.closeModal('conn-modal'); EV.toast(EV.t('Disconnected')); load(); }
         catch (err) { EV.formError('conn-modal', err); }
     });
 

@@ -17,6 +17,7 @@ from typing import Any
 
 import aiohttp
 
+from ..i18n import msg
 from .base import CHARGING, FINISHED, OFFLINE, PENDING_APPROVAL, PLUGGED_IN, UNPLUGGED, ConnectorError, HourStat, LiveReading
 
 BASE_URL = "https://api.easee.com"
@@ -59,7 +60,7 @@ class EaseeConnector:
 
     def __init__(self, config: dict[str, Any]) -> None:
         if not config.get("username") or not config.get("password"):
-            raise ConnectorError("Enter the user name and password of the Easee account")
+            raise ConnectorError(msg("Enter the user name and password of the Easee account"))
         self._config = config
         self._session: aiohttp.ClientSession | None = None
         self._token: dict[str, Any] | None = None
@@ -78,12 +79,14 @@ class EaseeConnector:
                 body = await resp.json(content_type=None) if resp.status == 200 else None
                 status = resp.status
         except (aiohttp.ClientError, TimeoutError) as exc:
-            raise ConnectorError(f"Cannot reach Easee ({str(exc) or type(exc).__name__})") from exc
+            raise ConnectorError(msg("Cannot reach Easee ({error})", error=str(exc) or type(exc).__name__)) from exc
         except ValueError:
             body, status = None, 200
         if not isinstance(body, dict) or not body.get("accessToken"):
             if path == "login":
-                raise ConnectorError("Easee refused the login: check the user name and password" if status in (400, 401) else f"Easee login failed (HTTP {status})")
+                raise ConnectorError(
+                    msg("Easee refused the login: check the user name and password") if status in (400, 401) else msg("Easee login failed (HTTP {status})", status=status)
+                )
             return False
         self._token = body
         self._token_until = datetime.now(UTC) + timedelta(seconds=max(60, int(_number(body.get("expiresIn")) or 3600) - 60))
@@ -106,30 +109,30 @@ class EaseeConnector:
                     self._token = None
                     return await self._get(path, retry=False)
                 if resp.status == 403:
-                    raise ConnectorError("Easee: this account may not read this charger")
+                    raise ConnectorError(msg("Easee: this account may not read this charger"))
                 if resp.status == 429:
-                    raise ConnectorError("Easee: too many requests for now (its API is rate limited); try again in a few minutes")
+                    raise ConnectorError(msg("Easee: too many requests for now (its API is rate limited); try again in a few minutes"))
                 if resp.status != 200:
-                    raise ConnectorError(f"Easee: {path.split('?')[0]} answered HTTP {resp.status}")
+                    raise ConnectorError(msg("Easee: {path} answered HTTP {status}", path=path.split("?")[0], status=resp.status))
                 return await resp.json(content_type=None)
         except (aiohttp.ClientError, TimeoutError) as exc:
-            raise ConnectorError(f"Cannot reach Easee ({str(exc) or type(exc).__name__})") from exc
+            raise ConnectorError(msg("Cannot reach Easee ({error})", error=str(exc) or type(exc).__name__)) from exc
 
     # ── Charger ───────────────────────────────────────────────────────────
     async def _find_charger(self) -> dict[str, Any]:
         if self._charger is None:
             chargers = await self._get("/api/chargers")
             if not chargers:
-                raise ConnectorError("No charger on this Easee account")
+                raise ConnectorError(msg("No charger on this Easee account"))
             ids = ", ".join(str(c.get("id")) for c in chargers)
             serial = (self._config.get("serial") or "").strip().upper()
             if serial:
                 found = [c for c in chargers if serial in (str(c.get("id", "")).upper(), str(c.get("name", "")).upper())]
                 if not found:
-                    raise ConnectorError(f"No charger {serial} on this Easee account (found: {ids})")
+                    raise ConnectorError(msg("No charger {serial} on this Easee account (found: {ids})", serial=serial, ids=ids))
                 self._charger = found[0]
             elif len(chargers) > 1:
-                raise ConnectorError(f"This Easee account has {len(chargers)} chargers: enter the serial number of one ({ids})")
+                raise ConnectorError(msg("This Easee account has {n} chargers: enter the serial number of one ({ids})", n=len(chargers), ids=ids))
             else:
                 self._charger = chargers[0]
         return self._charger
@@ -144,7 +147,7 @@ class EaseeConnector:
         body = await self._get(f"/state/{charger['id']}/observations?ids={OP_MODE},{TOTAL_POWER},{SESSION_ENERGY}")
         observations = body.get("observations") if isinstance(body, dict) else None
         if not isinstance(observations, list):
-            raise ConnectorError("Easee: unexpected answer to the charger's state")
+            raise ConnectorError(msg("Easee: unexpected answer to the charger's state"))
         values = {int(_number(o.get("id"))): o.get("value") for o in observations if isinstance(o, dict)}
         if OP_MODE not in values:
             return LiveReading(status=OFFLINE, online=False)  # the charger never reported: not installed or offline
