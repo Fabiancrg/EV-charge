@@ -77,6 +77,14 @@ class CarOut(CarIn):
     last_odometer: int | None = None
     last_charge_date: date | None = None
     lease: LeaseStatus | None = None
+    odometer_source: dict[str, str] | None = None  # Home Assistant's address and the sensor the odometer is read from (never the token)
+    odometer_error: str | None = None  # why the last reading failed
+
+
+class OdometerSource(BaseModel):
+    url: str = Field(default="", max_length=300)  # empty url and token: those of a charger of the group connected to Home Assistant
+    token: str = Field(default="", max_length=2000)  # empty: keep the stored one
+    entity: str = Field(default="", max_length=200)
 
 
 ReimbursementStatus = Literal["in_progress", "not_recorded", "recorded", "invoiced", "paid"]

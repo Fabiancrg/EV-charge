@@ -12,6 +12,26 @@
     <div class="table-wrap" id="cars-table"><p class="muted">{{ t("Loading…") }}</p></div>
 </div>
 
+<div class="modal" id="odo-modal">
+    <div class="modal-box" style="max-width:560px">
+        <h3><span id="od-title">{{ t("Odometer") }}</span><button class="icon-btn" data-close title="{{ t("Close") }}">✕</button></h3>
+        <div class="form-error"></div>
+        <p class="muted small" style="margin-bottom:12px">{{ t("Home Assistant has an integration for most car makes, and shows the mileage of the car as a sensor. Give that sensor here: the <b>odometer</b> is then written by itself on the sessions recorded from a charger (when the charge starts, and again when it ends if that failed), and the session form can fetch it. A reading lower than the car's last one is not written. The access token is stored encrypted.") }}</p>
+        <form id="odo-form" autocomplete="off">
+            <div class="form-grid">
+                <div class="field span-all"><label>{{ t("Odometer sensor") }} *</label><input type="text" name="entity" required placeholder="sensor.my_car_odometer"><div class="hint">{{ t("A sensor in km or miles") }}</div></div>
+                <div class="field span-all"><label>{{ t("Home Assistant URL") }}</label><input type="text" name="url" placeholder="http://homeassistant.local:8123"><div class="hint" id="od-shared">{{ t("Leave the address and the token empty to use those of a charger of the group connected to Home Assistant") }}</div></div>
+                <div class="field span-all"><label>{{ t("Long-lived access token") }}</label><input type="password" name="token" autocomplete="off"></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-danger left" id="od-remove">{{ t("Stop reading it") }}</button>
+                <button type="button" class="btn btn-ghost" data-close>{{ t("Cancel") }}</button>
+                <button type="submit" class="btn">🔌 {{ t("Test & save") }}</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <div class="modal" id="car-modal">
     <div class="modal-box">
         <h3><span id="cf-title">{{ t("Car") }}</span><button class="icon-btn" data-close title="{{ t("Close") }}">✕</button></h3>
@@ -101,12 +121,14 @@
                 <td class="hide-sm">${EV.esc(c.license_plate || '')}</td>
                 <td class="num hide-sm">${c.battery_kwh ? EV.num(c.battery_kwh, 1) + ' kWh' : '—'}</td>
                 <td class="hide-sm">${c.lease_start ? `${EV.date(c.lease_start)} → ${EV.date(c.lease_end)}${c.lease_km_per_year ? `<br><span class="muted small">${EV.t('{km}/year', { km: EV.km(c.lease_km_per_year) })}${c.lease_company ? ' · ' + EV.esc(c.lease_company) : ''}</span>` : ''}` : '—'}</td>
-                <td class="num">${EV.km(c.last_odometer)}</td>
+                <td class="num">${EV.km(c.last_odometer)}${!c.odometer_source ? '' : c.odometer_error
+                    ? `<br><span class="badge badge-err" title="${EV.esc(c.odometer_error)}">⚠ Home Assistant</span>` : `<br><span class="muted small" title="${EV.esc(EV.t('Read from Home Assistant when a charge is recorded from a charger'))}">🔌 Home Assistant</span>`}</td>
                 <td class="num hide-sm">${EV.num(c.session_count)}</td>
                 <td class="hide-sm small">${c.drivers.map(EV.esc).join('<br>') || '<span class="muted">—</span>'}</td>
                 <td>${c.active ? `<span class="badge badge-ok">${EV.t('Active')}</span>` : `<span class="badge badge-warn">${EV.t('Inactive')}</span>`}${c.active && c.lease_end && c.lease_end < EV.today()
                     ? `<br><span class="badge badge-warn" title="${EV.esc(EV.t('The lease is over: once the car is returned, edit it and untick Active to put it away'))}">⚠ ${EV.t('Lease ended')}</span>` : ''}</td>
-                <td>${EV.canCar('car:edit', c.id) ? `<button class="btn btn-ghost btn-sm" data-edit="${c.id}">✏ ${EV.t('Edit')}</button>` : `<button class="btn btn-ghost btn-sm" data-edit="${c.id}">👁 ${EV.t('View')}</button>`}</td>
+                <td>${EV.canCar('car:edit', c.id) ? `<button class="btn btn-ghost btn-sm" data-edit="${c.id}">✏ ${EV.t('Edit')}</button>
+                    <button class="btn btn-ghost btn-sm" data-odo="${c.id}" title="${EV.esc(EV.t('Read the odometer from Home Assistant'))}">🔌</button>` : `<button class="btn btn-ghost btn-sm" data-edit="${c.id}">👁 ${EV.t('View')}</button>`}</td>
             </tr>`).join('')}</tbody></table>`;
     }
 
@@ -136,6 +158,39 @@
     document.getElementById('cars-table').addEventListener('click', (e) => {
         const b = e.target.closest('[data-edit]');
         if (b) open(cars.find(c => c.id === Number(b.dataset.edit)));
+        const o = e.target.closest('[data-odo]');
+        if (o) openOdo(cars.find(c => c.id === Number(o.dataset.odo)));
+    });
+
+    // ── Odometer read from Home Assistant ─────────────────────────────
+    const odoForm = document.getElementById('odo-form');
+    let odoFor = null;
+    function openOdo(c) {
+        odoFor = c;
+        const source = c.odometer_source || {};
+        odoForm.reset();
+        document.querySelector('#odo-modal .form-error').textContent = '';
+        document.getElementById('od-title').textContent = EV.t('Odometer of {name}', { name: c.name });
+        odoForm.entity.value = source.entity || '';
+        odoForm.url.value = source.url || '';
+        odoForm.token.placeholder = c.odometer_source ? EV.t('unchanged') : '';
+        document.getElementById('od-shared').style.display = c.odometer_source ? 'none' : '';
+        document.getElementById('od-remove').style.display = c.odometer_source ? '' : 'none';
+        EV.openModal('odo-modal');
+    }
+    odoForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = odoForm.querySelector('button[type=submit]');
+        btn.disabled = true; btn.textContent = EV.t('Reading…');
+        try {
+            const r = await EV.api('PUT', `/api/cars/${odoFor.id}/odometer-source`, { entity: odoForm.entity.value, url: odoForm.url.value, token: odoForm.token.value });
+            EV.closeModal('odo-modal'); EV.toast(EV.t('Saved: the odometer is {km} now', { km: EV.km(r.odometer) })); load();
+        } catch (err) { EV.formError('odo-modal', err); }
+        finally { btn.disabled = false; btn.textContent = `🔌 ${EV.t('Test & save')}`; }
+    });
+    document.getElementById('od-remove').addEventListener('click', async () => {
+        try { await EV.api('DELETE', `/api/cars/${odoFor.id}/odometer-source`); EV.closeModal('odo-modal'); EV.toast(EV.t('The odometer is no longer read from Home Assistant')); load(); }
+        catch (err) { EV.formError('odo-modal', err); }
     });
     document.addEventListener('ev:themechange', render);
     load().then(() => { if (EV.canAdd('cars:manage') && new URLSearchParams(location.search).has('new')) open(null); });

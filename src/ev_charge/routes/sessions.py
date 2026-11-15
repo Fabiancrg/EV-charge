@@ -158,6 +158,7 @@ def suggestions(car_id: int | None = None, user: Principal = Depends(current_use
         "last_odometer": last_odo.odometer if last_odo else None,
         "last_odometer_date": last_odo.charge_date.isoformat() if last_odo else None,
         "last_used_car_id": last_car.car_id if last_car else None,
+        "odometer_source": bool(car_id and (car := db.get(Car, car_id)) and car.odometer_secret),  # the form can fetch the odometer
     }
 
 

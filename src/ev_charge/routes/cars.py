@@ -6,14 +6,24 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .. import odometer
 from ..auth import Principal, check_car_access, check_group_manager, current_user, target_group
 from ..database import get_db
 from ..i18n import msg
 from ..models import Car, Charger, ChargeSession
-from ..schemas import CarIn, CarOut
+from ..schemas import CarIn, CarOut, OdometerSource
+from ..secretbox import SecretError, decrypt_json, encrypt_json
 from ..services import car_out
 
 router = APIRouter(prefix="/api/cars", tags=["cars"])
+
+
+def _out(db: Session, car: Car, user: Principal) -> CarOut:
+    out = car_out(db, car, language=user.language)
+    if not user.can("car:edit", car.id):  # where the odometer is read from: for who may change it
+        out.odometer_source = {} if out.odometer_source else None
+        out.odometer_error = None
+    return out
 
 
 def _get(db: Session, car_id: int) -> Car:
@@ -40,14 +50,14 @@ def list_cars(active_only: bool = False, user: Principal = Depends(current_user)
         query = query.where(Car.id.in_(scope))
     if active_only:
         query = query.where(Car.active.is_(True))
-    return [car_out(db, c) for c in db.scalars(query)]
+    return [_out(db, c, user) for c in db.scalars(query)]
 
 
 @router.get("/{car_id}", response_model=CarOut)
 def get_car(car_id: int, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> CarOut:
     car = _get(db, car_id)
     check_car_access(user, car_id)
-    return car_out(db, car)
+    return _out(db, car, user)
 
 
 @router.post("", response_model=CarOut, status_code=201)
@@ -57,7 +67,7 @@ def create_car(body: CarIn, user: Principal = Depends(current_user), db: Session
     db.add(car)
     _save(db, car)
     db.refresh(car)
-    return car_out(db, car)
+    return _out(db, car, user)
 
 
 @router.put("/{car_id}", response_model=CarOut)
@@ -72,7 +82,7 @@ def update_car(car_id: int, body: CarIn, user: Principal = Depends(current_user)
         setattr(car, key, value)
     _save(db, car)
     db.refresh(car)
-    return car_out(db, car)
+    return _out(db, car, user)
 
 
 @router.delete("/{car_id}", status_code=204)
@@ -89,3 +99,67 @@ def delete_car(car_id: int, user: Principal = Depends(current_user), db: Session
     db.delete(car)
     db.commit()
     return Response(status_code=204)
+
+
+# ── Odometer read from Home Assistant ────────────────────────────────────────
+
+
+def _home_assistant_of_group(db: Session, group_id: int | None) -> dict[str, str] | None:
+    """The address and token of Home Assistant, from a charger of the group that is connected to it."""
+    for c in db.scalars(select(Charger).where(Charger.group_id == group_id).order_by(Charger.id)):
+        for kind, secret in ((c.connector, c.connector_secret), (c.connector2, c.connector2_secret)):
+            if kind == "homeassistant":
+                try:
+                    config = decrypt_json(secret)
+                except SecretError:
+                    continue
+                if config.get("url") and config.get("token"):
+                    return {"url": config["url"], "token": config["token"]}
+    return None
+
+
+@router.put("/{car_id}/odometer-source")
+async def set_odometer_source(car_id: int, body: OdometerSource, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    """Read the car's odometer from a Home Assistant sensor: tested now, the token is stored encrypted.
+
+    Without address and token, those of a charger of the group connected to Home Assistant are used."""
+    car = _get(db, car_id)
+    check_car_access(user, car_id, "car:edit")
+    stored = odometer.settings(car) or {}
+    url, token = body.url.strip(), body.token.strip()
+    if not url and not token and not stored:
+        shared = _home_assistant_of_group(db, car.group_id)
+        if shared is None:
+            raise HTTPException(422, msg("Enter the address of Home Assistant and an access token (no charger of the group is connected to Home Assistant)"))
+        url, token = shared["url"], shared["token"]
+    try:
+        config = odometer.clean(url or stored.get("url", ""), token or stored.get("token", ""), body.entity)
+        km = await odometer.read(config)
+    except odometer.OdometerError as e:
+        raise HTTPException(422, str(e)) from None
+    car.odometer_secret, car.odometer_error = encrypt_json(config), None
+    db.commit()
+    return {"odometer": km, "car": _out(db, car, user)}
+
+
+@router.delete("/{car_id}/odometer-source", response_model=CarOut)
+def remove_odometer_source(car_id: int, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> CarOut:
+    car = _get(db, car_id)
+    check_car_access(user, car_id, "car:edit")
+    car.odometer_secret = car.odometer_error = None
+    db.commit()
+    return _out(db, car, user)
+
+
+@router.get("/{car_id}/odometer")
+async def read_odometer(car_id: int, user: Principal = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, int]:
+    """The car's odometer now, from Home Assistant (for the session form)."""
+    car = _get(db, car_id)
+    check_car_access(user, car_id)
+    config = odometer.settings(car)
+    if config is None:
+        raise HTTPException(422, msg("The odometer of this car isn't read from Home Assistant"))
+    try:
+        return {"odometer": await odometer.read(config)}
+    except odometer.OdometerError as e:
+        raise HTTPException(502, str(e)) from None

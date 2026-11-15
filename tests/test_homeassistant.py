@@ -13,6 +13,7 @@ from ev_charge.connectors.homeassistant import HomeAssistantConnector, current_s
 
 POWER, ENERGY = "sensor.carplug2_relay_power", "sensor.ve_plug_2_energy_daily"
 TOKEN = "ha-token"
+ODOMETER = "sensor.ev6_odometer"
 
 
 def iso(dt):
@@ -23,6 +24,7 @@ class FakeHA:
     def __init__(self):
         self.now = datetime.now(UTC).replace(microsecond=0)
         self.power = "2190"
+        self.odometer, self.odometer_unit = "23456.4", "km"
         # The plug's daily meter: standby 3 h ago, then charging for 40 min at ~2.4 kW, through a midnight reset
         self.energy_rows = [(self.now - timedelta(hours=5), 9.70), (self.now - timedelta(hours=3), 9.71)]
         value = 9.71
@@ -62,6 +64,8 @@ class FakeHA:
         if entity == ENERGY:
             t, v = self.energy_rows[-1]
             return web.json_response({"entity_id": ENERGY, "state": str(v), "last_changed": iso(t), "attributes": {"unit_of_measurement": "kWh"}})
+        if entity == ODOMETER:
+            return web.json_response({"entity_id": ODOMETER, "state": self.odometer, "attributes": {"unit_of_measurement": self.odometer_unit}})
         return web.json_response({"message": "Entity not found."}, status=404)
 
     async def history(self, request):
@@ -231,3 +235,55 @@ def test_home_assistant_end_to_end(client, car, ha):
     assert s["kwh"] == pytest.approx(1.6, abs=0.002) and s["reimbursement_status"] == "in_progress"
     started = (ha.now - timedelta(minutes=40)).astimezone().replace(tzinfo=None)
     assert s["start_time"][:5] in {(started + timedelta(minutes=d)).strftime("%H:%M") for d in (-1, 0, 1)}  # when charging started, not the first poll
+
+
+def test_odometer_of_a_car_from_home_assistant(client, ha):
+    from ev_charge import odometer
+    from ev_charge.database import SessionLocal
+    from ev_charge.models import Car, ChargeSession
+
+    car = client.post("/api/cars", json={"name": "EV6"}).json()
+    put = lambda body: client.put(f"/api/cars/{car['id']}/odometer-source", json=body)  # noqa: E731
+    # Tested when saved; nothing to reuse yet
+    assert put({"entity": ODOMETER}).status_code == 422
+    assert put({"entity": ODOMETER, "url": ha.url, "token": "wrong"}).json()["detail"] == "Home Assistant refused the access token"
+    assert "no entity sensor.nope" in put({"entity": "sensor.nope", "url": ha.url, "token": TOKEN}).json()["detail"]
+    assert "not a distance" in put({"entity": POWER, "url": ha.url, "token": TOKEN}).json()["detail"]
+    # The address and token of a charger of the group connected to Home Assistant are used when none is given
+    charger = client.post("/api/chargers", json={"name": "Plug", "default_car_id": car["id"]}).json()
+    assert client.put(f"/api/chargers/{charger['id']}/connection", json={"connector": "homeassistant", "credentials": config(ha), "poll_enabled": False}).status_code == 200
+    saved = put({"entity": ODOMETER})
+    assert saved.status_code == 200 and saved.json()["odometer"] == 23456
+    shown = client.get(f"/api/cars/{car['id']}").json()
+    assert shown["odometer_source"] == {"url": ha.url, "entity": ODOMETER} and shown["odometer_error"] is None and TOKEN not in str(shown)
+    assert client.get(f"/api/sessions/suggestions?car_id={car['id']}").json()["odometer_source"] is True
+    # Changing the sensor keeps the stored token; miles are converted
+    ha.odometer, ha.odometer_unit = "10000", "mi"
+    assert put({"entity": ODOMETER, "url": ha.url}).json()["odometer"] == 16093
+    assert client.get(f"/api/cars/{car['id']}/odometer").json() == {"odometer": 16093}
+
+    # Written on a session without odometer; never lower than the last reading; the error is kept on the car
+    first = client.post("/api/sessions", json={"car_id": car["id"], "charge_date": "2026-11-01", "kwh": 10}).json()
+    second = client.post("/api/sessions", json={"car_id": car["id"], "charge_date": "2026-11-02", "kwh": 12}).json()
+
+    def fill(session_id):
+        db = SessionLocal()
+        try:
+            written = run(odometer.fill(db, db.get(ChargeSession, session_id)))
+            db.commit()
+            return written, db.get(Car, car["id"]).odometer_error
+        finally:
+            db.close()
+
+    assert fill(first["id"]) == (True, None) and client.get(f"/api/sessions/{first['id']}").json()["odometer"] == 16093
+    assert fill(first["id"])[0] is False  # already has one
+    ha.odometer, ha.odometer_unit = "15000", "km"
+    assert fill(second["id"])[0] is False and client.get(f"/api/sessions/{second['id']}").json()["odometer"] is None
+    assert "less than the last reading of the car (16093 km)" in client.get(f"/api/cars/{car['id']}").json()["odometer_error"]
+    ha.odometer = "unavailable"  # the car is asleep and its integration has nothing
+    assert fill(second["id"])[0] is False and "has no value for now (unavailable)" in client.get(f"/api/cars/{car['id']}").json()["odometer_error"]
+    ha.odometer = "16200"
+    assert fill(second["id"]) == (True, None) and client.get(f"/api/sessions/{second['id']}").json()["odometer"] == 16200
+
+    assert client.delete(f"/api/cars/{car['id']}/odometer-source").json()["odometer_source"] is None
+    assert client.get(f"/api/cars/{car['id']}/odometer").status_code == 422

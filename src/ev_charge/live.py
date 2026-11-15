@@ -32,7 +32,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import i18n
+from . import i18n, odometer
 from .connectors import Connector, ConnectorError, LiveReading, make_connector
 from .connectors.base import CHARGING, FINISHED, OFFLINE, PAUSED, PENDING_APPROVAL, PLUGGED_IN, UNPLUGGED
 from .i18n import msg
@@ -262,6 +262,12 @@ async def poll_charger(db: Session, c: Charger) -> str:
             return "error"
         action = apply_reading(db, c, reading, datetime.now(), source, i18n.store(error) if error else None)
         db.commit()
+        if action in ("created", "restarted", "closed"):  # the car's odometer, when it is read from Home Assistant
+            closed = db.get(ChargeSession, (live_state(c).get("finalize") or {}).get("id") or 0) if action != "created" else None
+            for s in (closed, open_session(db, c) if action != "closed" else None):
+                if s is not None:
+                    await odometer.fill(db, s)
+            db.commit()
         if await finalize_closed(db, c, connector_for(c)):
             action = "corrected" if action in ("idle", "updated") else action
         db.commit()

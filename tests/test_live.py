@@ -6,7 +6,7 @@ from ev_charge import live
 from ev_charge.connectors import CONNECTORS, ConnectorError, HourStat, LiveReading
 from ev_charge.database import SessionLocal
 from ev_charge.history import rebuild_sessions
-from ev_charge.models import Charger
+from ev_charge.models import Car, Charger
 from ev_charge.secretbox import decrypt_json
 
 
@@ -372,3 +372,40 @@ def test_secondary_connection_takes_over_and_gives_back(client, car, charger, fa
     assert client.post(f"/api/chargers/{cid}/connection/swap").status_code == 422
     r = client.put(f"/api/chargers/{cid}/connection", json={"connector": None}).json()
     assert (r["connector"], r["poll_enabled"], r["live"]) == (None, False, None)
+
+
+def test_odometer_is_written_when_a_charge_is_recorded(client, car, charger, fake, monkeypatch):
+    from ev_charge import odometer
+    from ev_charge.secretbox import encrypt_json
+
+    db = SessionLocal()
+    db.get(Car, car["id"]).odometer_secret = encrypt_json({"url": "http://ha.local:8123", "token": "t", "entity": "sensor.odo"})
+    db.commit()
+    db.close()
+    readings = iter([odometer.OdometerError("Home Assistant is restarting"), 20500, 20500])
+
+    async def read(config):
+        value = next(readings)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    monkeypatch.setattr(odometer, "read", read)
+    poll = lambda: client.post(f"/api/chargers/{charger['id']}/poll")  # noqa: E731
+    # When the charge starts: the reading fails, the session is recorded all the same
+    fake.reading = LiveReading(status="charging", energy_wh=1000)
+    poll()
+    assert client.get("/api/sessions").json()[0]["odometer"] is None and client.get(f"/api/cars/{car['id']}").json()["odometer_error"] == "Home Assistant is restarting"
+    fake.reading = LiveReading(status="charging", energy_wh=3000)
+    poll()  # nothing is read while it charges
+    # When it ends: read again
+    fake.reading = LiveReading(status="unplugged")
+    poll()
+    s = client.get("/api/sessions").json()[0]
+    assert (s["odometer"], s["kwh"], s["reimbursement_status"]) == (20500, 3.0, "recorded") and client.get(f"/api/cars/{car['id']}").json()["odometer_error"] is None
+    # The next charge has it from its start, and it isn't read again at its end
+    fake.reading = LiveReading(status="charging", energy_wh=500)
+    poll()
+    fake.reading = LiveReading(status="unplugged")
+    poll()
+    assert [x["odometer"] for x in client.get("/api/sessions").json()] == [20500, 20500]
