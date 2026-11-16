@@ -211,6 +211,9 @@ A charger can be connected to its cloud account, or read directly on your networ
   - Ohme has no public API. EV Charge uses the open-source [`ohme`](https://github.com/dan-r/ohmepy) library (MIT), the one behind the Home Assistant integration.
   - It logs in with the **Ohme app e-mail and password**; one Ohme account is one charger.
   - The API is unofficial, so Ohme can change it at any time. A broken connection shows its error on the Chargers page and the dashboard; sessions can still be entered by hand.
+  - **Live state:** status, power and the car's battery level. Ohme's API has no energy figure for the session (its `batterySoc.wh` is the energy in the car's battery), so the session's energy is **estimated** from the power and the time between readings (shown with ≈). Readings more than 15 minutes apart (EV Charge stopped, Ohme unreachable) add nothing for the time in between.
+  - **End of a session:** the session takes the energy of the hours of Ohme's history it covers, read again a few times over the next two hours as the last hour fills in. If that history has nothing, the secondary connection's history is used, when there is one. Ohme's history is per hour, so a session that shares its first hour with the end of another charge includes that charge's energy too.
+  - **History:** the energy per hour.
 - **Easee** (Home, Charge, Charge Lite…):
   - Uses Easee's **official cloud API** ([developer.easee.com](https://developer.easee.com)) with the Easee app account (e-mail or phone number, and password). Easee chargers have no local API.
   - If the account holds several chargers, give the serial number (e.g. `EH123456`).

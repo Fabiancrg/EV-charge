@@ -34,7 +34,7 @@ class FakeCharger:
         return FakeCharger.reading
 
     async def history(self, start, end):
-        return [h for h in FakeCharger.stats if start <= h.start < end]
+        return [h for h in type(self).stats if start <= h.start < end]
 
     async def close(self):
         pass
@@ -230,15 +230,15 @@ def test_ohme_connector_maps_the_library(monkeypatch):
 
     info, reading, stats, calls = asyncio.run(run())
     assert info == {"serial": "OH123", "model": "Ohme Home/Go", "firmware": "1.2"}
-    assert (reading.status, reading.power_w, reading.energy_wh, reading.battery_pct) == ("charging", 7100, 4321.0, 72)
+    assert (reading.status, reading.power_w, reading.energy_wh, reading.battery_pct) == ("charging", 7100, 0.0, 72)  # estimated, see below
     assert len(calls) == 2 and calls[0][2] == ohme.SummaryGranularity.HOUR  # 14 days = 2 weekly requests
     assert len(stats) == 2 and stats[0].energy_wh == 6500  # empty hours dropped
     with pytest.raises(ConnectorError):
         OhmeConnector({"email": "a@b.c"})
 
 
-def test_ohme_reads_the_session_energy_not_the_library_maximum(monkeypatch):
-    """The ohme library keeps max(energy seen); a new session must not start with the previous one's energy."""
+def test_ohme_does_not_take_the_battery_energy_as_the_session_energy(monkeypatch):
+    """batterySoc.wh (the library's energy) is the energy in the car's battery: the reading says it must be estimated."""
     import asyncio
 
     import ohme
@@ -247,11 +247,11 @@ def test_ohme_reads_the_session_energy_not_the_library_maximum(monkeypatch):
 
     class Client:
         def __init__(self, email, password):
-            self.serial, self.device_info, self.available, self.battery = "OH1", {}, True, 50
-            self.energy = 18_400.0  # the library's carried maximum, from the previous session
+            self.serial, self.device_info, self.available, self.battery = "OH1", {}, True, 75
+            self.energy = 10_350.0  # what is in the battery, not what this charge delivered
             self.status, self.mode = ohme.ChargerStatus.CHARGING, None
-            self.power = ohme.ChargerPower(watts=7000, amps=30, volts=230)
-            self._charge_session = {"mode": "SMART_CHARGE", "batterySoc": {"wh": 1_250, "percent": 50}}
+            self.power = ohme.ChargerPower(watts=2000, amps=9, volts=230)
+            self._charge_session = {"mode": "SMART_CHARGE", "batterySoc": {"wh": 10_350, "percent": 75}}
 
         async def async_login(self):
             return True
@@ -266,21 +266,86 @@ def test_ohme_reads_the_session_energy_not_the_library_maximum(monkeypatch):
             pass
 
     monkeypatch.setattr(ohme, "OhmeApiClient", Client)
-    conn = OhmeConnector({"email": "a@b.c", "password": "x"})
+    reading = asyncio.run(OhmeConnector({"email": "a@b.c", "password": "x"}).live())
+    assert reading.energy_wh == 0.0 and reading.energy_from_power and reading.power_w == 2000 and reading.battery_pct == 75
+    assert OhmeConnector.estimates_energy
 
-    async def run():
-        first = await conn.live()
-        conn._client.status = ohme.ChargerStatus.UNPLUGGED
-        unplugged = await conn.live()
-        conn._client.status = ohme.ChargerStatus.CHARGING
-        conn._client._charge_session = {"mode": "SMART_CHARGE"}  # no batterySoc: falls back to the library value
-        fallback = await conn.live()
-        return first, unplugged, fallback
 
-    first, unplugged, fallback = asyncio.run(run())
-    assert first.energy_wh == 1250.0  # not 18 400
-    assert unplugged.energy_wh == 0.0
-    assert fallback.energy_wh == 18_400.0
+def _estimated(**kw):
+    return LiveReading(energy_from_power=True, **kw)
+
+
+def test_session_energy_estimated_from_the_power(client, charger):
+    cid, t0 = charger["id"], datetime(2026, 11, 16, 9, 0)
+    assert _apply(cid, _estimated(status="plugged_in"), t0) == "idle"
+    assert _apply(cid, _estimated(status="charging", power_w=2000), t0 + timedelta(minutes=1)) == "created"
+    s = client.get("/api/sessions").json()[0]
+    assert s["start_time"] == "09:01:00" and s["kwh"] == 0.017  # from 0 to 2 kW in that minute: 1 kW on average
+    for m in range(2, 12):
+        _apply(cid, _estimated(status="charging", power_w=2000), t0 + timedelta(minutes=m))
+    live_state = client.get("/api/chargers").json()[0]["live"]
+    assert client.get("/api/sessions").json()[0]["kwh"] == 0.35 and round(live_state["energy_wh"]) == 350 and live_state["energy_from_power"]
+    # The charger offline: the figure is kept, nothing is added for that time
+    assert _apply(cid, _estimated(status="offline", online=False), t0 + timedelta(minutes=30)) == "offline"
+    assert round(client.get("/api/chargers").json()[0]["live"]["energy_wh"]) == 350
+    _apply(cid, _estimated(status="charging", power_w=2000), t0 + timedelta(minutes=40))
+    _apply(cid, _estimated(status="charging", power_w=2000), t0 + timedelta(minutes=46))
+    s = client.get("/api/sessions").json()[0]
+    assert (s["kwh"], s["reimbursement_status"]) == (0.55, "in_progress")  # +6 min at 2 kW, no new session
+    # A gap longer than 15 min adds nothing either
+    _apply(cid, _estimated(status="charging", power_w=2000), t0 + timedelta(hours=2))
+    assert client.get("/api/sessions").json()[0]["kwh"] == 0.55
+    assert _apply(cid, _estimated(status="unplugged"), t0 + timedelta(hours=3)) == "closed"
+    assert client.get("/api/chargers").json()[0]["live"]["energy_wh"] == 0.0
+
+
+class EstimatingCharger(FakeCharger):
+    estimates_energy = True
+
+
+def test_estimated_session_takes_the_hourly_history_once_closed(client, charger, fake, monkeypatch):
+    monkeypatch.setitem(CONNECTORS, "fake", EstimatingCharger)
+    monkeypatch.setitem(CONNECTORS, "plug", FakePlug)
+    live._connectors.clear()
+    cid = charger["id"]
+    session = lambda: client.get("/api/sessions").json()[0]  # noqa: E731
+    _apply(cid, _estimated(status="charging", power_w=7000), datetime(2026, 11, 15, 22, 10))
+    for m in range(20, 80, 10):
+        _apply(cid, _estimated(status="charging", power_w=7000), datetime(2026, 11, 15, 22, 0) + timedelta(minutes=m))
+    _apply(cid, _estimated(status="unplugged"), datetime(2026, 11, 15, 23, 40))
+    assert (session()["kwh"], session()["end_time"], session()["reimbursement_status"]) == (7.0, "23:10:00", "recorded")
+    # The hours of the charger's history that the session covers (not the hour before, nor the one after)
+    fake.reading = LiveReading(status="unplugged", energy_from_power=True)
+    EstimatingCharger.stats = _hours(15, 21, [4]) + [HourStat(start=datetime(2026, 11, 15, 22), end=datetime(2026, 11, 15, 23), energy_wh=5200)]
+    poll = lambda: client.post(f"/api/chargers/{cid}/poll")  # noqa: E731
+    poll()
+    assert session()["kwh"] == 7.0  # not looked up on the first poll
+    poll()
+    assert session()["kwh"] == 5.2
+    EstimatingCharger.stats.append(HourStat(start=datetime(2026, 11, 15, 23), end=datetime(2026, 11, 16, 0), energy_wh=2100))  # the last hour, late
+    for _ in range(8):
+        poll()
+    assert session()["kwh"] == 7.3
+    EstimatingCharger.stats = []
+
+
+def test_estimated_session_falls_back_to_the_secondary_history(client, charger, fake, monkeypatch):
+    monkeypatch.setitem(CONNECTORS, "fake", EstimatingCharger)
+    monkeypatch.setitem(CONNECTORS, "plug", FakePlug)
+    live._connectors.clear()
+    EstimatingCharger.stats, FakePlug.stats, FakePlug.reading, FakePlug.fail = [], [], LiveReading(status="unplugged"), None
+    cid = charger["id"]
+    credentials = {"email": "me@example.com", "password": "secret"}
+    assert client.put(f"/api/chargers/{cid}/connection", json={"connector": "plug", "credentials": credentials, "secondary": True}).status_code == 200
+    _apply(cid, _estimated(status="charging", power_w=7000), datetime(2026, 11, 15, 22, 10))
+    _apply(cid, _estimated(status="charging", power_w=7000), datetime(2026, 11, 15, 22, 20))
+    _apply(cid, _estimated(status="unplugged"), datetime(2026, 11, 15, 22, 40))
+    FakePlug.stats = [HourStat(start=datetime(2026, 11, 15, 22), end=datetime(2026, 11, 15, 23), energy_wh=2900)]
+    fake.reading = LiveReading(status="unplugged", energy_from_power=True)
+    for _ in range(2):
+        client.post(f"/api/chargers/{cid}/poll")
+    assert client.get("/api/sessions").json()[0]["kwh"] == 2.9  # the charger's history has nothing: the plug's
+    FakePlug.stats = []
 
 
 def test_a_new_charge_after_an_unseen_unplug_is_a_new_session(client, charger):

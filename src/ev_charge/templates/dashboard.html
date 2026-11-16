@@ -99,7 +99,7 @@
             ${lv.warning ? `<div class="note small" style="margin-bottom:8px">⚠ ${EV.esc(EV.t(lv.warning))}</div>` : ''}
             <dl class="kv">
                 <dt>${EV.t('Power')}</dt><dd>${lv.status === 'charging' ? `${EV.num((lv.power_w || 0) / 1000, 1)} kW` : '—'}</dd>
-                <dt>${EV.t('This session')}</dt><dd>${plugged && lv.energy_wh ? EV.kwh(lv.energy_wh / 1000) : '—'}</dd>
+                <dt>${EV.t('This session')}</dt><dd>${plugged && lv.energy_wh ? `${lv.energy_from_power ? '≈ ' : ''}${EV.kwh(lv.energy_wh / 1000)}` : '—'}</dd>
                 <dt>${EV.t('Car battery')}</dt><dd>${lv.battery_pct != null ? `${lv.battery_pct} %` : '—'}</dd>
                 ${lv.charging_since && plugged ? `<dt>${EV.t('Charging since')}</dt><dd>${lv.charging_since.slice(11, 16)}</dd>` : ''}
             </dl>

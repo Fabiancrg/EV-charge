@@ -9,6 +9,9 @@ Each poll gives a reading (status, power, energy delivered in the current sessio
 - the last reading before unplugging is up to a few minutes old (chargers report the session's energy in
   steps), so once closed, the session takes its final energy and end time from the charger's own list of
   sessions, when its API has one (Zaptec, Easee)
+- a charger that doesn't report the session's energy (Ohme) has it estimated from its power and the time between
+  readings; once closed, the session takes the energy of the charger's hourly history (or, when that has nothing,
+  of the secondary connection's history)
 
 A charger can have a secondary connection (e.g. the smart plug it is on, through Home Assistant): it is read
 when the main one fails or says the charger is offline. The main connection stays the preferred source: as
@@ -63,6 +66,8 @@ def open_session(db: Session, c: Charger) -> ChargeSession | None:
 
 
 FINALIZE_AT = (1, 3, 6, 12, 30)  # polls after the session closed at which the charger's own record is looked up
+FINALIZE_HOURLY_AT = (2, 10, 30, 60, 120)  # the same for the hourly history (the last hour can be completed late)
+MAX_POWER_GAP = timedelta(minutes=15)  # readings further apart: the power in between isn't known, nothing is added
 ODOMETER_AT = (0, 2, 5, 10)  # polls after the session closed at which the car's odometer is read (the highest figure is kept)
 FINALIZE_BEFORE = timedelta(hours=2)  # the charger's session may have started a little before ours
 
@@ -80,10 +85,24 @@ def _span(s: ChargeSession) -> tuple[datetime, datetime]:
     return start, end + timedelta(days=1) if end < start else end
 
 
-async def finalize_closed(db: Session, c: Charger, conn: Connector) -> bool:
+async def _hourly_wh(c: Charger, conn: Connector, start: datetime, end: datetime) -> float | None:
+    """Energy of the hours of a connection's history that the session covers (None: nothing there)."""
+    first_hour = start.replace(minute=0, second=0, microsecond=0)
+    try:
+        stats = await conn.history(first_hour, end + timedelta(hours=1))
+    except ConnectorError as exc:
+        logger.info("Charger %s: cannot read the hourly history of its last session yet (%s)", c.name, exc)
+        return None
+    total = sum(h.energy_wh for h in stats if not h.is_session and h.start < end and h.end > first_hour)
+    return total if total > 0 else None
+
+
+async def finalize_closed(db: Session, c: Charger, conn: Connector, fallback: Connector | None = None) -> bool:
     """Give the session that was just closed the energy and end time the charger recorded for it.
 
     Tried a few times after closing (the charger's API may list the session a little later), then given up.
+    A charger whose live energy is an estimate (Ohme) gives the energy of its hourly history instead, read again at
+    each try (the last hour fills in late); when it has nothing, the fallback (secondary) connection's history is used.
     Nothing changes if the session was edited or removed meanwhile. Returns True when the session was corrected."""
     state = live_state(c)
     todo = state.get("finalize")
@@ -91,9 +110,20 @@ async def finalize_closed(db: Session, c: Charger, conn: Connector) -> bool:
         return False
     todo["polls"] = int(todo.get("polls") or 0) + 1
     s = db.get(ChargeSession, todo.get("id"))
-    done = s is None or abs(s.kwh - float(todo.get("kwh") or 0)) > 0.0005 or not getattr(conn, "lists_sessions", False)
+    hourly = bool(getattr(conn, "estimates_energy", False))
+    schedule = FINALIZE_HOURLY_AT if hourly else FINALIZE_AT
+    done = s is None or abs(s.kwh - float(todo.get("kwh") or 0)) > 0.0005 or not (hourly or getattr(conn, "lists_sessions", False))
     corrected = False
-    if not done and todo["polls"] in FINALIZE_AT:
+    if not done and hourly and todo["polls"] in schedule:
+        start, end = _span(s)
+        wh = await _hourly_wh(c, conn, start, end)
+        if wh is None and fallback is not None:
+            wh = await _hourly_wh(c, fallback, start, end)
+        if wh is not None and round(wh / 1000, 3) != s.kwh:
+            s.kwh = todo["kwh"] = round(wh / 1000, 3)
+            corrected = True
+            logger.info("Charger %s: last session corrected to %.3f kWh (hourly history)", c.name, s.kwh)
+    elif not done and todo["polls"] in schedule:
         start, end = _span(s)
         try:
             recorded = [h for h in await conn.history(start - FINALIZE_BEFORE, datetime.now()) if h.is_session]
@@ -108,7 +138,7 @@ async def finalize_closed(db: Session, c: Charger, conn: Connector) -> bool:
             s.end_time = best.end.time().replace(second=0, microsecond=0)
             done = corrected = True
             logger.info("Charger %s: last session corrected to %.3f kWh, ended %s", c.name, s.kwh, s.end_time.strftime("%H:%M"))
-    if done or todo["polls"] >= FINALIZE_AT[-1]:
+    if done or todo["polls"] >= schedule[-1]:
         state.pop("finalize", None)
     c.live_state = json.dumps(state)
     return corrected
@@ -136,6 +166,27 @@ async def odometer_after_charge(db: Session, c: Charger) -> None:
     c.live_state = json.dumps(state)
 
 
+def _estimated_wh(previous: dict[str, Any], r: LiveReading, now: datetime, source: str, current: ChargeSession | None) -> float:
+    """Energy of the session so far for a charger that doesn't report it: the power, integrated between readings.
+
+    It continues from the session's figure (e.g. after the secondary connection was read), through readings where
+    the charger is offline. Readings too far apart (or from another source) add nothing for the time in between."""
+    if r.status not in PLUGGED:
+        return 0.0
+    wh = float(previous.get("energy_wh") or 0) if previous.get("energy_from_power") and previous.get("status") in PLUGGED | {OFFLINE} else 0.0
+    if current is not None and (not previous.get("energy_from_power") or previous.get("source", PRIMARY) != source):
+        wh = max(wh, current.kwh * 1000)  # the session's figure didn't come from this estimate
+    try:
+        since = datetime.fromisoformat(previous["updated_at"])
+    except (KeyError, TypeError, ValueError):
+        since = None
+    if since is not None and previous.get("source", PRIMARY) == source and previous.get("status") in PLUGGED:
+        seconds = (now - since).total_seconds()
+        if 0 < seconds <= MAX_POWER_GAP.total_seconds():
+            wh += (float(previous.get("power_w") or 0) + r.power_w) / 2 * seconds / 3600
+    return round(wh, 3)
+
+
 def apply_reading(db: Session, c: Charger, r: LiveReading, now: datetime, source: str = PRIMARY, primary_error: str | None = None) -> str:
     """Update the charger's live state and its live session from one reading. Returns what happened.
 
@@ -154,14 +205,18 @@ def apply_reading(db: Session, c: Charger, r: LiveReading, now: datetime, source
     for pending in ("finalize", "odometer"):
         if previous.get(pending):
             state[pending] = previous[pending]
-    c.live_state = json.dumps(state)
     c.last_poll_at = datetime.now(UTC)
     c.last_poll_error = None
+    current = open_session(db, c) if r.status != OFFLINE else None
+    if r.energy_from_power:  # the charger doesn't report it: estimated (shown on the dashboard as the session's energy)
+        energy_wh = float(previous.get("energy_wh") or 0) if r.status == OFFLINE and previous.get("energy_from_power") else _estimated_wh(previous, r, now, source, current)
+        r = LiveReading(**{**asdict(r), "energy_wh": energy_wh})
+        state["energy_wh"] = energy_wh
+    c.live_state = json.dumps(state)
     if r.status == OFFLINE:
         return "offline"
 
     kwh = round(r.energy_wh / 1000, 3)
-    current = open_session(db, c)
     action = "idle"
     if current is not None:
         if r.status in CLOSING:
@@ -293,11 +348,17 @@ async def poll_charger(db: Session, c: Charger) -> str:
         db.commit()
         await odometer_after_charge(db, c)
         db.commit()
-        if await finalize_closed(db, c, connector_for(c)):
+        fallback = None
+        if c.connector2 and isinstance(live_state(c).get("finalize"), dict):
+            try:
+                fallback = connector_for(c, SECONDARY)
+            except ConnectorError:
+                pass
+        if await finalize_closed(db, c, connector_for(c), fallback):
             action = "corrected" if action in ("idle", "updated") else action
         db.commit()
         if action not in ("idle", "updated", "offline"):
-            logger.info("Charger %s: %s (%.3f kWh, %s)", c.name, action, reading.energy_wh / 1000, reading.status)
+            logger.info("Charger %s: %s (%.3f kWh, %s)", c.name, action, float(live_state(c).get("energy_wh") or 0) / 1000, reading.status)
         return action
 
 

@@ -28,6 +28,9 @@ class LiveReading:
     power_w: float = 0.0
     energy_wh: float = 0.0  # energy delivered in the current session
     battery_pct: int | None = None  # the car's state of charge, when the charger knows it
+    # The charger doesn't report the session's energy (energy_wh unused): it is estimated from the power and the
+    # time between readings, and the session takes the charger's hourly figures once it is closed
+    energy_from_power: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
 

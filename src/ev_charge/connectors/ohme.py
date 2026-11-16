@@ -26,6 +26,7 @@ HISTORY_CHUNK = timedelta(days=7)  # one summary request per week of history
 
 class OhmeConnector:
     label = "Ohme (cloud account)"
+    estimates_energy = True  # no session energy in its API: estimated live, then taken from its hourly history
     fields = (("email", "Ohme account e-mail", False, True), ("password", "Ohme account password", True, True))
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -69,28 +70,15 @@ class OhmeConnector:
             return LiveReading(status=OFFLINE, online=False)
         status = _STATUS.get(getattr(api.status, "value", str(api.status)), PLUGGED_IN)
         power = api.power
+        # Ohme doesn't give the energy of the session: the library's ``energy`` (``batterySoc.wh``) is the energy
+        # in the car's battery, not what this charge delivered. It is estimated from the power instead.
         return LiveReading(
             status=status,
             power_w=float(power.watts or 0),
-            energy_wh=self._session_wh(api, status),
+            energy_from_power=True,
             battery_pct=int(api.battery) if api.battery else None,
             extra={"amps": power.amps, "volts": power.volts, "mode": getattr(api.mode, "value", None)},
         )
-
-    @staticmethod
-    def _session_wh(api: Any, status: str) -> float:
-        """Energy of the current session as Ohme reports it now.
-
-        Not the library's ``energy``: it keeps the highest value seen by this client (it only resets when a
-        read happens while unplugged), so a new session started between two reads (quick unplug / replug, or
-        the charger offline meanwhile) would begin with the previous session's energy."""
-        if status in (UNPLUGGED, PENDING_APPROVAL):
-            return 0.0
-        session = getattr(api, "_charge_session", None) or {}
-        soc = session.get("batterySoc") if isinstance(session, dict) else None
-        if isinstance(soc, dict) and soc.get("wh") is not None:
-            return max(0.0, float(soc["wh"]))
-        return float(api.energy or 0)  # library structure changed: fall back
 
     async def history(self, start: datetime, end: datetime) -> list[HourStat]:
         from ohme import SummaryGranularity
